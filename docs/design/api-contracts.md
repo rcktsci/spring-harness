@@ -7,7 +7,7 @@
 
 1. **Auth**: `Authorization: Bearer <Keycloak JWT>` на всех эндпоинтах, кроме входящих вебхуков (capability-токен в URL, §4.4) и SSE/WS (ticket, §1.4). Проверки — только через `AccessPolicy`.
 2. **Ошибки**: RFC 9457 Problem Details + `code` из каталога §6; любой `code` вне каталога — дефект реализации. Для `422`: `errors[]: { pointer, rule, message }`.
-3. **Идемпотентность**: `Idempotency-Key` обязателен на `POST .../messages`, опционален на прочих POST, **включая вебхуки** (внешние отправители вроде GitHub ключ не присылают; задача-вебхук идемпотентен по построению — `409` вне WAIT_WEBHOOK; триггер без ключа создаёт задачу на каждый вызов — дубликаты задокументированы, ключ рекомендован). Повтор с тем же ключом и тем же телом → исходный ответ (replay-safe); тот же ключ с другим телом → `409 idempotency-conflict`. TTL 24 ч; хранение — `idempotency_key`, PK `(scope, key)` (data-model §6).
+3. **Идемпотентность**: `Idempotency-Key` обязателен на `POST .../messages`, опционален на прочих POST, **включая вебхуки** (внешние отправители вроде GitHub ключ не присылают; задача-вебхук идемпотентен по построению — `409` вне WAIT_WEBHOOK; триггер без ключа создаёт задачу на каждый вызов — дубликаты задокументированы, ключ рекомендован). Повтор с тем же ключом и тем же телом → исходный ответ (replay-safe); тот же ключ с другим телом → `409 idempotency-conflict`; конкурентные запросы с одним ключом — PK `(scope, key)` сериализует: проигравший ждёт коммита победителя и получает его ответ. TTL 24 ч; хранение — `idempotency_key` (data-model §6).
 4. **Пагинация**: списковые ответы — конверт `{ items: T[], nextCursor? }` (`?cursor=&limit=`). Потоковые коллекции (messages, events, history) — `?since=<seq>` с полуг开放的 интервалом `(since, …]` и `nextCursor` = max seq. Переданы оба — `since` приоритетен.
 5. **Версионирование**: `/api/v1/...` — для человеко- и SDK-контрактов. Вебхуки `/api/webhooks/**` — без сегмента версии: URL регистрируются во внешних системах и меняются последними; ломка — только с новым корнем.
 6. **PATCH**: JSON Merge Patch (RFC 7396): отсутствующее поле — не менять, `null` — очистить.
@@ -17,6 +17,7 @@
 10. **Rate limiting**: `/api/webhooks/**` — лимит по IP+пути (429 + `Retry-After`); билеты (§1.4) — лимит на пользователя.
 11. **CORS**: разрешены доверенные origin WebUI; методы+заголовки — по OpenAPI.
 12. **Командные эндпоинты** (`/fork`, `/rewind`, `/compact`, `/stop`, `/suspend`, `/resume`, `/archive`, `/unarchive`) — осознанный RPC-стиль над ресурсами: REST-ожидания кэширования к ним не применяются.
+13. **Лимиты тела**: максимум 1 МБ на запрос (включая вебхуки); больше — `413 payload-too-large`. Per-trigger rate-cap: 10 вызовов/мин (алерт при 80%).
 
 ## 1. Аутентификация, агенты, папки
 
@@ -85,7 +86,7 @@
 | `POST /api/v1/tasks` | `{ title, description, workflowKey, rev?, params?, tags? } → 201 TaskDto` | аутентифицированный |
 | `GET /api/v1/tasks` | `?parent=&status=&mine=&tags=&q=&cursor=` | по видимости задач |
 | `GET /api/v1/tasks/{id}` | `→ 200 TaskDto` | TASK-VIEW |
-| `PATCH /api/v1/tasks/{id}` | merge-patch `{ title?, description?, tags? }` | владелец |
+| `PATCH /api/v1/tasks/{id}` | merge-patch `{ title?, description?, tags? }` — **`params` иммутабельны после создания** (задаются при создании задачи/подзадачи/триггера) | владелец |
 | `POST /api/v1/tasks/{id}/subtasks` | `{ title, description, workflowKey, rev?, params?, tags? } → 201` | TASK-PARTICIPATE |
 | `POST /api/v1/tasks/{id}/suspend` `{ cascade } / resume` | `→ 204` (флаг синхронно; активный Turn дорабатывает); resume остановленной (терминальной) задачи → `409 task-already-terminal` | владелец |
 | `POST /api/v1/tasks/{id}/stop` | `→ 202` = suspend + отмена активных Turn'ов сессий задачи + **терминал**: `current_state = '$CANCELLED'`, `status_projection = CANCELLED` (workflow-domain, «Принудительная отмена») | владелец |
@@ -162,6 +163,7 @@ WebSocket `/api/v1/relay?ticket=…` (JWT при handshake недоступен 
 | `workspace-occupied` (WS `error` / close 4409) | — | |
 | `graph-invalid` / `dependency-invalid` (self/цикл/чужой id) / `params-schema` | 422 | |
 | `rate-limited` | 429 | `Retry-After` |
+| `payload-too-large` | 413 | тело > 1 МБ |
 | `trigger-revoked` | 410 | |
 
 ## 7. Матрица прав (сводно; полная — security-док)
@@ -170,7 +172,7 @@ WebSocket `/api/v1/relay?ticket=…` (JWT при handshake недоступен 
 |---|---|---|---|
 | FREE-сессия | читать, SSE, export, workspace-files | + messages, stop | PATCH/archive/shares/fork/rewind/compact, includeHidden |
 | Папка | видеть сессии внутри | + писать в них | CRUD, shares |
-| Задача | TaskDto **без `params` и `webhookUrl`**, history, tree, SSE | + subtasks, dependencies, comments, `webhookUrl` | PATCH, suspend/stop/resume, `params` |
+| Задача | TaskDto **без `params` и `webhookUrl`**, history, tree, SSE | + subtasks, dependencies, comments, `webhookUrl` | PATCH (title/description/tags), suspend/stop/resume; `params` иммутабельны после создания — поле только в ответах владельцу |
 | STATE-сессия | наследуется от задачи | наследуется (в т.ч. «дописать субагенту») | — (движок) |
 | Workflow | читать (аутентифицированный) | — | ревизии: владелец/`harness-admin` |
 | Триггер | — | — | CRUD: владелец |

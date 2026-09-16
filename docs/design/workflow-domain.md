@@ -21,7 +21,8 @@ states[]:
   scope           — для WAIT_TASKS: ALL_CHILDREN | BLOCKED_BY | TAGGED(x) | EXPLICIT(${task.params.key})
   condition       — для WAIT_TASKS: ALL_TERMINAL | ALL_SUCCESS
   payloadSchema   — опционально (для WAIT_WEBHOOK): JSON Schema валидации тела входящего вебхука
-  timeout         — опционально (для BASH_SCRIPT и WAIT_*)
+  paramsSchema    — опционально: JSON Schema для params задач, идущих по ревизии (создание задачи/триггера валидирует, `422 params-schema`)
+  timeout         — опционально: для BASH_SCRIPT и WAIT_* — обязателен по правилам §2; для AGENT — необязательный предохранитель (долгое зависание без прогресса → TIMEOUT-переход)
   outcome         — для TERMINAL: SUCCESS | FAILED | CANCELLED
 transitions[]:
   from, to        — codes
@@ -40,7 +41,7 @@ transitions[]:
 | Тип | Сессия? | Что происходит | Переходы |
 |---|---|---|---|
 | AGENT | да (пара «задача×code», резюмируется) | агент работает; переводит задачу инструментом `transition` с обязательным обоснованием | по разрешённым NEXT; обоснование → `task_transition_history.reason` |
-| BASH_SCRIPT | нет | скрипт через `WorkspaceTools` в task-контейнере `harness-task-<taskId>` (обычно SERVER_DIR с `${task.id}`) | код выхода 0 → NEXT; не 0 → ERROR; таймаут → TIMEOUT; вывод+exit → reason |
+| BASH_SCRIPT | нет | скрипт через `WorkspaceTools` в task-контейнере `harness-task-<taskId>` (обычно SERVER_DIR с `${task.id}`); перед исполнением инкремент `state_attempt` — повторный прогон после crash помечается новой попыткой, side-effect может выполниться дважды ⇒ **скрипты состояний должны быть идемпотентны** (клоны/пуллы — таковы) | код выхода 0 → NEXT; не 0 → ERROR; таймаут → TIMEOUT; вывод+exit → reason |
 | WAIT_WEBHOOK | нет | ждёт вызов `POST /api/webhooks/tasks/{taskId}/{token}` (capability-URL, §7); проверка без БД; payload → в reason | приём валидного payload → NEXT; payload не прошёл схему состояния (если декларирована) → ERROR; таймаут → TIMEOUT |
 | WAIT_TASKS | нет | переоценка на каждый терминал подзадач/разблокированных (scope); поиск «кто ждёт» — по индексам `(parent_task_id, status_projection)`, `(blocked_task_id)`, GIN `(tags)` | `condition`: `ALL_TERMINAL` — ждать терминалов всех (CANCELLED-ребёнок — терминал → NEXT); `ALL_SUCCESS` — как ALL_TERMINAL, но первый FAILED **или CANCELLED** немедленно ведёт по ERROR; таймаут → TIMEOUT; состав закрывшего условия → reason |
 | TERMINAL | нет | финал задачи | status_projection = outcome |
@@ -69,6 +70,7 @@ transitions[]:
 - Эндпоинты (см. `api-contracts.md` §4.4): `POST /api/webhooks/tasks/{taskId}/{token}?source=…` и `POST /api/webhooks/triggers/{triggerId}/{token}`, где `token = HMAC(server_secret, kind + ':' + entityId)`.
 - Сервер пассивен: URL (с токеном) выдаётся API (поле `webhookUrl` у TaskDto/TriggerDto), регистрацию во внешней системе делает агент предыдущего состояния или человек.
 - Проверка — чистая функция (пересчёт HMAC), без БД для задач; триггеры проверяются по `revoked_at`.
+- `409` вне WAIT_WEBHOOK — осознанно: повторная доставка — политика отправителя (GitHub и прочие шлюзы ретраят сами); буферизации «пришёл слишком рано» нет (stateless by design).
 - Принятый payload → `reason` перехода (кратко) + по решению workflow доступен следующему состоянию.
 - Threat-model capability-URL — `decisions.md` D-26: идемпотентность задач по построению (`409` вне WAIT_WEBHOOK), опциональный `Idempotency-Key`, TLS-only, rate-limit.
 

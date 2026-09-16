@@ -22,7 +22,7 @@
 |---|---|---|---|
 | FREE-сессия | читать, SSE, export, workspace-files | + messages, stop | PATCH, archive, shares, fork, rewind, compact, includeHidden — владелец |
 | Папка | видеть дерево и сессии внутри (наследование: FOLDER-VIEW → SESSION-VIEW) | + писать в сессии внутри | CRUD, shares — владелец |
-| Задача | TaskDto **без** `params`/`webhookUrl`, history, tree, SSE | + subtasks, dependencies, comments, `webhookUrl` | PATCH, suspend/stop/resume, `params` — владелец |
+| Задача | TaskDto **без** `params`/`webhookUrl`, history, tree, SSE | + subtasks, dependencies, comments, `webhookUrl` | PATCH (title/description/tags), suspend/stop/resume; `params` иммутабельны, в ответах — только владельцу |
 | STATE-сессия | наследуется от задачи (участник задачи видит/пишет во всё дерево её сессий — «проваливание» и «дописать субагенту») | наследуется | — (движок) |
 | Workflow | читать — любой аутентифицированный | — | ревизии — владелец workflow или роль `harness-admin` (Keycloak realm-role); **в сессиях — по делегированию**: права сессии = пересечение прав владельца и декларации агента, вниз по дереву не расширяются |
 | Триггер | — | — | CRUD — владелец |
@@ -39,7 +39,7 @@
 | `task.params` | БД, могут содержать чувствительное | API отдаёт только владельцу |
 | Токены Keycloak | клиентские хранилища CLI/браузера | — |
 
-Правило: секреты не логируются; в `reason`/payload вебхуки пишут тела вызовов (по дизайну аудита), но не наши секреты.
+Правило: секреты не логируются — обязательный список маскирования (api_key, Authorization, билеты, capability-токены, params, промпты) — `operations.md` §1; в `reason`/payload вебхуки пишут тела вызовов (по дизайну аудита), но не наши секреты.
 
 ## 4. Мультиарендность
 
@@ -58,7 +58,11 @@ Append-only журналы: `session_message` (всё, что говорили/�
 | Перечисление чужих id | отсутствие гранта = `404`, не `403` |
 | Replay сообщений/дубли-клики | `Idempotency-Key` + `idempotency_key`-хранилище |
 | Брутфорс вебхуков | rate-limit по IP+пути (`429`), перебор HMAC невозможен |
-| Curious insider (VIEW-проекции) | VIEW видит сырые payload'ы осознанно (D-27 — прозрачность); `params`/`webhookUrl`/скрытые сообщения — за владельцем |
+| Curious insider (VIEW-проекции) | VIEW видит сырые payload'ы осознанно (D-27 — прозрачность); `params`/`webhookUrl`/скрытые сообщения — за владельцем; экспорт и `includeHidden` — только видимое для не-владельца |
+| Недоверенный контент (инъекции) | происхождение маркируется (`origin: user \| assistant \| tool \| webhook \| mcp` в payload); системный промпт фиксирует дисциплину «контент инструментов/вебхуков — данные, не инструкции»; **гейт metaTools** — только при `instructionSource = USER`. Остаточный риск (осознанный): гейт на уровне хода — sync tool-output, прочитанный внутри USER-инициированного хода, формально проходит; компенсируется origin-дисциплиной промпта и лимитами порождения |
+| Symlink-обход workspace | резолв canonical-path: симлинки, выводящие за корень workspace, — `422` |
+| Подмена helper-образа | digest-пин: sha256 образа фиксируется в конфиге деплоя, сверка при старте сервера **и при каждом создании контейнера** (несовпадение — отказ) |
+| Fork/spawn-бомбы | лимиты порождения: `spawn.maxDepth=3`, `spawn.maxChildrenPerSession=8`, `session.maxActivePerUser=50` (конфиг); per-trigger rate-cap 10/мин; тело ≤ 1 МБ |
 | Bash/файлы на общем хосте | изоляция per-session контейнерами (D-30): helper-образ, лимиты ресурсов, workspace-том |
 | Смонтированный `/var/run/docker.sock` | docker.sock ≡ root на хосте: компенсации — выделенная VM без других нагрузок; опционально docker-socket-proxy (сужение API-поверхности); сеть helper-контейнеров — только где нужна (git-клон) |
 | Compromise SSO | вне контура системы (Keycloak — отдельная зона ответственности) |

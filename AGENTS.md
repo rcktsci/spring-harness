@@ -14,6 +14,7 @@
 - [docs/design/workflow-domain.md](docs/design/workflow-domain.md) — шаблоны/ревизии, типы состояний, вебхуки, оркестратор.
 - [docs/design/api-contracts.md](docs/design/api-contracts.md) — публичные контракты: REST/SSE/WS (прошёл трёхстороннее ревью, 3×approve).
 - [docs/design/security-multitenancy.md](docs/design/security-multitenancy.md) — аутентификация, матрица AccessPolicy, секреты, аудит.
+- [docs/design/operations.md](docs/design/operations.md) — логи, метрики, health, деплой, бэкапы, алерты.
 - [docs/design/agent-tools.md](docs/design/agent-tools.md) — каталог инструментов агента: нативные, мета-, MCP.
 - [docs/design/client-cli.md](docs/design/client-cli.md) — attach-CLI: команды, UX-минимум.
 - [docs/design/roadmap.md](docs/design/roadmap.md) — фазы реализации M1–M5 (каждая = openspec-change).

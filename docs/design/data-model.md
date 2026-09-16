@@ -48,7 +48,7 @@ PK `(group_id, user_id)`.
 | granted_by | uuid FK app_user | |
 | created_at | timestamptz | |
 
-UNIQUE `(subject_type, subject_id, resource_type, resource_id)`.
+UNIQUE `(subject_type, subject_id, resource_type, resource_id)`. INDEX `(resource_type, resource_id)` — обратный lookup AccessPolicy. INDEX `(group_id)`/`(user_id)` у group_member — проверка грантов групп.
 
 ## 2. llm
 
@@ -58,7 +58,8 @@ UNIQUE `(subject_type, subject_id, resource_type, resource_id)`.
 | id | uuid PK | |
 | name | text | |
 | base_url | text | OpenAI-совместимый |
-| api_key_encrypted | text | шифрование на стороне приложения |
+| api_key_encrypted | text | шифрование на стороне приложения; `key_version` — идентификатор ключа шифрования (ротация без порчи данных) |
+| key_version | int DEFAULT 1 | |
 | created_at | timestamptz | |
 
 ### llm_model
@@ -121,6 +122,9 @@ UNIQUE `(workflow_id, rev)`. UPDATE запрещён.
 | owner_user_id | uuid FK app_user | |
 | workflow_revision_id | uuid FK workflow_revision | пин к ревизии при создании |
 | current_state | text | `state.code` из ревизии |
+| current_state_kind | enum AGENT \| BASH_SCRIPT \| WAIT_WEBHOOK \| WAIT_TASKS \| TERMINAL | денормализация для задачного POLL-скана; обновляется транзакционно с current_state |
+| state_attempt | int DEFAULT 0 | счётчик входов в текущее системное состояние (идемпотентность повторных прогонов bash) |
+| deadline_at | timestamptz NULL | дедлайн таймаута состояния (BASH/WAIT/AGENT-timeout); таймаут-скан по индексу |
 | status_projection | enum RUNNING \| WAITING \| SUCCEEDED \| FAILED \| CANCELLED | денормализация текущего состояния, обновляется транзакционно с current_state |
 | params_jsonb | jsonb | параметр-мапа инстанса (`${task.params.<key>}`) |
 | parent_task_id | uuid FK task NULL | подзадачи |
@@ -129,7 +133,7 @@ UNIQUE `(workflow_id, rev)`. UPDATE запрещён.
 | suspended | bool DEFAULT false | аварийный стоп; планировщик пропускает |
 | created_at / updated_at | timestamptz | |
 
-INDEX `(parent_task_id, status_projection)` — оценка `WAIT_TASKS / ALL_CHILDREN`. INDEX `(tags)` GIN — для `TAGGED(x)`. `owner_user_id` при создании задачи агентом наследуется от породившей сессии (см. глоссарий, Session).
+INDEX `(parent_task_id, status_projection)` — оценка `WAIT_TASKS / ALL_CHILDREN`. INDEX `(tags)` GIN — для `TAGGED(x)`. INDEX `(current_state_kind)` WHERE WAIT_* — задачный POLL-скан; PARTIAL INDEX WHERE `current_state_kind = 'AGENT' AND status_projection = 'RUNNING'` — bootstrap-скан AGENT-без-сессии. INDEX `(deadline_at)` WHERE deadline_at IS NOT NULL — таймаут-скан. `owner_user_id` при создании задачи агентом наследуется от породившей сессии (см. глоссарий, Session).
 
 ### task_dependency
 | Поле | Тип |
@@ -178,6 +182,10 @@ INDEX `(task_id, created_at)`.
 | locked_by | text NULL | идентификатор инстанса-владельца лока |
 | locked_at | timestamptz NULL | TTL-стух лока |
 | cancel_requested | bool DEFAULT false | проверяется между вызовами инструментов |
+| last_seq | bigint DEFAULT 0 | денормализация: max(seq) сообщений |
+| last_consumed_seq | bigint DEFAULT 0 | денормализация: последний seq, вошедший в законченный модельный ход — основа eligible-скана |
+| message_count | int DEFAULT 0 | денормализация для SessionDto |
+| tokens_total | bigint DEFAULT 0 | денормализация для SessionDto |
 | last_turn_outcome | enum COMPLETED \| FAILED \| CANCELLED NULL | проекция исхода последнего Turn'а |
 | fork_source_session_id | uuid FK session NULL | форк: источник |
 | fork_seq_cutoff | bigint NULL | форк: отсечка (входит `seq ≤ cutoff`) |
@@ -186,7 +194,7 @@ INDEX `(task_id, created_at)`.
 | last_activity_at | timestamptz | |
 | created_at | timestamptz | |
 
-PARTIAL UNIQUE `(task_id, state_code) WHERE kind = 'STATE'` — повторный вход в состояние резюмирует ту же сессию.
+PARTIAL UNIQUE `(task_id, state_code) WHERE kind = 'STATE'` — повторный вход в состояние резюмирует ту же сессию. PARTIAL INDEX `(last_seq)` WHERE `last_seq > last_consumed_seq AND locked_by IS NULL AND archived_at IS NULL` — eligible-скан POLL (index-only). Денормализации `last_seq/last_consumed_seq/message_count/tokens_total` обновляются в той же транзакции, что и допись сообщения.
 
 ### session_message (append-only, UPDATE запрещён)
 | Поле | Тип | Примечание |
@@ -200,7 +208,7 @@ PARTIAL UNIQUE `(task_id, state_code) WHERE kind = 'STATE'` — повторны
 | tokens | int NULL | учёт стоимости |
 | created_at | timestamptz | |
 
-PK `(session_id, seq)`. Видимость скрытых сообщений — производная от `COMPACT.covers` (см. `execution-model.md` §5).
+PK `(session_id, seq)`. Видимость скрытых сообщений — производная от `COMPACT.covers` (см. `execution-model.md` §5). Retention: журнал бессрочен; политика выгрузки/очистки архивных сессий — отдельное решение при появлении объёмов (верхняя оценка роста ~1 ТБ/год на 50+ пользователей).
 
 ## 6. Интеграции
 
@@ -217,6 +225,14 @@ PK `(session_id, seq)`. Видимость скрытых сообщений —
 | revoked_at | timestamptz NULL | DELETE API = revoke; URL умирает мгновенно |
 | created_at | timestamptz | |
 
+### instance (реестр живых инстансов)
+| Поле | Тип | Примечание |
+|---|---|---|
+| id | text PK | идентификатор инстанса (= locked_by) |
+| last_seen | timestamptz | heartbeat 10 сек; мёртвый — старше 30 сек |
+
+Нужен для scoped recovery: рестарт-скан помечает LOST только локи инстансов, мёртвых по реестру (rolling deploy не убивает живые Turn'ы); TTL-кража остаётся страховкой от зависших.
+
 ### idempotency_key
 | Поле | Тип | Примечание |
 |---|---|---|
@@ -226,14 +242,14 @@ PK `(session_id, seq)`. Видимость скрытых сообщений —
 | response_json | jsonb | replay: повтор → исходный ответ |
 | expires_at | timestamptz | TTL 24 ч; чистка джобой |
 
-PRIMARY KEY `(scope, key)`.
+PRIMARY KEY `(scope, key)`. Чистка — джобой пачками (≤1000 строк) по `expires_at`.
 
 Вебхуки задач — stateless capability-URL (`токен = HMAC(secret, kind + ':' + entityId)` в пути, см. `workflow-domain.md` §7); очередь — сама `session_message`; история попыток обработки — не хранится (D-04).
 
 ## 7. Инварианты схемы
 
 1. `session_message` и `task_transition_history` — только INSERT; UPDATE/DELETE запрещены на уровне приложения (и проверяются ревью миграций).
-2. `current_state` ∈ codes своей `workflow_revision` **или равен зарезервированному `'$CANCELLED'`** (виртуальный терминал принудительной отмены, только через `stop`); смена — только через движок переходов, транзакционно с записью в `task_transition_history` и пересчётом `status_projection`.
+2. `current_state` ∈ codes своей `workflow_revision` **или равен зарезервированному `'$CANCELLED'`** (виртуальный терминал принудительной отмены). Смена — движком переходов **атомарным CAS** (`UPDATE … SET current_state = next WHERE id = ? AND current_state = expected AND NOT suspended`); гонки stop↔transition, двойной `transition`, дубль терминала и ретрай вебхука — один победитель, проигравшие no-op. **Исключение — `stop`**: его CAS-запись `'$CANCELLED'` гварда `NOT suspended` не имеет (иначе сам себя заблокировал бы) и выигрывает у любых переходов; отмена Turn'ов — после записи терминала. Переоценка WAIT_TASKS идемпотентна. Транзакционно: `task_transition_history` + `status_projection` + `current_state_kind`.
 3. Видимость и доступ — только через `AccessPolicy` (identity), никаких ad-hoc проверок.
 4. `session.locked_by/locked_at` — только CAS-переходы (взятие/освобождение), не прямые UPDATE.
 5. Ревизии (`agent`, `workflow_revision`) — иммутабельны; ссылки всегда на конкретную ревизию.
