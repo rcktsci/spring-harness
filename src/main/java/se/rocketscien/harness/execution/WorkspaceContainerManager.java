@@ -21,10 +21,13 @@ import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Lifecycle per-session контейнера {@code harness-<sessionId>} (D-M1-7, specs/workspace-tools):
@@ -38,6 +41,7 @@ public class WorkspaceContainerManager {
 
     private static final Logger log = LoggerFactory.getLogger(WorkspaceContainerManager.class);
     private static final String WORKSPACE_MOUNT = "/workspace";
+    private static final String CONTAINER_PREFIX = "harness-";
 
     private final DockerClient dockerClient;
     private final DockerProperties properties;
@@ -51,7 +55,7 @@ public class WorkspaceContainerManager {
     }
 
     public String containerName(UUID sessionId) {
-        return "harness-" + sessionId;
+        return CONTAINER_PREFIX + sessionId;
     }
 
     public Path workspaceDir(UUID sessionId) {
@@ -112,6 +116,21 @@ public class WorkspaceContainerManager {
     }
 
     public ContainerExecResult exec(UUID sessionId, List<String> command, byte[] stdin, Duration timeout) {
+        return exec(sessionId, command, stdin, timeout, null);
+    }
+
+    /**
+     * exec с областью отмены: ожидание завершения прерывается по {@code cancellation}
+     * (само убийство процесса — прерыватель, зарегистрированный вызывающей стороной;
+     * здесь — только выход из блокирующего ожидания).
+     *
+     * <p>Ожидание — собственный latch с поллингом отмены срезами {@code statePollInterval}:
+     * повторный вызов {@code awaitCompletion(timeout)} недопустим — его {@code finally}
+     * закрывает поток чтения (обрыв вывода); завершение/ошибка/переполнение вывода считают
+     * один и тот же latch через {@code close()}.</p>
+     */
+    public ContainerExecResult exec(UUID sessionId, List<String> command, byte[] stdin, Duration timeout,
+                                    TurnCancellation cancellation) {
         String containerId = ensureContainer(sessionId);
         if (!isContainerRunning(containerId)) {
             throw new WorkspaceContainerException(
@@ -134,7 +153,24 @@ public class WorkspaceContainerManager {
 
         long captureLimit = limits.toolOutput().toBytes() + limits.toolCaptureMargin().toBytes();
         BoundedOutputStream output = new BoundedOutputStream(captureLimit);
-        ExecStartResultCallback callback = new ExecStartResultCallback(output, output);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        CountDownLatch streamClosed = new CountDownLatch(1);
+        ExecStartResultCallback callback = new ExecStartResultCallback(output, output) {
+            @Override
+            public void onError(Throwable throwable) {
+                failure.compareAndSet(null, throwable);
+                super.onError(throwable);
+            }
+
+            @Override
+            public void close() throws java.io.IOException {
+                try {
+                    super.close();
+                } finally {
+                    streamClosed.countDown();
+                }
+            }
+        };
         output.setOnOverflow(() -> {
             try {
                 callback.close();
@@ -142,13 +178,19 @@ public class WorkspaceContainerManager {
                 log.debug("Could not stop exec {} after output limit: {}", execId, e.getMessage());
             }
         });
-        boolean completed;
+        boolean completed = false;
         try {
             var start = dockerClient.execStartCmd(execId).withDetach(false);
             if (stdin != null) {
                 start.withStdIn(new ByteArrayInputStream(stdin));
             }
-            completed = start.exec(callback).awaitCompletion(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            start.exec(callback);
+            long deadline = System.nanoTime() + timeout.toNanos();
+            long slice = Math.max(1, properties.statePollInterval().toMillis());
+            while (!completed && System.nanoTime() < deadline
+                    && (cancellation == null || !cancellation.isCancelled())) {
+                completed = streamClosed.await(slice, TimeUnit.MILLISECONDS);
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new WorkspaceContainerException("Exec interrupted: " + e.getMessage(), true, e);
@@ -158,6 +200,14 @@ public class WorkspaceContainerManager {
                         "Workspace container died during execution: " + containerName(sessionId), true, e);
             }
             throw new WorkspaceContainerException("Exec failed: " + e.getMessage(), true, e);
+        }
+        Throwable streamFailure = failure.get();
+        if (streamFailure != null) {
+            if (!isContainerRunning(containerId)) {
+                throw new WorkspaceContainerException(
+                        "Workspace container died during execution: " + containerName(sessionId), true, streamFailure);
+            }
+            throw new WorkspaceContainerException("Exec failed: " + streamFailure.getMessage(), true, streamFailure);
         }
 
         Long exitCode = null;
@@ -173,8 +223,10 @@ public class WorkspaceContainerManager {
         }
         // Сигнальная смерть команды (exit >= 128): демон может отдавать состояние с задержкой —
         // короткое окно containerStopConfirm отличает смерть контейнера от self-kill команды,
-        // не блокируя валидный exit 128+ на всё окно startTimeout (C-J-6 #4).
-        if (exitCode != null && exitCode >= 128 && containerStoppedWithin(containerId)) {
+        // не блокируя валидный exit 128+ на всё окно startTimeout (C-J-6 #4). Отменённый exec —
+        // уже известный self-kill, окно не тратим.
+        if (exitCode != null && exitCode >= 128
+                && (cancellation != null && cancellation.isCancelled() || containerStoppedWithin(containerId))) {
             throw new WorkspaceContainerException(
                     "Workspace container died during execution: " + containerName(sessionId), true, null);
         }
@@ -184,6 +236,41 @@ public class WorkspaceContainerManager {
             return new ContainerExecResult(text, exitCode == null ? -1 : exitCode.intValue(), true, output.isTruncated());
         }
         return new ContainerExecResult(text, exitCode.intValue(), exitCode == 124L, output.isTruncated());
+    }
+
+    /**
+     * Рестарт-скан (execution-model §1): удаляет контейнеры {@code harness-<sessionId>} без
+     * живой сессии в БД; контейнеры живых сессий не трогает. {@code harness-task-*} (M2) не
+     * рассматриваются — суффикс парсится как UUID.
+     */
+    public int removeOrphanContainers(java.util.Set<UUID> liveSessionIds) {
+        var listed = dockerClient.listContainersCmd()
+                .withShowAll(true)
+                .exec();
+        int removed = 0;
+        for (var container : listed) {
+            String[] names = container.getNames();
+            if (names == null || names.length == 0 || names[0] == null) {
+                continue;
+            }
+            String name = names[0].startsWith("/") ? names[0].substring(1) : names[0];
+            if (!name.startsWith(CONTAINER_PREFIX)) {
+                continue;
+            }
+            String suffix = name.substring(CONTAINER_PREFIX.length());
+            UUID sessionId;
+            try {
+                sessionId = UUID.fromString(suffix);
+            } catch (IllegalArgumentException e) {
+                continue;
+            }
+            if (!liveSessionIds.contains(sessionId)) {
+                log.info("Removing orphan workspace container {}", name);
+                removeContainerId(container.getId());
+                removed++;
+            }
+        }
+        return removed;
     }
 
     private String createAndStart(String name, UUID sessionId) {

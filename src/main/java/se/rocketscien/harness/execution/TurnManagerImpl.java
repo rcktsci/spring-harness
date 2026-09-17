@@ -1,0 +1,99 @@
+package se.rocketscien.harness.execution;
+
+import jakarta.annotation.PreDestroy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import se.rocketscien.harness.session.MessageKind;
+import se.rocketscien.harness.session.Session;
+import se.rocketscien.harness.session.SessionEventBroadcaster;
+import se.rocketscien.harness.session.SessionRuntimeStatus;
+import se.rocketscien.harness.session.SessionStore;
+import se.rocketscien.harness.session.TurnOutcome;
+
+import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+/**
+ * Wake-точка и жизненный цикл Turn'а (D-M1-4/D-M1-5): tryStart → лок {@code sess-{id}}
+ * (занят — no-op) → виртуальный поток → сброс cancel-флага → агентный цикл
+ * {@link AgentTurnEngine} → unlock в finally. Статусы — в broadcaster (SSE-подписчики, 8.5).
+ */
+@Service
+class TurnManagerImpl implements TurnManager {
+
+    private static final Logger log = LoggerFactory.getLogger(TurnManagerImpl.class);
+
+    private final SessionStore sessionStore;
+    private final SessionLockManager sessionLocks;
+    private final AgentTurnEngine engine;
+    private final ActiveTurnRegistry activeTurns;
+    private final SessionEventBroadcaster broadcaster;
+    private final ExecutorService turnExecutor = Executors.newVirtualThreadPerTaskExecutor();
+
+    TurnManagerImpl(SessionStore sessionStore,
+                    SessionLockManager sessionLocks,
+                    AgentTurnEngine engine,
+                    ActiveTurnRegistry activeTurns,
+                    SessionEventBroadcaster broadcaster) {
+        this.sessionStore = sessionStore;
+        this.sessionLocks = sessionLocks;
+        this.engine = engine;
+        this.activeTurns = activeTurns;
+        this.broadcaster = broadcaster;
+    }
+
+    @Override
+    public void tryStart(UUID sessionId) {
+        Optional<Session> session = sessionStore.findSession(sessionId);
+        if (session.isEmpty() || session.get().lastSeq() <= session.get().lastConsumedSeq()) {
+            return;
+        }
+        turnExecutor.submit(() -> runTurn(sessionId));
+    }
+
+    @Override
+    public void requestStop(UUID sessionId) {
+        sessionStore.requestCancel(sessionId);
+        TurnCancellation cancellation = activeTurns.get(sessionId);
+        if (cancellation != null) {
+            cancellation.cancel();
+        }
+    }
+
+    private void runTurn(UUID sessionId) {
+        Optional<SessionLockManager.HeldLock> lock = sessionLocks.tryAcquire(sessionId);
+        if (lock.isEmpty()) {
+            log.debug("Сессия {}: лок занят — попытка запуска без эффекта", sessionId);
+            return;
+        }
+        TurnCancellation cancellation = activeTurns.register(sessionId);
+        broadcaster.publishStatus(sessionId, SessionRuntimeStatus.TURN_RUNNING);
+        try {
+            // Сброс флага на старте нового Turn'а (спека agent-turn; stop по IDLE не гасит новые ходы)
+            sessionStore.resetCancelRequested(sessionId);
+            engine.run(sessionId, cancellation);
+        } catch (Exception e) {
+            log.error("Turn сессии {} упал неожиданно", sessionId, e);
+            try {
+                SessionStore.AppendedEvent systemEvent = sessionStore.appendEvent(
+                        sessionId, MessageKind.SYSTEM, null, TurnPayloads.systemFailure(e), null);
+                sessionStore.finishTurn(sessionId, TurnOutcome.FAILED, systemEvent.seq());
+            } catch (Exception finishFailure) {
+                log.error("Не удалось зафиксировать FAILED для сессии {}", sessionId, finishFailure);
+            }
+        } finally {
+            broadcaster.publishStatus(sessionId, SessionRuntimeStatus.IDLE);
+            activeTurns.unregister(sessionId);
+            lock.get().close();
+        }
+    }
+
+    @PreDestroy
+    void shutdown() {
+        // Потоки не ждём (graceful shutdown не проектируем, D-41); локи истекут по TTL
+        turnExecutor.shutdown();
+    }
+}

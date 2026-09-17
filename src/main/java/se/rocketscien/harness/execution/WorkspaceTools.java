@@ -24,4 +24,13 @@ public interface WorkspaceTools {
     ToolResult grep(UUID sessionId, String pattern, String include);
 
     ToolResult bash(UUID sessionId, String command, Duration timeout, String cwd);
+
+    /**
+     * bash с областью отмены (execution-model §6): отмена прерывает in-flight команду убийством
+     * процесса в контейнере, результат — CANCELLED. Реализация по умолчанию отмену не поддерживает.
+     */
+    default ToolResult bash(UUID sessionId, String command, Duration timeout, String cwd,
+                            TurnCancellation cancellation) {
+        return bash(sessionId, command, timeout, cwd);
+    }
 }

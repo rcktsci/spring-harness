@@ -31,3 +31,26 @@ exclude `DataSourceAutoConfiguration` снят).
 - OSIV выключен (`spring.jpa.open-in-view: false`).
 - preliquibase: хук подключён стартером 2.0.0 (Boot 4 совместим); pre-DDL скриптов в M1 нет —
   файл-заглушка не нужна (comment-only файл ломает старт стартера).
+
+## Пачка D (задачи 7.1–7.6) и её ревью-фиксы
+
+Судейские вердикты: `docs/temp/review/m1-apply-D-judge.md`. Гейты D-J-1…D-J-6 закрыты.
+
+### Зафиксированные решения (D-J-5 и отклонения пачки D)
+
+- **Broadcaster — in-memory, lastDeliveredSeq — не источник истины (D-J-5).**
+  InMemorySessionEventBroadcaster живёт в границах процесса: буфер переупорядочения и
+  lastDeliveredSeq после рестарта не восстанавливаются, события, опубликованные до старта
+  текущего процесса, подписчикам не доставляются. Восстановление потока при
+  коннекте/реконнекте SSE — бэкфилл из SessionStore по ?since=/Last-Event-ID
+  (эндпоинт 8.5 строится поверх этого базлайна); broadcaster — только живая доставка.
+- **Heartbeat = SimpleLock.extend()** (не LockExtender): LockExtender привязан к
+  ThreadLocal-регистрации LockingTaskExecutor, при программном LockProvider.lock()
+  неприменим; SimpleLock.extend — тот же вызов, что внутри LockExtender. Интервал/TTL — конфиг.
+- **EVENT-хук = контракт TurnManager.tryStart**; вайринг «допись USER → немедленный
+  tryStart» — точка ингресса сообщений, задача 8.3 (пачка E); контроль — 10.2.
+- **kill -9 в 7.6 смоделирован пост-фактум** (состояние в БД/Docker, in-memory у мёртвого
+  процесса нет); полный рестарт-тест — приёмочная задача 10.3.
+- **Потребление батча — watermark виденного (D-45, D-J-2)**: COMPLETED — финальный ASSISTANT;
+  FAILED — SYSTEM-причина (retry-шторма POLL нет); CANCELLED — последний рендер (собственные
+  результаты и свежий USER остаются непотреблёнными и поднимают новый Turn).

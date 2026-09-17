@@ -1,3 +1,21 @@
+harness:
+  llm:
+    # Тестовый ключ шифрования api_key (32 байта, base64) — тот же, что в тестовых фикстурах.
+    encryption-keys:
+      1: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+  lock:
+    # Быстрый heartbeat для проверки продления лока реальным таймером (task 7.1).
+    heartbeat-interval: 200ms
+  turn:
+    # POLL-джоба в тестах не стартует сама (первый запуск через интервал); Act вызывает poll() напрямую.
+    poll-interval: 1h
+    llm-retries: 2
+    backoff-base: 100ms
+  docker:
+    # Образ собирается DockerTestSupport'ом из docker/Dockerfile до первого docker-теста.
+    helper-image: harness-helper:test
+    workspace-root: ${java.io.tmpdir}/harness-it-workspaces
+
 spring:
   liquibase:
     change-log: classpath:db/changelog-test/changelog-test.xml

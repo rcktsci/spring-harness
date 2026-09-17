@@ -181,25 +181,118 @@ public class ContainerWorkspaceTools implements WorkspaceTools {
 
     @Override
     public ToolResult bash(UUID sessionId, String command, Duration timeout, String cwd) {
+        return bash(sessionId, command, timeout, cwd, null);
+    }
+
+    /**
+     * Отменяемый bash (execution-model §6): команда исполняется в своей сессии процесса
+     * ({@code setsid}) с PID-файлом; область отмены регистрирует прерыватель — убийство группы
+     * процессов в контейнере, что разблокирует ожидание. Отменённый вызов (до или во время)
+     * возвращает синтетический CANCELLED; обычный путь идентичен {@link #bash(UUID, String,
+     * Duration, String)}.
+     */
+    @Override
+    public ToolResult bash(UUID sessionId, String command, Duration timeout, String cwd,
+                           TurnCancellation cancellation) {
         String tool = "bash";
+        if (cancellation != null && cancellation.isCancelled()) {
+            return ToolResult.cancelled(callId(), tool, "отменено пользователем");
+        }
+        String callId = callId();
         try {
             String containerCwd = cwd == null || cwd.isBlank()
                     ? MOUNT
                     : resolve(sessionId, cwd);
             Duration effective = effectiveBashTimeout(timeout);
             long seconds = Math.max(1, effective.toSeconds());
-            ContainerExecResult result = exec(sessionId,
-                    "cd -- \"$1\" && timeout -s TERM \"$2\" sh -c \"$3\"",
-                    List.of(containerCwd, Long.toString(seconds), command),
-                    effective.plusSeconds(5));
+            Duration execDeadline = effective.plusSeconds(5);
+            String pidFile = "/tmp/harness-exec-" + callId + ".pid";
+            // Docker exec запускает процесс уже в собственной сессии/группе: PID внешнего sh
+            // и есть PGID для убийства дерева (timeout + команда) при отмене.
+            List<String> cmd = List.of(
+                    "sh", "-c",
+                    "echo $$ > \"$4\"; cd -- \"$1\";"
+                            + " timeout -s TERM \"$2\" sh -c \"$3\"; rc=$?; rm -f -- \"$4\"; exit $rc",
+                    "harness", containerCwd, Long.toString(seconds), command, pidFile);
+
+            // Прерыватель живёт дольше вызова exec: stop может прийти раньше, чем PID-файл
+            // появится — тогда добивание продолжается поллингом (граница — таймаут вызова).
+            AutoCloseable interruptor = cancellation == null
+                    ? null
+                    : cancellation.registerInterrupt(() -> killUntilDead(sessionId, pidFile, execDeadline));
+            ContainerExecResult result;
+            try {
+                result = containers.exec(sessionId, cmd, null, execDeadline, cancellation);
+            } finally {
+                if (interruptor != null) {
+                    try {
+                        interruptor.close();
+                    } catch (Exception e) {
+                        log.debug("Снятие прерывателя не удалось: {}", e.getMessage());
+                    }
+                }
+            }
+            if (cancellation != null && cancellation.isCancelled()) {
+                return ToolResult.cancelled(callId, tool, "отменено пользователем");
+            }
             Limited limited = truncate(result.output(), result.truncated());
-            return ToolResult.ok(callId(), tool, limited.text(), result.exitCode(),
+            return ToolResult.ok(callId, tool, limited.text(), result.exitCode(),
                     limited.truncated(), result.timedOut());
         } catch (WorkspacePathException e) {
-            return ToolResult.error(callId(), tool, e.getMessage());
+            if (cancellation != null && cancellation.isCancelled()) {
+                return ToolResult.cancelled(callId, tool, "отменено пользователем");
+            }
+            return ToolResult.error(callId, tool, e.getMessage());
         } catch (WorkspaceContainerException e) {
+            if (cancellation != null && cancellation.isCancelled()) {
+                return ToolResult.cancelled(callId, tool, "отменено пользователем");
+            }
             return containerFailure(tool, e);
         }
+    }
+
+    /**
+     * Прерыватель: SIGTERM всей группе процессов команды (PID-файл пишет сам exec-процесс —
+     * лидер группы: docker exec даёт каждому процессу свою сессию); синтаксис
+     * {@code kill -TERM -<pgid>} — busybox kill не принимает {@code --} перед отрицательным
+     * PID. Повторяется с интервалом конфига: PID-файл может появиться позже команды stop;
+     * граница повторов — таймаут вызова.
+     */
+    private void killUntilDead(UUID sessionId, String pidFile, Duration deadline) {
+        long end = System.nanoTime() + deadline.toNanos();
+        while (System.nanoTime() < end) {
+            if (tryKillProcessGroup(sessionId, pidFile)) {
+                return;
+            }
+            try {
+                Thread.sleep(dockerProperties.statePollInterval().toMillis());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+        log.warn("Прерывание bash-процесса в {} не успело за {}", containerOf(sessionId), deadline);
+    }
+
+    private boolean tryKillProcessGroup(UUID sessionId, String pidFile) {
+        try {
+            ContainerExecResult result = containers.exec(sessionId,
+                    List.of("sh", "-c",
+                            "pid=$(cat \"$1\" 2>/dev/null) || exit 1;"
+                                    + " [ -n \"$pid\" ] || exit 1;"
+                                    + " kill -TERM -\"$pid\" 2>/dev/null; kill -TERM \"$pid\" 2>/dev/null; exit 0",
+                            "harness", pidFile),
+                    null, dockerProperties.execTimeout(), null);
+            return result.exitCode() == 0;
+        } catch (Exception e) {
+            log.debug("Попытка прерывания bash-процесса в {} не удалась: {}",
+                    containerOf(sessionId), e.getMessage());
+            return false;
+        }
+    }
+
+    private String containerOf(UUID sessionId) {
+        return "harness-" + sessionId;
     }
 
     private ContainerExecResult exec(UUID sessionId, String script, List<String> args) {

@@ -8,11 +8,14 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.util.retry.Retry;
 import se.rocketscien.harness.config.TurnProperties;
 
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -38,16 +41,31 @@ public class LlmInvoker {
     }
 
     public Flux<ChatResponse> stream(UUID llmModelId, Prompt prompt) {
+        return stream(llmModelId, prompt, null);
+    }
+
+    /**
+     * Декларации инструментов уходят в prompt-level options (провайдер-специфичный
+     * {@link OpenAiChatOptions} — модель ожидает именно его); внутреннее исполнение Spring AI
+     * не происходит — цикл инструментов ведёт Turn (write-ahead, execution-model §1).
+     */
+    public Flux<ChatResponse> stream(UUID llmModelId, Prompt prompt, List<ToolCallback> toolCallbacks) {
+        Prompt effective = prompt;
+        if (toolCallbacks != null && !toolCallbacks.isEmpty()) {
+            effective = new Prompt(prompt.getInstructions(),
+                    OpenAiChatOptions.builder().toolCallbacks(toolCallbacks).build());
+        }
+        Prompt finalPrompt = effective;
         // chatModel резолвится на подписке: LlmConfigurationException приходит как сигнал Flux,
         // а не синхронным исключением (C-J-6 #14).
         return Flux.defer(() -> {
             ChatModel model = llmGateway.chatModel(llmModelId);
             long retries = Math.max(0, turnProperties.llmRetries() - 1L);
             if (retries == 0) {
-                return model.stream(prompt);
+                return model.stream(finalPrompt);
             }
             AtomicBoolean delivered = new AtomicBoolean(false);
-            return model.stream(prompt)
+            return model.stream(finalPrompt)
                     .doOnNext(response -> delivered.set(true))
                     .retryWhen(Retry.backoff(retries, turnProperties.backoffBase())
                             .filter(throwable -> isTransient(throwable) && !delivered.get())

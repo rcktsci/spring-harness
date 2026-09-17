@@ -7,13 +7,18 @@ import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import se.rocketscien.harness.common.IdGenerator;
 
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.StringJoiner;
 import java.util.UUID;
 
@@ -27,6 +32,7 @@ public class SessionStoreImpl implements SessionStore {
     private final SessionMessageRepository sessionMessageRepository;
     private final IdGenerator idGenerator;
     private final JdbcTemplate jdbcTemplate;
+    private final List<SessionEventListener> eventListeners;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -34,11 +40,13 @@ public class SessionStoreImpl implements SessionStore {
     public SessionStoreImpl(AgentRevisionRepository agentRevisionRepository,
                             SessionMessageRepository sessionMessageRepository,
                             IdGenerator idGenerator,
-                            JdbcTemplate jdbcTemplate) {
+                            JdbcTemplate jdbcTemplate,
+                            List<SessionEventListener> eventListeners) {
         this.agentRevisionRepository = agentRevisionRepository;
         this.sessionMessageRepository = sessionMessageRepository;
         this.idGenerator = idGenerator;
         this.jdbcTemplate = jdbcTemplate;
+        this.eventListeners = List.copyOf(eventListeners);
     }
 
     @Override
@@ -62,6 +70,12 @@ public class SessionStoreImpl implements SessionStore {
 
     @Override
     public AppendedEvent appendEvent(UUID sessionId, MessageKind kind, UUID authorUserId, Map<String, Object> payload) {
+        return appendEvent(sessionId, kind, authorUserId, payload, null);
+    }
+
+    @Override
+    public AppendedEvent appendEvent(UUID sessionId, MessageKind kind, UUID authorUserId, Map<String, Object> payload,
+                                     Integer tokens) {
         ReservedSeq reserved = reserveSeqByRowLock(sessionId);
 
         String ulid = idGenerator.newUlid();
@@ -71,12 +85,119 @@ public class SessionStoreImpl implements SessionStore {
                 kind,
                 authorUserId,
                 payload,
-                null,
+                tokens,
                 reserved.now()
         );
         entityManager.persist(message);
+        notifyListenersAfterCommit(message);
 
         return new AppendedEvent(reserved.seq(), ulid);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<Session> findSession(UUID sessionId) {
+        return Optional.ofNullable(entityManager.find(SessionEntity.class, sessionId)).map(SessionStoreImpl::toSession);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<UUID> findEligibleSessionIds() {
+        return jdbcTemplate.queryForList(
+                "SELECT id FROM session WHERE last_seq > last_consumed_seq", UUID.class);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<UUID> findAllSessionIds() {
+        return jdbcTemplate.queryForList("SELECT id FROM session", UUID.class);
+    }
+
+    @Override
+    public void requestCancel(UUID sessionId) {
+        jdbcTemplate.update("UPDATE session SET cancel_requested = true WHERE id = ?", sessionId);
+    }
+
+    @Override
+    public void resetCancelRequested(UUID sessionId) {
+        jdbcTemplate.update("UPDATE session SET cancel_requested = false WHERE id = ?", sessionId);
+    }
+
+    @Override
+    public void finishTurn(UUID sessionId, TurnOutcome outcome, long consumedSeq) {
+        jdbcTemplate.update(
+                "UPDATE session SET last_consumed_seq = GREATEST(last_consumed_seq, ?),"
+                        + " last_turn_outcome = ?, cancel_requested = false WHERE id = ?",
+                consumedSeq, outcome.name(), sessionId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public AgentRuntime agentRuntime(UUID agentRevisionId) {
+        AgentRevisionEntity revision = entityManager.find(AgentRevisionEntity.class, agentRevisionId);
+        if (revision == null) {
+            throw new AgentNotFoundException("Ревизия агента %s не найдена".formatted(agentRevisionId));
+        }
+        return new AgentRuntime(
+                revision.getId(),
+                revision.getAgentKey(),
+                revision.getRev(),
+                revision.getRolePrompt(),
+                revision.getToolsJsonb(),
+                revision.getPermissionsJsonb(),
+                revision.getLlmModelId()
+        );
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<UUID> findSessionIdsWithPendingToolCalls() {
+        return jdbcTemplate.queryForList(
+                """
+                SELECT DISTINCT sm.session_id
+                FROM session_message AS sm
+                WHERE sm.kind = 'TOOL_CALL'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM session_message AS tr
+                      WHERE tr.session_id = sm.session_id
+                        AND tr.kind = 'TOOL_RESULT'
+                        AND tr.payload_jsonb ->> 'callId' = sm.payload_jsonb ->> 'callId'
+                  )
+                """,
+                UUID.class);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<SessionMessageEntity> findPendingToolCalls(UUID sessionId) {
+        List<SessionMessageEntity> toolEvents = entityManager.createQuery(
+                        """
+                        SELECT sm
+                        FROM SessionMessageEntity AS sm
+                        WHERE sm.id.sessionId = :sessionId
+                          AND sm.kind IN (:toolCall, :toolResult)
+                        ORDER BY sm.id.seq ASC
+                        """,
+                        SessionMessageEntity.class)
+                .setParameter("sessionId", sessionId)
+                .setParameter("toolCall", MessageKind.TOOL_CALL)
+                .setParameter("toolResult", MessageKind.TOOL_RESULT)
+                .getResultList();
+
+        Set<String> answered = new HashSet<>();
+        for (SessionMessageEntity event : toolEvents) {
+            if (event.getKind() == MessageKind.TOOL_RESULT
+                    && event.getPayloadJsonb() != null
+                    && event.getPayloadJsonb().get("callId") instanceof String callId) {
+                answered.add(callId);
+            }
+        }
+        return toolEvents.stream()
+                .filter(event -> event.getKind() == MessageKind.TOOL_CALL)
+                .filter(event -> !(event.getPayloadJsonb() != null
+                        && event.getPayloadJsonb().get("callId") instanceof String callId
+                        && answered.contains(callId)))
+                .toList();
     }
 
     @Override
@@ -234,6 +355,43 @@ public class SessionStoreImpl implements SessionStore {
                 entity.getLastActivityAt(),
                 entity.getCreatedAt()
         );
+    }
+
+    /**
+     * Уведомление слушателей (broadcaster) строго после коммита: незакоммиченное событие
+     * доставить нельзя (подписчик может прочитать журнал и не найти его).
+     */
+    private void notifyListenersAfterCommit(SessionMessageEntity message) {
+        SessionEvent.MessageCreated event = new SessionEvent.MessageCreated(
+                message.getId().sessionId(),
+                message.getId().seq(),
+                message.getUlid(),
+                message.getKind(),
+                message.getAuthorUserId(),
+                message.getPayloadJsonb(),
+                message.getTokens(),
+                message.getCreatedAt()
+        );
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    publish(event);
+                }
+            });
+        } else {
+            publish(event);
+        }
+    }
+
+    private void publish(SessionEvent event) {
+        for (SessionEventListener listener : eventListeners) {
+            try {
+                listener.onEvent(event);
+            } catch (Exception e) {
+                log.warn("Слушатель событий {} упал на {}: {}", listener.getClass().getSimpleName(), event, e.getMessage());
+            }
+        }
     }
 
     private record ReservedSeq(long seq, Instant now) {

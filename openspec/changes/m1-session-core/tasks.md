@@ -42,12 +42,12 @@
 
 ## 7. TurnManager (specs/agent-turn)
 
-- [ ] 7.1 Программный лок `sess-{id}` через `LockProvider` (TTL `harness.lock.session-ttl`), heartbeat `LockExtender` (интервал — конфиг), unlock в finally; тест конкурентного tryStart (1 победитель)
-- [ ] 7.2 Агентный цикл: раунды «рендер → LLM → write-ahead (ASSISTANT+TOOL_CALL) → sync-инструменты → TOOL_RESULT → раунд»; выход при отсутствии tool-calls (COMPLETED, `last_consumed_seq := last_seq`); FAILED при исчерпании ретраев LLM — SYSTEM-событие причины + `last_consumed_seq := last_seq` (без автоповтора); новые события во время хода → доп. раунд; интеграционный тест на WireMock-LLM с tool-calling
-- [ ] 7.3 Wake EVENT: после дописи USER-сообщения — немедленный tryStart (тот же виртуальный поток/пул); тест задержки старта (< poll-interval)
-- [ ] 7.4 Wake POLL: `@Scheduled`+`@SchedulerLock` джоба (имя `poll-wake`, `lockAtMostFor` = `harness.lock.job-ttl`), eligible-скан `last_seq > last_consumed_seq`; тест «пропущенная EVENT-ом сессия подобрана POLL-ом»; чистка просроченных `sess-*`-строк (`lock_until < now()`)
-- [ ] 7.5 Отмена: `POST /stop` → `cancel_requested`; проверка между вызовами; in-flight bash — убийство процесса в контейнере → TOOL_RESULT CANCELLED, Turn CANCELLED; сброс флага при завершении Turn'а (любой исход) и на старте нового; повторный stop идемпотентен; тесты, включая «сообщение после отмены обрабатывается штатно»
-- [ ] 7.6 Рестарт-скан: (1) TOOL_CALL без результата у сессий со свободным `sess-{id}`-локом → синтетический LOST (залоченные не трогаем); (2) удаление осиротевших `harness-*`-контейнеров; тест на kill -9 + рестарт контекста
+- [x] 7.1 Программный лок `sess-{id}` через `LockProvider` (TTL `harness.lock.session-ttl`), heartbeat `LockExtender` (интервал — конфиг), unlock в finally; тест конкурентного tryStart (1 победитель)
+- [x] 7.2 Агентный цикл: раунды «рендер → LLM → write-ahead (ASSISTANT+TOOL_CALL) → sync-инструменты → TOOL_RESULT → раунд»; выход при отсутствии tool-calls (COMPLETED, `last_consumed_seq := last_seq`); FAILED при исчерпании ретраев LLM — SYSTEM-событие причины + `last_consumed_seq := last_seq` (без автоповтора); новые события во время хода → доп. раунд; интеграционный тест на WireMock-LLM с tool-calling
+- [x] 7.3 Wake EVENT: после дописи USER-сообщения — немедленный tryStart (тот же виртуальный поток/пул); тест задержки старта (< poll-interval)
+- [x] 7.4 Wake POLL: `@Scheduled`+`@SchedulerLock` джоба (имя `poll-wake`, `lockAtMostFor` = `harness.lock.job-ttl`), eligible-скан `last_seq > last_consumed_seq`; тест «пропущенная EVENT-ом сессия подобрана POLL-ом»; чистка просроченных `sess-*`-строк (`lock_until < now()`)
+- [x] 7.5 Отмена: `POST /stop` → `cancel_requested`; проверка между вызовами; in-flight bash — убийство процесса в контейнере → TOOL_RESULT CANCELLED, Turn CANCELLED; сброс флага при завершении Turn'а (любой исход) и на старте нового; повторный stop идемпотентен; тесты, включая «сообщение после отмены обрабатывается штатно»
+- [x] 7.6 Рестарт-скан: (1) TOOL_CALL без результата у сессий со свободным `sess-{id}`-локом → синтетический LOST (залоченные не трогаем); (2) удаление осиротевших `harness-*`-контейнеров; тест на kill -9 + рестарт контекста
 
 ## 8. API (specs/session-api)
 

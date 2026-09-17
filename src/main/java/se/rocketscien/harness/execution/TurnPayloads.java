@@ -1,0 +1,133 @@
+package se.rocketscien.harness.execution;
+
+import java.util.HashMap;
+import java.util.Map;
+
+/**
+ * Схемы payload-ов событий журнала, которые пишет/читает исполняющий контур (D-M1-1: форматы —
+ * достояние обоих сторон, зафиксированы в одном месте):
+ * <ul>
+ *   <li>{@code USER/ASSISTANT/SYSTEM}: {@code {"text": ...}} (SYSTEM — причина сбоя тем же ключом);</li>
+ *   <li>{@code TOOL_CALL}: {@code {"callId": <внутренний ULID>, "toolCallId": <id провайдера>,
+ *       "tool": <имя>, "arguments": {...}}};</li>
+ *   <li>{@code TOOL_RESULT}: {@code {"callId": ..., "tool": ..., "status": OK|ERROR|CANCELLED|LOST,
+ *       "output"?: ..., "exitCode"?: ..., "truncated"?: ..., "timedOut"?: ...}}.</li>
+ * </ul>
+ */
+final class TurnPayloads {
+
+    static final String TEXT = "text";
+    static final String CALL_ID = "callId";
+    static final String TOOL_CALL_ID = "toolCallId";
+    static final String TOOL = "tool";
+    static final String ARGUMENTS = "arguments";
+    static final String STATUS = "status";
+    static final String OUTPUT = "output";
+    static final String EXIT_CODE = "exitCode";
+    static final String TRUNCATED = "truncated";
+    static final String TIMED_OUT = "timedOut";
+
+    private TurnPayloads() {
+    }
+
+    static Map<String, Object> assistant(String text) {
+        return Map.of(TEXT, text);
+    }
+
+    static Map<String, Object> systemFailure(Throwable error) {
+        return Map.of(TEXT, "Turn прерван ошибкой: " + rootMessage(error));
+    }
+
+    static Map<String, Object> toolCall(String callId, String toolCallId, String tool,
+                                        Map<String, Object> arguments) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put(CALL_ID, callId);
+        if (toolCallId != null) {
+            payload.put(TOOL_CALL_ID, toolCallId);
+        }
+        payload.put(TOOL, tool);
+        payload.put(ARGUMENTS, arguments);
+        return payload;
+    }
+
+    static Map<String, Object> toolResult(String callId, String tool, ToolResult result) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put(CALL_ID, callId);
+        payload.put(TOOL, tool);
+        payload.put(STATUS, result.status().name());
+        if (result.output() != null) {
+            payload.put(OUTPUT, result.output());
+        }
+        if (result.exitCode() != null) {
+            payload.put(EXIT_CODE, result.exitCode());
+        }
+        if (result.truncated() != null) {
+            payload.put(TRUNCATED, result.truncated());
+        }
+        if (result.timedOut() != null) {
+            payload.put(TIMED_OUT, result.timedOut());
+        }
+        return payload;
+    }
+
+    static Map<String, Object> toolResultSynthetic(String callId, String tool, ToolStatus status, String output) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put(CALL_ID, callId);
+        payload.put(TOOL, tool);
+        payload.put(STATUS, status.name());
+        if (output != null) {
+            payload.put(OUTPUT, output);
+        }
+        return payload;
+    }
+
+    static String text(Map<String, Object> payload) {
+        if (payload == null) {
+            return "";
+        }
+        return payload.get(TEXT) instanceof String text ? text : "";
+    }
+
+    static String summary(Map<String, Object> payload) {
+        if (payload == null) {
+            return "";
+        }
+        return payload.get("summary") instanceof String summary ? summary : "";
+    }
+
+    static String callId(Map<String, Object> payload) {
+        return payload == null ? null : asString(payload.get(CALL_ID));
+    }
+
+    static String toolCallId(Map<String, Object> payload) {
+        if (payload == null) {
+            return null;
+        }
+        String providerId = asString(payload.get(TOOL_CALL_ID));
+        return providerId != null ? providerId : asString(payload.get(CALL_ID));
+    }
+
+    static String tool(Map<String, Object> payload) {
+        return payload == null ? null : asString(payload.get(TOOL));
+    }
+
+    @SuppressWarnings("unchecked")
+    static Map<String, Object> arguments(Map<String, Object> payload) {
+        if (payload != null && payload.get(ARGUMENTS) instanceof Map<?, ?> arguments) {
+            return (Map<String, Object>) arguments;
+        }
+        return Map.of();
+    }
+
+    private static String asString(Object value) {
+        return value instanceof String text ? text : null;
+    }
+
+    private static String rootMessage(Throwable error) {
+        Throwable root = error;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        return root.getMessage() != null ? root.getMessage() : error.getClass().getSimpleName();
+    }
+}
