@@ -7,7 +7,7 @@ import org.springframework.test.context.ContextConfiguration;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ContextConfiguration(
-        initializers = {},
+        initializers = {PostgresContextInitializer.class},
         classes = {
                 HarnessApplication.class
         }

@@ -31,8 +31,13 @@
         <shedlock.version>7.10.1</shedlock.version>
 
         <testcontainers.version>2.0.5</testcontainers.version>
+        <testcontainers-keycloak.version>4.3.1</testcontainers-keycloak.version>
         <wiremock.version>3.13.2</wiremock.version>
         <awaitility.version>4.3.0</awaitility.version>
+
+        <docker-java.version>3.7.1</docker-java.version>
+        <archunit.version>1.5.0</archunit.version>
+        <ulid-creator.version>5.2.4</ulid-creator.version>
 
         <git-commit-id-maven-plugin.version>10.0.0</git-commit-id-maven-plugin.version>
         <jacoco-maven-plugin.version>0.8.15</jacoco-maven-plugin.version>
@@ -92,10 +97,6 @@
             <artifactId>springboot4-dotenv</artifactId>
             <optional>true</optional>
         </dependency>
-        <dependency>
-            <groupId>com.fasterxml.jackson.datatype</groupId>
-            <artifactId>jackson-datatype-jsr310</artifactId>
-        </dependency>
 
         <!-- DATABASE -->
         <dependency>
@@ -133,6 +134,31 @@
             <artifactId>spring-ai-starter-model-openai</artifactId>
         </dependency>
 
+        <!-- SECURITY -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+        </dependency>
+
+        <!-- EXECUTION (docker-java) -->
+        <dependency>
+            <groupId>com.github.docker-java</groupId>
+            <artifactId>docker-java</artifactId>
+            <version>${docker-java.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.github.docker-java</groupId>
+            <artifactId>docker-java-transport-httpclient5</artifactId>
+            <version>${docker-java.version}</version>
+        </dependency>
+
+        <!-- COMMON (идентификаторы) -->
+        <dependency>
+            <groupId>com.github.f4b6a3</groupId>
+            <artifactId>ulid-creator</artifactId>
+            <version>${ulid-creator.version}</version>
+        </dependency>
+
         <!-- TESTING -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -152,6 +178,18 @@
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.github.dasniko</groupId>
+            <artifactId>testcontainers-keycloak</artifactId>
+            <version>${testcontainers-keycloak.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit-junit5</artifactId>
+            <version>${archunit.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>

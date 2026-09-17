@@ -1,14 +1,50 @@
+harness:
+  security:
+    allowed-groups: [harness-users]
+  lock:
+    session-ttl: 10m
+    heartbeat-interval: 30s
+    job-ttl: 10s
+  turn:
+    poll-interval: 5s
+    llm-retries: 3
+    backoff-base: 1s
+  llm:
+    timeout: 60s
+  compact:
+    threshold: 0.8
+  docker:
+    helper-image: harness-helper:local
+    workspace-root: workspaces/sessions
+    cpu-nanos: 1000000000
+    memory: 512MB
+  sse:
+    ping-interval: 15s
+  limits:
+    body: 1MB
+    tool-output: 256KB
+    bash-timeout-cap: 5m
+
 spring:
   main.banner-mode: off
   autoconfigure:
     exclude:
-      - org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration
       - org.springframework.ai.model.openai.autoconfigure.OpenAiChatAutoConfiguration
       - org.springframework.ai.model.openai.autoconfigure.OpenAiAudioSpeechAutoConfiguration
       - org.springframework.ai.model.openai.autoconfigure.OpenAiAudioTranscriptionAutoConfiguration
       - org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingAutoConfiguration
       - org.springframework.ai.model.openai.autoconfigure.OpenAiImageAutoConfiguration
       - org.springframework.ai.model.openai.autoconfigure.OpenAiModerationAutoConfiguration
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:harness}
+    username: ${DB_USERNAME:harness}
+    password: ${DB_PASSWORD:harness}
+  liquibase:
+    change-log: classpath:db/changelog/changeset-master.xml
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
 
 logging:
   pattern:

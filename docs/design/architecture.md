@@ -43,7 +43,7 @@ intelligence, integration — драйвены контрактами (их зн
 ## 4. Стек и конфигурация
 
 - Spring Boot 4.1.1, Java 25 (виртуальные потоки для Turn'ов), Spring AI 2.0.1 (BOM).
-- Автоконфигурации **отключены** (`application.yml`): `DataSourceAutoConfiguration` (datasource собирается вручную; фактический порядок инициализации: **пул → preliquibase → liquibase → JPA**) и автоконфиги Spring AI из `application.yml` (клиенты собираются из `LlmModel` вручную).
+- Автоконфигурация DataSource — **включена** (D-43): пул/`spring.datasource.*` биндит Boot, порядок инициализации **пул → preliquibase → liquibase → JPA** обеспечивает preliquibase-стартер. Отключены (`application.yml`) только автоконфиги Spring AI (клиенты собираются из `LlmModel` вручную).
 - PostgreSQL + Liquibase + Preliquibase; ShedLock 7.10.1 (jdbc-template) для singleton-джоб; Keycloak (OIDC) — SSO.
 - Стек-ловушки (зафиксировано ревью Т1): Boot 4 = **Jackson 3** — для jsonb нужен кастомный `FormatMapper` (`hibernate.type.json_format_mapper`) или осознанный Jackson 2; регрессия Spring AI 2.0.1 (#6915) — **в каждом `OpenAiChatOptions` задавать `.timeout()`/`.maxRetries()` явно**; в pom на M1 добавить: `docker-java` (+транспорт), MCP-клиент Spring AI, `spring-boot-starter-oauth2-resource-server`; UUID v7 — генератор владельца (проверен на Boot 3.4); пиннинга виртуальных потоков в JDK 25 нет (JEP 491).
 - Деплой: оркестратор — контейнер на выделенной VM, `/var/run/docker.sock` смонтирован (docker-java создаёт helper-контейнеры — D-30); helper-образ собирается из Dockerfile в репозитории и присутствует на VM локально (pull — только backoff-обновление).

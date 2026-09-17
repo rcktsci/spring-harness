@@ -4,7 +4,7 @@
 
 ## Context
 
-Скелет проекта: Boot 4.1.1 / Java 25 / Spring AI 2.0.1 BOM / ShedLock 7.10.1 (jdbc-template), preliquibase, Testcontainers (postgres), WireMock — в pom. Автоконфигурации отключены (`DataSourceAutoConfiguration`, автоконфиги Spring AI) — значит ручная сборка DataSource (пул → preliquibase → liquibase → JPA) и LLM-клиентов — сама первая задача M1 (задача 1.5), не данность скелета. Кода домена нет — greenfield.
+Скелет проекта: Boot 4.1.1 / Java 25 / Spring AI 2.0.1 BOM / ShedLock 7.10.1 (jdbc-template), preliquibase, Testcontainers (postgres), WireMock — в pom. DataSource — автоконфигурация Boot (ручная сборка убрана директивой владельца — D-43; порядок пул → preliquibase → liquibase → JPA обеспечивает стартер). Автоконфиги Spring AI отключены — LLM-клиенты собираем вручную (задача 5.1). Кода домена нет — greenfield.
 
 ## Goals / Non-Goals
 

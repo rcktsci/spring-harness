@@ -4,16 +4,16 @@
 
 ## 1. Фундамент
 
-- [ ] 1.1 Дополнить pom по факту (уже есть: preliquibase 2.0.0, testcontainers junit-jupiter/postgresql, wiremock, awaitility): добавить `spring-boot-starter-oauth2-resource-server`, `docker-java` (+транспорт httpclient5), `archunit`, `testcontainers-keycloak`; `mvn verify` зелёный на пустых тестах
-- [ ] 1.2 `IdGenerator`: UUID v7 + ULID (монотонный) через единую точку; unit-тесты на формат/сортируемость; перепроверка генератора владельца на Boot 4
-- [ ] 1.3 Скелет `@ConfigurationProperties`: `harness.security.*`, `harness.lock.*` (session-ttl, heartbeat, job-ttl), `harness.turn.*` (poll-interval, llm-retries, backoff-base), `harness.llm.timeout`, `harness.compact.threshold`, `harness.docker.*`, `harness.sse.ping-interval`, `harness.limits.*` (body, tool-output, bash-timeout-cap); тест на привязку дефолтов из application.yml
-- [ ] 1.4 Jackson 3 `FormatMapper` для jsonb (единая точка); интеграционный тест roundtrip `payload_jsonb` на Testcontainers-Postgres
-- [ ] 1.5 Ручная сборка `DataSource` (HikariCP) с порядком инициализации пул → preliquibase → liquibase → JPA (автоконфиг DataSource отключён); smoke-тест старта контекста на Testcontainers-Postgres
+- [x] 1.1 Дополнить pom по факту (уже есть: preliquibase 2.0.0, testcontainers junit-jupiter/postgresql, wiremock, awaitility): добавить `spring-boot-starter-oauth2-resource-server`, `docker-java` (+транспорт httpclient5), `archunit`, `testcontainers-keycloak`; `mvn verify` зелёный на пустых тестах
+- [x] 1.2 `IdGenerator`: UUID v7 + ULID (монотонный) через единую точку; unit-тесты на формат/сортируемость; перепроверка генератора владельца на Boot 4
+- [x] 1.3 Скелет `@ConfigurationProperties`: `harness.security.*`, `harness.lock.*` (session-ttl, heartbeat, job-ttl), `harness.turn.*` (poll-interval, llm-retries, backoff-base), `harness.llm.timeout`, `harness.compact.threshold`, `harness.docker.*`, `harness.sse.ping-interval`, `harness.limits.*` (body, tool-output, bash-timeout-cap); тест на привязку дефолтов из application.yml
+- [x] 1.4 Jackson 3 `FormatMapper` для jsonb (единая точка); интеграционный тест roundtrip `payload_jsonb` на Testcontainers-Postgres
+- [x] 1.5 DataSource: автоконфигурация Boot (ручная сборка убрана директивой владельца — D-43), порядок пул → preliquibase → liquibase → JPA — preliquibase-стартером; smoke-тест старта контекста на Testcontainers-Postgres
 
 ## 2. БД (Liquibase)
 
-- [ ] 2.1 Чейнджсет `m1-core`: `app_user`, `llm_credentials`, `llm_model`, `agent`, `session`, `session_message`, таблица ShedLock; индексы по `data-model.md` §5 (partial index eligible-скан, PK `(session_id, seq)`, UNIQUE ULID); preliquibase-хук
-- [ ] 2.2 Интеграционный тест: миграции накатываются с нуля на чистом Postgres; append-only-guard (попытка UPDATE `session_message` отклоняется на уровне приложения)
+- [x] 2.1 Чейнджсет `m1-core`: `app_user`, `llm_credentials`, `llm_model`, `agent`, `session`, `session_message`, таблица ShedLock; индексы по `data-model.md` §5 (partial index eligible-скан, PK `(session_id, seq)`, UNIQUE ULID); preliquibase-хук
+- [x] 2.2 Интеграционный тест: миграции накатываются с нуля на чистом Postgres; append-only-guard (попытка UPDATE `session_message` отклоняется на уровне приложения)
 
 ## 3. Identity (specs/sso-gate)
 
