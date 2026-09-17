@@ -4,8 +4,10 @@
 
 ## M1 — Ядро сессий (фундамент)
 
-**Объём**: identity (Keycloak-синхронизация users/groups, AccessPolicy-каркас), `SessionStore` (append-only, рендер видимости), `LlmGateway` (ChatModel из LlmModel, стриминг, отмена), агентный цикл (sync-инструменты), helper-образ + docker-java + `ContainerWorkspaceTools` (per-session контейнеры — D-30), TurnManager (wake EVENT+POLL, CAS-локи, TTL), REST/SSE сессий-сообщений, страховочная компакция, билеты, **минимальный attach (стриминг + отправка)**, **bootstrap-сид** (первые llm_credentials/agent — админ-команда CLI из env; см. architecture §4).
-**Критерий готовности**: FREE-сессия через минимальный attach работает end-to-end: сообщение → модель → инструменты **в helper-контейнере** → стриминг; рестарт сервера не теряет сессии; контейнер сессии поднимается/уничтожается корректно; bootstrap-сид разворачивает профиль+агента с нуля.
+**Объём**: identity (SSO-гейт по groups-claim + синхронизация users), `SessionStore` (append-only, рендер видимости), `LlmGateway` (ChatModel из LlmModel, стриминг, отмена), агентный цикл (sync-инструменты), helper-образ + docker-java + `ContainerWorkspaceTools` (per-session контейнеры — D-30), TurnManager (wake EVENT+POLL; **локи сессий — ShedLock `sess-{id}`, D-40**), REST/SSE сессий-сообщений, страховочная компакция, **минимальный attach (стриминг + отправка)**. Начальные llm_credentials/agent — вручную в БД.
+**Критерий готовности**: FREE-сессия через минимальный attach работает end-to-end: сообщение → модель → инструменты **в helper-контейнере** → стриминг; рестарт сервера не теряет сессии; контейнер сессии поднимается/уничтожается корректно.
+
+> **Порядок клиентов гибкий (D-42)**: WebUI может пойти сразу после M1 — раньше attach-CLI. Решение — по ходу, владельцем. Билеты SSE/WS и скачивание workspace-файлов — часть WebUI-фазы (api-contracts §8).
 
 ## M2 — Workflow-движок
 
@@ -19,7 +21,7 @@
 
 ## M4 — Клиенты и релей
 
-**Объём**: attach-CLI полный (tree/inject/stop/fork/rewind/compact, задачи), CLIENT_EXEC-релей (WS-протокол, register/tool.call/result/cancel, PARKED_CLIENT), скачивание workspace-файлов.
+**Объём**: attach-CLI полный (tree/inject/stop/compact, задачи), CLIENT_EXEC-релей (WS-протокол, register/tool.call/result/cancel, PARKED_CLIENT), скачивание workspace-файлов.
 **Критерий**: роуминг-сценарий: одна сессия, два «офиса», git pull, продолжение работы; CLIENT_EXEC-состояние ждёт исполнителя и переживает его переподключение.
 
 ## M5 — WebUI (позже)

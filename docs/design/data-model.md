@@ -14,41 +14,7 @@
 | display_name | text | |
 | created_at | timestamptz | |
 
-### app_group
-| Поле | Тип | Примечание |
-|---|---|---|
-| id | uuid PK | |
-| external_id | text UNIQUE | идентификатор группы в Keycloak |
-| name | text | |
-
-### group_member
-| Поле | Тип |
-|---|---|
-| group_id | uuid FK app_group |
-| user_id | uuid FK app_user |
-PK `(group_id, user_id)`.
-
-### folder
-| Поле | Тип | Примечание |
-|---|---|---|
-| id | uuid PK | |
-| owner_user_id | uuid FK app_user | |
-| parent_id | uuid FK folder NULL | дерево; корень — NULL |
-| name | text | |
-
-### share
-| Поле | Тип | Примечание |
-|---|---|---|
-| id | uuid PK | |
-| subject_type | enum USER \| GROUP | кому выдан |
-| subject_id | uuid | app_user.id или app_group.id |
-| resource_type | enum SESSION \| FOLDER \| TASK | |
-| resource_id | uuid | |
-| level | enum VIEW \| PARTICIPATE | PARTICIPATE ⊃ VIEW |
-| granted_by | uuid FK app_user | |
-| created_at | timestamptz | |
-
-UNIQUE `(subject_type, subject_id, resource_type, resource_id)`. INDEX `(resource_type, resource_id)` — обратный lookup AccessPolicy. INDEX `(group_id)`/`(user_id)` у group_member — проверка грантов групп.
+Группы/папки/шары **не моделируются**: вход — SSO-гейт по `groups`-claim (конфиг `harness.security.allowed-groups`), внутри — «аутентифицированный видит всё» (D-41).
 
 ## 2. llm
 
@@ -126,10 +92,9 @@ UNIQUE `(workflow_id, rev)`. UPDATE запрещён.
 | state_attempt | int DEFAULT 0 | счётчик входов в текущее системное состояние (идемпотентность повторных прогонов bash) |
 | deadline_at | timestamptz NULL | дедлайн таймаута состояния (BASH/WAIT/AGENT-timeout); таймаут-скан по индексу |
 | status_projection | enum RUNNING \| WAITING \| SUCCEEDED \| FAILED \| CANCELLED | денормализация текущего состояния, обновляется транзакционно с current_state |
-| params_jsonb | jsonb | параметр-мапа инстанса (`${task.params.<key>}`) |
+| params_jsonb | jsonb | параметр-мапа инстанса (`${task.params.<key>}`); **иммутабельны после создания** (api §4.1) |
 | parent_task_id | uuid FK task NULL | подзадачи |
 | tags | text[] DEFAULT '{}' | группировка для `WAIT_TASKS/TAGGED(x)` |
-| visibility | enum PRIVATE \| PUBLIC DEFAULT PRIVATE | как у сессий + точечные share (TASK) |
 | suspended | bool DEFAULT false | аварийный стоп; планировщик пропускает |
 | created_at / updated_at | timestamptz | |
 
@@ -176,25 +141,17 @@ INDEX `(task_id, created_at)`.
 | task_id | uuid FK task NULL | только STATE |
 | state_code | text NULL | только STATE; code состояния ревизии задачи |
 | agent_revision_id | uuid FK agent NULL | чем обрабатывается |
-| visibility | enum PRIVATE \| PUBLIC | плюс точечные share |
-| folder_id | uuid FK folder NULL | только FREE |
 | parent_session_id | uuid FK session NULL | субагентские сессии; поддерево для stop |
-| locked_by | text NULL | идентификатор инстанса-владельца лока |
-| locked_at | timestamptz NULL | TTL-стух лока |
 | cancel_requested | bool DEFAULT false | проверяется между вызовами инструментов |
-| last_seq | bigint DEFAULT 0 | денормализация: max(seq) сообщений |
-| last_consumed_seq | bigint DEFAULT 0 | денормализация: последний seq, вошедший в законченный модельный ход — основа eligible-скана |
-| message_count | int DEFAULT 0 | денормализация для SessionDto |
-| tokens_total | bigint DEFAULT 0 | денормализация для SessionDto |
+| last_seq | bigint DEFAULT 0 | денормализация: max(seq) сообщений — основа eligible-скана |
+| last_consumed_seq | bigint DEFAULT 0 | денормализация: последний seq, вошедший в законченный модельный ход |
 | last_turn_outcome | enum COMPLETED \| FAILED \| CANCELLED NULL | проекция исхода последнего Turn'а |
-| fork_source_session_id | uuid FK session NULL | форк: источник |
-| fork_seq_cutoff | bigint NULL | форк: отсечка (входит `seq ≤ cutoff`) |
-| rewind_seq | bigint NULL | мягкий откат: скрыто `seq > rewind_seq` |
-| archived_at | timestamptz NULL | архивация (скрытие из списков) |
 | last_activity_at | timestamptz | |
 | created_at | timestamptz | |
 
-PARTIAL UNIQUE `(task_id, state_code) WHERE kind = 'STATE'` — повторный вход в состояние резюмирует ту же сессию. PARTIAL INDEX `(last_seq)` WHERE `last_seq > last_consumed_seq AND locked_by IS NULL AND archived_at IS NULL` — eligible-скан POLL (index-only). Денормализации `last_seq/last_consumed_seq/message_count/tokens_total` обновляются в той же транзакции, что и допись сообщения.
+PARTIAL UNIQUE `(task_id, state_code) WHERE kind = 'STATE'` — повторный вход в состояние резюмирует ту же сессию. PARTIAL INDEX `(last_seq)` WHERE `last_seq > last_consumed_seq` — eligible-скан POLL (index-only; занятость лока проверяется попыткой взятия). Денормализации `last_seq/last_consumed_seq` обновляются в той же транзакции, что и допись сообщения.
+
+**Локи сессий хранятся не здесь**: ShedLock-таблица библиотеки, ключи `sess-{sessionId}` (+ имя джобы-сканера); колонок локов в `session` нет (D-40). Старые `sess-*`-строки чистит джоба.
 
 ### session_message (append-only, UPDATE запрещён)
 | Поле | Тип | Примечание |
@@ -208,7 +165,7 @@ PARTIAL UNIQUE `(task_id, state_code) WHERE kind = 'STATE'` — повторны
 | tokens | int NULL | учёт стоимости |
 | created_at | timestamptz | |
 
-PK `(session_id, seq)`. Видимость скрытых сообщений — производная от `COMPACT.covers` (см. `execution-model.md` §5). Retention: журнал бессрочен; политика выгрузки/очистки архивных сессий — отдельное решение при появлении объёмов (верхняя оценка роста ~1 ТБ/год на 50+ пользователей).
+PK `(session_id, seq)`. Видимость скрытых сообщений — производная от `COMPACT.covers` (см. `execution-model.md` §5). Retention: журнал бессрочен; политика выгрузки/очистки старых сессий — отдельное решение при появлении объёмов (верхняя оценка роста ~1 ТБ/год на 50+ пользователей).
 
 ## 6. Интеграции
 
@@ -225,24 +182,7 @@ PK `(session_id, seq)`. Видимость скрытых сообщений —
 | revoked_at | timestamptz NULL | DELETE API = revoke; URL умирает мгновенно |
 | created_at | timestamptz | |
 
-### instance (реестр живых инстансов)
-| Поле | Тип | Примечание |
-|---|---|---|
-| id | text PK | идентификатор инстанса (= locked_by) |
-| last_seen | timestamptz | heartbeat 10 сек; мёртвый — старше 30 сек |
-
-Нужен для scoped recovery: рестарт-скан помечает LOST только локи инстансов, мёртвых по реестру (rolling deploy не убивает живые Turn'ы); TTL-кража остаётся страховкой от зависших.
-
-### idempotency_key
-| Поле | Тип | Примечание |
-|---|---|---|
-| key | text | Idempotency-Key |
-| scope | text | путь эндпоинта + субъект |
-| request_hash | text | детект конфликта «тот же ключ — другое тело» |
-| response_json | jsonb | replay: повтор → исходный ответ |
-| expires_at | timestamptz | TTL 24 ч; чистка джобой |
-
-PRIMARY KEY `(scope, key)`. Чистка — джобой пачками (≤1000 строк) по `expires_at`.
+Таблица `idempotency_key` **выброшена** (D-41): дубль POST переживём; вебхук задач идемпотентен по построению (`409` вне WAIT_WEBHOOK).
 
 Вебхуки задач — stateless capability-URL (`токен = HMAC(secret, kind + ':' + entityId)` в пути, см. `workflow-domain.md` §7); очередь — сама `session_message`; история попыток обработки — не хранится (D-04).
 
@@ -250,6 +190,6 @@ PRIMARY KEY `(scope, key)`. Чистка — джобой пачками (≤100
 
 1. `session_message` и `task_transition_history` — только INSERT; UPDATE/DELETE запрещены на уровне приложения (и проверяются ревью миграций).
 2. `current_state` ∈ codes своей `workflow_revision` **или равен зарезервированному `'$CANCELLED'`** (виртуальный терминал принудительной отмены). Смена — движком переходов **атомарным CAS** (`UPDATE … SET current_state = next WHERE id = ? AND current_state = expected AND NOT suspended`); гонки stop↔transition, двойной `transition`, дубль терминала и ретрай вебхука — один победитель, проигравшие no-op. **Исключение — `stop`**: его CAS-запись `'$CANCELLED'` гварда `NOT suspended` не имеет (иначе сам себя заблокировал бы) и выигрывает у любых переходов; отмена Turn'ов — после записи терминала. Переоценка WAIT_TASKS идемпотентна. Транзакционно: `task_transition_history` + `status_projection` + `current_state_kind`.
-3. Видимость и доступ — только через `AccessPolicy` (identity), никаких ad-hoc проверок.
-4. `session.locked_by/locked_at` — только CAS-переходы (взятие/освобождение), не прямые UPDATE.
+3. Видимость и доступ: SSO-гейт (`groups`-claim) + правило «аутентифицированный видит всё» (D-41); отдельных проверок нет.
+4. Локи сессий — в ShedLock-таблице (`sess-{id}`), не в колонках `session`; обращение — только через `LockProvider`/`LockExtender` библиотеки.
 5. Ревизии (`agent`, `workflow_revision`) — иммутабельны; ссылки всегда на конкретную ревизию.

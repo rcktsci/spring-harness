@@ -6,7 +6,7 @@
 
 | Модуль | Ответственность | Исходящие контракты |
 |---|---|---|
-| `identity` | users, groups, folders, sharing, SSO-синхронизация | `AccessPolicy` |
+| `identity` | SSO-гейт (groups-claim), пользователи | (SSO-гейт — фильтр, контракта-матрицы нет, D-41) |
 | `workflow` | шаблоны, ревизии, валидация графов | `WorkflowRegistry` |
 | `task` | задачи, подзадачи, зависимости, suspended, история переходов | `TaskRegistry` |
 | `session` | сессии, append-only сообщения, eligibility | `SessionStore` |
@@ -30,7 +30,6 @@ intelligence, integration — драйвены контрактами (их зн
 
 | Контракт | Модуль | Назначение |
 |---|---|---|
-| `AccessPolicy` | identity | единая точка «кому что видно/можно» |
 | `WorkflowRegistry` | workflow | CRUD workflow/ревизий, валидация графа |
 | `TaskRegistry` | task | создание (пин к ревизии), переходы, зависимости, suspend |
 | `SessionStore` | session | единственная дверь к сессиям/сообщениям (append-only) |
@@ -48,7 +47,8 @@ intelligence, integration — драйвены контрактами (их зн
 - PostgreSQL + Liquibase + Preliquibase; ShedLock 7.10.1 (jdbc-template) для singleton-джоб; Keycloak (OIDC) — SSO.
 - Стек-ловушки (зафиксировано ревью Т1): Boot 4 = **Jackson 3** — для jsonb нужен кастомный `FormatMapper` (`hibernate.type.json_format_mapper`) или осознанный Jackson 2; регрессия Spring AI 2.0.1 (#6915) — **в каждом `OpenAiChatOptions` задавать `.timeout()`/`.maxRetries()` явно**; в pom на M1 добавить: `docker-java` (+транспорт), MCP-клиент Spring AI, `spring-boot-starter-oauth2-resource-server`; UUID v7 — генератор владельца (проверен на Boot 3.4); пиннинга виртуальных потоков в JDK 25 нет (JEP 491).
 - Деплой: оркестратор — контейнер на выделенной VM, `/var/run/docker.sock` смонтирован (docker-java создаёт helper-контейнеры — D-30); helper-образ собирается из Dockerfile в репозитории и присутствует на VM локально (pull — только backoff-обновление).
-- Bootstrap: первые `llm_credentials`/`agent` заводятся админ-командой CLI (читает env: base_url/key/model) — до появления UI-управления ревизиями агентов.
+- Bootstrap: начальные `llm_credentials`/`agent` — **вручную в БД** (MVP; никакого бутстрап-кода).
+- Правило конфигурации: **все числовые параметры — конфиг** (`application.yml`, `@ConfigurationProperties`): TTL/heartbeat локов, окно async, лимиты spawn, таймауты, backoff, лимит тела и т.п. Хардкод чисел в коде запрещён.
 - Сборка: Maven 3.9 (wrapper), git-commit-id (git.properties), JaCoCo.
 
 ## 5. Точки эволюции (заложены, не реализуются)

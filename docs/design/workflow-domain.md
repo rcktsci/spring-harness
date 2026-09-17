@@ -72,7 +72,7 @@ transitions[]:
 - Проверка — чистая функция (пересчёт HMAC), без БД для задач; триггеры проверяются по `revoked_at`.
 - `409` вне WAIT_WEBHOOK — осознанно: повторная доставка — политика отправителя (GitHub и прочие шлюзы ретраят сами); буферизации «пришёл слишком рано» нет (stateless by design).
 - Принятый payload → `reason` перехода (кратко) + по решению workflow доступен следующему состоянию.
-- Threat-model capability-URL — `decisions.md` D-26: идемпотентность задач по построению (`409` вне WAIT_WEBHOOK), опциональный `Idempotency-Key`, TLS-only, rate-limit.
+- Threat-model capability-URL — `decisions.md` D-26: идемпотентность задач по построению (`409` вне WAIT_WEBHOOK), TLS-only, логирование вызовов в `reason`.
 
 ## 8. Задача-аналог /goal
 
