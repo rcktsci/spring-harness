@@ -23,7 +23,8 @@
 ## Текущее состояние
 
 - Дизайн-базис завершён и закоммичен (MVP-уровень, D-01…D-42).
-- Следующий шаг: `/opsx:propose` по фазе M1 «Ядро сессий» (`docs/design/roadmap.md`).
+- M1 «Ядро сессий»: openspec-чендж `m1-session-core` спроектирован, ревью-цикл закрыт (3×approve), закоммичен.
+- Следующий шаг: `/opsx:apply` по `openspec/changes/m1-session-core/tasks.md` (TDD, dev→review циклы субагентами).
 
 ## Ключевые документы
 
