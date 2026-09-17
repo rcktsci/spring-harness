@@ -13,7 +13,7 @@ import java.util.UUID;
 
 /**
  * Строка {@code session} (data-model §5). Денормализации {@code lastSeq/lastConsumedSeq}
- * обновляются только транзакционно с дописью сообщений (см. {@code SessionStoreImpl}).
+ * обновляются только транзакционно с дописью сообщений (см. {@code session.impl.SessionStoreImpl}).
  */
 @Entity
 @Table(name = "session")

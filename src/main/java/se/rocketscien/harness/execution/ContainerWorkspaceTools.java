@@ -1,5 +1,6 @@
 package se.rocketscien.harness.execution;
 
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -15,6 +16,8 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import java.util.stream.Collectors;
 
@@ -25,6 +28,7 @@ import java.util.stream.Collectors;
  * non-zero exit для bash — не ошибка инструмента.
  */
 @Service
+@RequiredArgsConstructor
 public class ContainerWorkspaceTools implements WorkspaceTools {
 
     private static final Logger log = LoggerFactory.getLogger(ContainerWorkspaceTools.class);
@@ -34,16 +38,6 @@ public class ContainerWorkspaceTools implements WorkspaceTools {
     private final DockerProperties dockerProperties;
     private final LimitsProperties limits;
     private final IdGenerator idGenerator;
-
-    public ContainerWorkspaceTools(WorkspaceContainerManager containers,
-                                   DockerProperties dockerProperties,
-                                   LimitsProperties limits,
-                                   IdGenerator idGenerator) {
-        this.containers = containers;
-        this.dockerProperties = dockerProperties;
-        this.limits = limits;
-        this.idGenerator = idGenerator;
-    }
 
     @Override
     public ToolResult readFile(UUID sessionId, String path, Integer offset, Integer limit) {
@@ -108,8 +102,8 @@ public class ContainerWorkspaceTools implements WorkspaceTools {
             }
             String edited = replaceAll
                     ? content.replace(oldString, newString)
-                    : content.replaceFirst(java.util.regex.Pattern.quote(oldString),
-                            java.util.regex.Matcher.quoteReplacement(newString));
+                    : content.replaceFirst(Pattern.quote(oldString),
+                            Matcher.quoteReplacement(newString));
             ContainerExecResult written = writeContainerFile(sessionId, containerPath, edited);
             if (written.exitCode() != 0) {
                 return ToolResult.error(callId(), tool, firstLine(written.output()));

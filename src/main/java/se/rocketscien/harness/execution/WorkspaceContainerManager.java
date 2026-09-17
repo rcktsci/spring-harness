@@ -7,6 +7,7 @@ import com.github.dockerjava.api.model.Bind;
 import com.github.dockerjava.api.model.HostConfig;
 import com.github.dockerjava.api.model.Volume;
 import com.github.dockerjava.core.command.ExecStartResultCallback;
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -37,6 +38,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * локального; недоступность registry не фейлит вызов (пока образ есть локально).
  */
 @Service
+@RequiredArgsConstructor
 public class WorkspaceContainerManager {
 
     private static final Logger log = LoggerFactory.getLogger(WorkspaceContainerManager.class);
@@ -47,12 +49,6 @@ public class WorkspaceContainerManager {
     private final DockerProperties properties;
     private final LimitsProperties limits;
     private final ConcurrentMap<UUID, String> containers = new ConcurrentHashMap<>();
-
-    public WorkspaceContainerManager(DockerClient dockerClient, DockerProperties properties, LimitsProperties limits) {
-        this.dockerClient = dockerClient;
-        this.properties = properties;
-        this.limits = limits;
-    }
 
     public String containerName(UUID sessionId) {
         return CONTAINER_PREFIX + sessionId;
@@ -243,7 +239,7 @@ public class WorkspaceContainerManager {
      * живой сессии в БД; контейнеры живых сессий не трогает. {@code harness-task-*} (M2) не
      * рассматриваются — суффикс парсится как UUID.
      */
-    public int removeOrphanContainers(java.util.Set<UUID> liveSessionIds) {
+    public int removeOrphanContainers(Set<UUID> liveSessionIds) {
         var listed = dockerClient.listContainersCmd()
                 .withShowAll(true)
                 .exec();

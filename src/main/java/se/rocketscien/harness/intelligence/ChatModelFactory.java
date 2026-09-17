@@ -1,6 +1,7 @@
 package se.rocketscien.harness.intelligence;
 
 import io.micrometer.observation.ObservationRegistry;
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.model.tool.ToolCallingManager;
@@ -23,6 +24,7 @@ import java.util.Set;
  * неизвестные ключи не теряются молча — WARN со списком (C-J-4).
  */
 @Service
+@RequiredArgsConstructor
 public class ChatModelFactory {
 
     private static final Logger log = LoggerFactory.getLogger(ChatModelFactory.class);
@@ -41,11 +43,6 @@ public class ChatModelFactory {
 
     private final LlmProperties llmProperties;
     private final CredentialDecryptor credentialDecryptor;
-
-    public ChatModelFactory(LlmProperties llmProperties, CredentialDecryptor credentialDecryptor) {
-        this.llmProperties = llmProperties;
-        this.credentialDecryptor = credentialDecryptor;
-    }
 
     public OpenAiChatModel create(LlmModel model, LlmCredentials credentials) {
         String apiKey = credentialDecryptor.decrypt(credentials.getApiKeyEncrypted(), credentials.getKeyVersion());
@@ -67,8 +64,8 @@ public class ChatModelFactory {
                 .build();
     }
 
-    /** Package-private для unit-проверки проброса {@code params_jsonb} (C-J-4). */
-    OpenAiChatOptions options(LlmModel model) {
+    /** Public для unit-проверки проброса {@code params_jsonb} (C-J-4; тесты живут в tests.intelligence). */
+    public OpenAiChatOptions options(LlmModel model) {
         OpenAiChatOptions.Builder builder = OpenAiChatOptions.builder()
                 .model(model.getModelId())
                 .timeout(llmProperties.timeout())

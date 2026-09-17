@@ -14,31 +14,31 @@ import java.util.Map;
  *       "output"?: ..., "exitCode"?: ..., "truncated"?: ..., "timedOut"?: ...}}.</li>
  * </ul>
  */
-final class TurnPayloads {
+public final class TurnPayloads {
 
-    static final String TEXT = "text";
-    static final String CALL_ID = "callId";
-    static final String TOOL_CALL_ID = "toolCallId";
-    static final String TOOL = "tool";
-    static final String ARGUMENTS = "arguments";
-    static final String STATUS = "status";
-    static final String OUTPUT = "output";
-    static final String EXIT_CODE = "exitCode";
-    static final String TRUNCATED = "truncated";
-    static final String TIMED_OUT = "timedOut";
+    public static final String TEXT = "text";
+    public static final String CALL_ID = "callId";
+    public static final String TOOL_CALL_ID = "toolCallId";
+    public static final String TOOL = "tool";
+    public static final String ARGUMENTS = "arguments";
+    public static final String STATUS = "status";
+    public static final String OUTPUT = "output";
+    public static final String EXIT_CODE = "exitCode";
+    public static final String TRUNCATED = "truncated";
+    public static final String TIMED_OUT = "timedOut";
 
     private TurnPayloads() {
     }
 
-    static Map<String, Object> assistant(String text) {
+    public static Map<String, Object> assistant(String text) {
         return Map.of(TEXT, text);
     }
 
-    static Map<String, Object> systemFailure(Throwable error) {
+    public static Map<String, Object> systemFailure(Throwable error) {
         return Map.of(TEXT, "Turn прерван ошибкой: " + rootMessage(error));
     }
 
-    static Map<String, Object> toolCall(String callId, String toolCallId, String tool,
+    public static Map<String, Object> toolCall(String callId, String toolCallId, String tool,
                                         Map<String, Object> arguments) {
         Map<String, Object> payload = new HashMap<>();
         payload.put(CALL_ID, callId);
@@ -50,7 +50,7 @@ final class TurnPayloads {
         return payload;
     }
 
-    static Map<String, Object> toolResult(String callId, String tool, ToolResult result) {
+    public static Map<String, Object> toolResult(String callId, String tool, ToolResult result) {
         Map<String, Object> payload = new HashMap<>();
         payload.put(CALL_ID, callId);
         payload.put(TOOL, tool);
@@ -70,7 +70,7 @@ final class TurnPayloads {
         return payload;
     }
 
-    static Map<String, Object> toolResultSynthetic(String callId, String tool, ToolStatus status, String output) {
+    public static Map<String, Object> toolResultSynthetic(String callId, String tool, ToolStatus status, String output) {
         Map<String, Object> payload = new HashMap<>();
         payload.put(CALL_ID, callId);
         payload.put(TOOL, tool);
@@ -81,25 +81,25 @@ final class TurnPayloads {
         return payload;
     }
 
-    static String text(Map<String, Object> payload) {
+    public static String text(Map<String, Object> payload) {
         if (payload == null) {
             return "";
         }
         return payload.get(TEXT) instanceof String text ? text : "";
     }
 
-    static String summary(Map<String, Object> payload) {
+    public static String summary(Map<String, Object> payload) {
         if (payload == null) {
             return "";
         }
         return payload.get("summary") instanceof String summary ? summary : "";
     }
 
-    static String callId(Map<String, Object> payload) {
+    public static String callId(Map<String, Object> payload) {
         return payload == null ? null : asString(payload.get(CALL_ID));
     }
 
-    static String toolCallId(Map<String, Object> payload) {
+    public static String toolCallId(Map<String, Object> payload) {
         if (payload == null) {
             return null;
         }
@@ -107,12 +107,12 @@ final class TurnPayloads {
         return providerId != null ? providerId : asString(payload.get(CALL_ID));
     }
 
-    static String tool(Map<String, Object> payload) {
+    public static String tool(Map<String, Object> payload) {
         return payload == null ? null : asString(payload.get(TOOL));
     }
 
     @SuppressWarnings("unchecked")
-    static Map<String, Object> arguments(Map<String, Object> payload) {
+    public static Map<String, Object> arguments(Map<String, Object> payload) {
         if (payload != null && payload.get(ARGUMENTS) instanceof Map<?, ?> arguments) {
             return (Map<String, Object>) arguments;
         }

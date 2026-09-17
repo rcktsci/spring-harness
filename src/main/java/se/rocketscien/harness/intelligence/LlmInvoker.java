@@ -3,6 +3,7 @@ package se.rocketscien.harness.intelligence;
 import com.openai.errors.OpenAIIoException;
 import com.openai.errors.OpenAIRetryableException;
 import com.openai.errors.OpenAIServiceException;
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ChatModel;
@@ -28,17 +29,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * наверх как неисправимая ошибка. Отмена — dispose подписки на {@link Flux}.
  */
 @Service
+@RequiredArgsConstructor
 public class LlmInvoker {
 
     private static final Logger log = LoggerFactory.getLogger(LlmInvoker.class);
 
     private final LlmGateway llmGateway;
     private final TurnProperties turnProperties;
-
-    public LlmInvoker(LlmGateway llmGateway, TurnProperties turnProperties) {
-        this.llmGateway = llmGateway;
-        this.turnProperties = turnProperties;
-    }
 
     public Flux<ChatResponse> stream(UUID llmModelId, Prompt prompt) {
         return stream(llmModelId, prompt, null);

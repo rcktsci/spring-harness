@@ -7,6 +7,7 @@ import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.stereotype.Component;
+import lombok.RequiredArgsConstructor;
 import se.rocketscien.harness.session.SessionMessageEntity;
 import se.rocketscien.harness.session.SessionStore;
 import tools.jackson.databind.ObjectMapper;
@@ -28,15 +29,12 @@ import java.util.Map;
  * порядок ролей валиден при любом интерливинге.</p>
  */
 @Component
+@RequiredArgsConstructor
 public class SessionPromptBuilder {
 
     private static final String TOOL_CALL_TYPE = "function";
 
     private final ObjectMapper objectMapper;
-
-    public SessionPromptBuilder(ObjectMapper objectMapper) {
-        this.objectMapper = objectMapper;
-    }
 
     public Prompt buildPrompt(SessionStore.AgentRuntime agent, List<SessionMessageEntity> visible) {
         List<Message> messages = new ArrayList<>();

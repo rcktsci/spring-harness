@@ -54,3 +54,11 @@ exclude `DataSourceAutoConfiguration` снят).
 - **Потребление батча — watermark виденного (D-45, D-J-2)**: COMPLETED — финальный ASSISTANT;
   FAILED — SYSTEM-причина (retry-шторма POLL нет); CANCELLED — последний рендер (собственные
   результаты и свежий USER остаются непотреблёнными и поднимают новый Turn).
+### D-46: чистка ShedLock-строк отменена
+
+PollWakeJob больше не чистит просроченные sess-*-строки — джоба делает ровно одно:
+нашёл eligible-сессии → 	ryStart. Просроченные строки в shedlock безвредны: взятие лока
+(lock_until <= now) и продление (lock_until > now AND locked_by = …) их игнорируют,
+чужой poll-wake-рядок не трогается. Владелец: сущность «чистка» не имеет сценария
+необходимости (правило проекта); тесты чистки удалены. Решение — D-46 в
+docs/design/decisions.md; тексты D-M1-4 (design.md) и tasks.md (7.4) обновлены.

@@ -4,6 +4,7 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -23,13 +24,10 @@ import java.util.List;
  * <p>Не является бином: исключается двойная servlet-регистрация, экземпляр собирается
  * в {@link SecurityConfig} внутри security-цепочки.</p>
  */
+@RequiredArgsConstructor
 public class GroupsGateFilter extends OncePerRequestFilter {
 
     private final SecurityProperties securityProperties;
-
-    public GroupsGateFilter(SecurityProperties securityProperties) {
-        this.securityProperties = securityProperties;
-    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)

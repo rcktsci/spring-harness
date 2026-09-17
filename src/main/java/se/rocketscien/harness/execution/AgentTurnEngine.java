@@ -8,6 +8,7 @@ import org.springframework.ai.chat.model.MessageAggregator;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Component;
+import lombok.RequiredArgsConstructor;
 import reactor.core.Disposable;
 import se.rocketscien.harness.common.IdGenerator;
 import se.rocketscien.harness.intelligence.LlmInvoker;
@@ -39,6 +40,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * (собственные результаты и свежий USER остаются непотреблёнными и поднимают новый Turn).</p>
  */
 @Component
+@RequiredArgsConstructor
 public class AgentTurnEngine {
 
     private static final Logger log = LoggerFactory.getLogger(AgentTurnEngine.class);
@@ -50,21 +52,7 @@ public class AgentTurnEngine {
     private final ObjectMapper objectMapper;
     private final IdGenerator idGenerator;
 
-    public AgentTurnEngine(SessionStore sessionStore,
-                           LlmInvoker llmInvoker,
-                           NativeAgentTools agentTools,
-                           SessionPromptBuilder promptBuilder,
-                           ObjectMapper objectMapper,
-                           IdGenerator idGenerator) {
-        this.sessionStore = sessionStore;
-        this.llmInvoker = llmInvoker;
-        this.agentTools = agentTools;
-        this.promptBuilder = promptBuilder;
-        this.objectMapper = objectMapper;
-        this.idGenerator = idGenerator;
-    }
-
-    void run(UUID sessionId, TurnCancellation cancellation) {
+    public void run(UUID sessionId, TurnCancellation cancellation) {
         Session session = sessionStore.findSession(sessionId).orElse(null);
         if (session == null) {
             return;

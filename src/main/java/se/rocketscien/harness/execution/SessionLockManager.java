@@ -1,6 +1,7 @@
 package se.rocketscien.harness.execution;
 
 import jakarta.annotation.PreDestroy;
+import lombok.RequiredArgsConstructor;
 import net.javacrumbs.shedlock.core.LockConfiguration;
 import net.javacrumbs.shedlock.core.LockProvider;
 import net.javacrumbs.shedlock.core.SimpleLock;
@@ -30,6 +31,7 @@ import java.util.concurrent.TimeUnit;
  * риск принят, компенсация щедрым TTL.</p>
  */
 @Component
+@RequiredArgsConstructor
 public class SessionLockManager {
 
     private static final Logger log = LoggerFactory.getLogger(SessionLockManager.class);
@@ -42,11 +44,6 @@ public class SessionLockManager {
         thread.setDaemon(true);
         return thread;
     });
-
-    public SessionLockManager(LockProvider lockProvider, LockProperties properties) {
-        this.lockProvider = lockProvider;
-        this.properties = properties;
-    }
 
     /**
      * Попытка взятия лока сессии; занято (активный Turn на любом инстансе) — {@code empty} (no-op
@@ -93,7 +90,7 @@ public class SessionLockManager {
                     TimeUnit.MILLISECONDS);
         }
 
-        void heartbeat() {
+        public void heartbeat() {
             try {
                 synchronized (mutex) {
                     if (lock == null || lost) {
@@ -113,7 +110,7 @@ public class SessionLockManager {
             }
         }
 
-        boolean isLost() {
+        public boolean isLost() {
             synchronized (mutex) {
                 return lost;
             }

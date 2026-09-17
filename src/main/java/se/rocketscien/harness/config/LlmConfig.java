@@ -3,8 +3,8 @@ package se.rocketscien.harness.config;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import se.rocketscien.harness.intelligence.AesGcmCredentialDecryptor;
 import se.rocketscien.harness.intelligence.CredentialDecryptor;
+import se.rocketscien.harness.intelligence.impl.AesGcmCredentialDecryptor;
 
 /**
  * Расшифровка api_key конфигурируемым ключом (D-M1-3). Изолирована в intelligence, наружу —

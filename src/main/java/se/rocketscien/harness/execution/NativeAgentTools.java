@@ -3,6 +3,7 @@ package se.rocketscien.harness.execution;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.function.FunctionToolCallback;
 import org.springframework.stereotype.Component;
+import lombok.RequiredArgsConstructor;
 import se.rocketscien.harness.session.SessionStore;
 
 import java.time.Duration;
@@ -21,16 +22,13 @@ import java.util.UUID;
  * (execution-model §1), поэтому callbacks используются только как схемы для провайдера.
  */
 @Component
+@RequiredArgsConstructor
 public class NativeAgentTools {
 
     static final Set<String> NATIVE_TOOL_NAMES =
             Set.of("read_file", "write_file", "edit_file", "bash", "glob", "grep");
 
     private final WorkspaceTools workspaceTools;
-
-    public NativeAgentTools(WorkspaceTools workspaceTools) {
-        this.workspaceTools = workspaceTools;
-    }
 
     public List<ToolCallback> declarations(SessionStore.AgentRuntime agent) {
         Set<String> allowed = allowedTools(agent);

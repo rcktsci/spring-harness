@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
+import lombok.RequiredArgsConstructor;
 import se.rocketscien.harness.session.MessageKind;
 import se.rocketscien.harness.session.SessionMessageEntity;
 import se.rocketscien.harness.session.SessionStore;
@@ -21,6 +22,7 @@ import java.util.UUID;
  * Ошибка одного пункта не валит старт процесса.
  */
 @Component
+@RequiredArgsConstructor
 public class RestartScanRunner {
 
     private static final Logger log = LoggerFactory.getLogger(RestartScanRunner.class);
@@ -30,16 +32,6 @@ public class RestartScanRunner {
     private final SessionLockManager sessionLocks;
     private final TurnManager turnManager;
     private final WorkspaceContainerManager containers;
-
-    public RestartScanRunner(SessionStore sessionStore,
-                             SessionLockManager sessionLocks,
-                             TurnManager turnManager,
-                             WorkspaceContainerManager containers) {
-        this.sessionStore = sessionStore;
-        this.sessionLocks = sessionLocks;
-        this.turnManager = turnManager;
-        this.containers = containers;
-    }
 
     @EventListener(ApplicationReadyEvent.class)
     public void onApplicationReady() {

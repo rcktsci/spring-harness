@@ -1,4 +1,12 @@
+spring:
+  liquibase:
+    change-log: classpath:db/changelog-test/changelog-test.xml
+
 harness:
+  security:
+    # Живой Keycloak тестового контекста (позитивный путь и groups-гейт — через реальный Keycloak)
+    issuer-uri: ${containers.keycloak.url}/realms/harness
+    jwk-set-uri: ${containers.keycloak.url}/realms/harness/protocol/openid-connect/certs
   llm:
     # Тестовый ключ шифрования api_key (32 байта, base64) — тот же, что в тестовых фикстурах.
     encryption-keys:
@@ -15,25 +23,3 @@ harness:
     # Образ собирается DockerTestSupport'ом из docker/Dockerfile до первого docker-теста.
     helper-image: harness-helper:test
     workspace-root: ${java.io.tmpdir}/harness-it-workspaces
-
-spring:
-  liquibase:
-    change-log: classpath:db/changelog-test/changelog-test.xml
-
----
-
-spring.config.activate.on-profile: jwtmock
-
-harness:
-  security:
-    issuer-uri: https://jwtmock.issuer
-    jwk-set-uri: ${wiremock.jwks.url}/jwks
-
----
-
-spring.config.activate.on-profile: keycloak
-
-harness:
-  security:
-    issuer-uri: ${containers.keycloak.url}/realms/harness
-    jwk-set-uri: ${containers.keycloak.url}/realms/harness/protocol/openid-connect/certs

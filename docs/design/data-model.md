@@ -1,4 +1,4 @@
-# Модель данных spring-harness
+﻿# Модель данных spring-harness
 
 > СУБД: PostgreSQL. Миграции: Liquibase (+ Preliquibase для pre-DDL). Все конечные решения — из `docs/design/decisions.md`.
 > Соглашения: id — UUID v7 (кроме `session_message.id` — короткий ULID); генератор — единая точка `IdGenerator` (библиотека владельца — D-31); время — `timestamptz`; гибкие структуры — `jsonb`; удаления каскадные от владельца, если не указано иное.
@@ -151,7 +151,7 @@ INDEX `(task_id, created_at)`.
 
 PARTIAL UNIQUE `(task_id, state_code) WHERE kind = 'STATE'` — повторный вход в состояние резюмирует ту же сессию. PARTIAL INDEX `(last_seq)` WHERE `last_seq > last_consumed_seq` — eligible-скан POLL (index-only; занятость лока проверяется попыткой взятия). Денормализации `last_seq/last_consumed_seq` обновляются в той же транзакции, что и допись сообщения.
 
-**Локи сессий хранятся не здесь**: ShedLock-таблица библиотеки, ключи `sess-{sessionId}` (+ имя джобы-сканера); колонок локов в `session` нет (D-40). Старые `sess-*`-строки чистит джоба.
+**Локи сессий хранятся не здесь**: ShedLock-таблица библиотеки, ключи `sess-{sessionId}` (+ имя джобы-сканера); колонок локов в `session` нет (D-40). Строки `sess-*` библиотека переиспользует при следующем взятии того же ключа; отдельной чистки нет (D-46).
 
 ### session_message (append-only, UPDATE запрещён)
 | Поле | Тип | Примечание |
