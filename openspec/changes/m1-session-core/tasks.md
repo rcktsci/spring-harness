@@ -17,15 +17,15 @@
 
 ## 3. Identity (specs/sso-gate)
 
-- [ ] 3.1 Resource server: JWT-валидация (issuer, подпись) на всех `/api/v1/**`; без/кривой токен → `401 unauthenticated` (Problem Details, без challenge); тест с самоподписанным JWT
-- [ ] 3.2 Groups-гейт: claim `groups` ∩ `harness.security.allowed-groups`, иначе `401 unauthenticated`; тесты «в группе / вне группы»
-- [ ] 3.3 Синхронизация `app_user` (upsert по `keycloak_subject`, обновление username/display_name); интеграционный тест на Testcontainers-Keycloak
+- [x] 3.1 Resource server: JWT-валидация (issuer, подпись) на всех `/api/v1/**`; без/кривой токен → `401 unauthenticated` (Problem Details, без challenge); тест с самоподписанным JWT
+- [x] 3.2 Groups-гейт: claim `groups` ∩ `harness.security.allowed-groups`, иначе `401 unauthenticated`; тесты «в группе / вне группы»
+- [x] 3.3 Синхронизация `app_user` (upsert по `keycloak_subject`, обновление username/display_name); интеграционный тест на Testcontainers-Keycloak
 
 ## 4. SessionStore (specs/session-store)
 
-- [ ] 4.1 Сущности/репозитории + контракт `SessionStore` (Javadoc-инварианты); создание FREE с пином ревизии агента (`agentRev`|latest, `404 agent-not-found`); интеграционные тесты
-- [ ] 4.2 Допись событий: монотонный `seq` через транзакционный row-lock строки сессии (`UPDATE session SET last_seq = last_seq+1 … RETURNING`; лок `sess-{id}` НЕ используется), ULID, `last_seq/last_consumed_seq` транзакционно; конкурентный тест (2 параллельных дописи, в т.ч. при активном Turn'е — без дыр и дублей seq)
-- [ ] 4.3 Рендер видимости: журнал минус `COMPACT.covers` (проекция → SET покрытий → payload видимых); unit-тесты на вложенные/граничные случаи
+- [x] 4.1 Сущности/репозитории + контракт `SessionStore` (Javadoc-инварианты); создание FREE с пином ревизии агента (`agentRev`|latest, `404 agent-not-found`); интеграционные тесты
+- [x] 4.2 Допись событий: монотонный `seq` через транзакционный row-lock строки сессии (`UPDATE session SET last_seq = last_seq+1 … RETURNING`; лок `sess-{id}` НЕ используется), ULID, `last_seq/last_consumed_seq` транзакционно; конкурентный тест (2 параллельных дописи, в т.ч. при активном Turn'е — без дыр и дублей seq)
+- [x] 4.3 Рендер видимости: журнал минус `COMPACT.covers` (проекция → SET покрытий → payload видимых); unit-тесты на вложенные/граничные случаи
 
 ## 5. LlmGateway (specs/llm-gateway)
 

@@ -1,6 +1,8 @@
 harness:
   security:
     allowed-groups: [harness-users]
+    issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8080/realms/harness}
+    jwk-set-uri: ${KEYCLOAK_JWKS_URI:http://localhost:8080/realms/harness/protocol/openid-connect/certs}
   lock:
     session-ttl: 10m
     heartbeat-interval: 30s

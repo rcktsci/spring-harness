@@ -1,3 +1,21 @@
 spring:
   liquibase:
     change-log: classpath:db/changelog-test/changelog-test.xml
+
+---
+
+spring.config.activate.on-profile: jwtmock
+
+harness:
+  security:
+    issuer-uri: https://jwtmock.issuer
+    jwk-set-uri: ${wiremock.jwks.url}/jwks
+
+---
+
+spring.config.activate.on-profile: keycloak
+
+harness:
+  security:
+    issuer-uri: ${containers.keycloak.url}/realms/harness
+    jwk-set-uri: ${containers.keycloak.url}/realms/harness/protocol/openid-connect/certs

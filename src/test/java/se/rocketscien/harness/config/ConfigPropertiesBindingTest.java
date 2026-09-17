@@ -21,6 +21,9 @@ class ConfigPropertiesBindingTest {
         contextRunner.run(context -> {
             SecurityProperties properties = context.getBean(SecurityProperties.class);
             assertThat(properties.allowedGroups()).containsExactly("harness-users");
+            assertThat(properties.issuerUri()).isEqualTo("http://localhost:8080/realms/harness");
+            assertThat(properties.jwkSetUri())
+                    .isEqualTo("http://localhost:8080/realms/harness/protocol/openid-connect/certs");
         });
     }
 
@@ -87,6 +90,19 @@ class ConfigPropertiesBindingTest {
             assertThat(properties.toolOutput()).isEqualTo(org.springframework.util.unit.DataSize.ofKilobytes(256));
             assertThat(properties.bashTimeoutCap()).isEqualTo(Duration.ofMinutes(5));
         });
+    }
+
+    @Test
+    void emptyAllowedGroupsFailsContextStartup() {
+        contextRunner
+                .withPropertyValues("harness.security.allowed-groups=")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()
+                                    .getCause()
+                                    .getCause())
+                            .hasMessageContaining("allowedGroups");
+                });
     }
 
     @Test
