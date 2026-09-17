@@ -29,16 +29,16 @@
 
 ## 5. LlmGateway (specs/llm-gateway)
 
-- [ ] 5.1 Сборка клиента из `llm_model`+`llm_credentials` (кэш по `llm_model.id`; AES-GCM api_key с `key_version`); явные `.timeout()`/`.maxRetries(0)` в каждой options (#6915); unit-тесты сборки, включая dangling `credentials_id` (Turn FAILED с SYSTEM-событием, старт процесса штатен)
-- [ ] 5.2 Стриминг + отмена: блокирующий стрим deltas, отмена прекращает поток; WireMock-тесты (стрим-чанки, abort)
-- [ ] 5.3 Ретраи 429/5xx: экспоненциальный backoff, лимит попыток из конфига, исчерпание → FAILED (SYSTEM-событие причины + `last_consumed_seq := last_seq`, без автоповтора Turn'а); фиксация tokens из usage; WireMock-тесты (429→успех, исчерпание)
+- [x] 5.1 Сборка клиента из `llm_model`+`llm_credentials` (кэш по `llm_model.id`; AES-GCM api_key с `key_version`); явные `.timeout()`/`.maxRetries(0)` в каждой options (#6915); unit-тесты сборки, включая dangling `credentials_id` (Turn FAILED с SYSTEM-событием, старт процесса штатен)
+- [x] 5.2 Стриминг + отмена: блокирующий стрим deltas, отмена прекращает поток; WireMock-тесты (стрим-чанки, abort)
+- [x] 5.3 Ретраи 429/5xx: экспоненциальный backoff, лимит попыток из конфига, исчерпание → FAILED (SYSTEM-событие причины + `last_consumed_seq := last_seq`, без автоповтора Turn'а); фиксация tokens из usage; WireMock-тесты (429→успех, исчерпание)
 
 ## 6. WorkspaceTools (specs/workspace-tools)
 
-- [ ] 6.1 `docker/Dockerfile` helper-образа (минимальная ОС + find/grep/coreutils/git; выбор базового образа — Open Question design.md, зафиксировать в Dockerfile) + smoke-сборка в CI
-- [ ] 6.2 docker-java: ленивое создание `harness-<sessionId>` (workspace — bind-mount хост-каталога `workspaces/sessions/{sessionId}`, лимиты cpu/mem из конфига, сеть off), удаление при чистке; pull-политика: локальный образ приоритетен, pull — backoff-обновление, недоступность registry не фейлит вызов; интеграционный тест на реальном Docker (в т.ч. «registry недоступен, образ локально → инструменты работают»)
-- [ ] 6.3 Нативные инструменты `read_file/write_file/edit_file/glob/grep/bash`: контракты `agent-tools.md` §1 (created|overwritten, not-found/ambiguous, exitCode, таймаут bash с `timedOut`, stdout+stderr); containment-гварды: относительные пути, запрет `..`, canonical-path-резолв внутри корня workspace (symlink-обход — ошибка); единый отчёт `{callId, tool, status, output?, exitCode?, truncated?, timedOut?}`; лимит вывода + `truncated`; unit+docker-интеграционные тесты
-- [ ] 6.4 Отказы: смерть контейнера → LOST с причиной; ошибка монтирования workspace-каталога → ERROR с причиной; docker-интеграционные тесты (kill контейнера mid-bash)
+- [x] 6.1 `docker/Dockerfile` helper-образа (минимальная ОС + find/grep/coreutils/git; выбор базового образа — Open Question design.md, зафиксировать в Dockerfile) + smoke-сборка в CI
+- [x] 6.2 docker-java: ленивое создание `harness-<sessionId>` (workspace — bind-mount хост-каталога `workspaces/sessions/{sessionId}`, лимиты cpu/mem из конфига, сеть off), удаление при чистке; pull-политика: локальный образ приоритетен, pull — backoff-обновление, недоступность registry не фейлит вызов; интеграционный тест на реальном Docker (в т.ч. «registry недоступен, образ локально → инструменты работают»)
+- [x] 6.3 Нативные инструменты `read_file/write_file/edit_file/glob/grep/bash`: контракты `agent-tools.md` §1 (created|overwritten, not-found/ambiguous, exitCode, таймаут bash с `timedOut`, stdout+stderr); containment-гварды: относительные пути, запрет `..`, canonical-path-резолв внутри корня workspace (symlink-обход — ошибка); единый отчёт `{callId, tool, status, output?, exitCode?, truncated?, timedOut?}`; лимит вывода + `truncated`; unit+docker-интеграционные тесты
+- [x] 6.4 Отказы: смерть контейнера → LOST с причиной; ошибка монтирования workspace-каталога → ERROR с причиной; docker-интеграционные тесты (kill контейнера mid-bash)
 
 ## 7. TurnManager (specs/agent-turn)
 

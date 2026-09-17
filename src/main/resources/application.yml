@@ -13,18 +13,32 @@ harness:
     backoff-base: 1s
   llm:
     timeout: 60s
+    encryption-keys:
+      1: ${HARNESS_LLM_KEY_V1:}
   compact:
     threshold: 0.8
   docker:
     helper-image: harness-helper:local
-    workspace-root: workspaces/sessions
+    # Абсолютный путь: bind-mount хостового каталога резолвится демоном от ФС хоста, не от CWD процесса.
+    workspace-root: ${HARNESS_WORKSPACE_ROOT:workspaces/sessions}
     cpu-nanos: 1000000000
     memory: 512MB
+    network: none
+    pull-timeout: 30s
+    start-timeout: 30s
+    exec-timeout: 60s
+    state-poll-interval: 50ms
+    container-stop-confirm: 3s
+    write-chunk-bytes: 60000
+    pull-retries: 3
+    pull-backoff: 2s
   sse:
     ping-interval: 15s
   limits:
     body: 1MB
     tool-output: 256KB
+    tool-capture-margin: 4KB
+    bash-timeout: 30s
     bash-timeout-cap: 5m
 
 spring:

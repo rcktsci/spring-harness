@@ -52,6 +52,7 @@ class ConfigPropertiesBindingTest {
         contextRunner.run(context -> {
             LlmProperties properties = context.getBean(LlmProperties.class);
             assertThat(properties.timeout()).isEqualTo(Duration.ofSeconds(60));
+            assertThat(properties.encryptionKeys()).containsKey(1);
         });
     }
 
@@ -71,6 +72,15 @@ class ConfigPropertiesBindingTest {
             assertThat(properties.workspaceRoot()).isEqualTo("workspaces/sessions");
             assertThat(properties.cpuNanos()).isEqualTo(1_000_000_000L);
             assertThat(properties.memory()).isEqualTo(org.springframework.util.unit.DataSize.ofMegabytes(512));
+            assertThat(properties.network()).isEqualTo("none");
+            assertThat(properties.pullTimeout()).isEqualTo(Duration.ofSeconds(30));
+            assertThat(properties.startTimeout()).isEqualTo(Duration.ofSeconds(30));
+            assertThat(properties.execTimeout()).isEqualTo(Duration.ofSeconds(60));
+            assertThat(properties.statePollInterval()).isEqualTo(Duration.ofMillis(50));
+            assertThat(properties.containerStopConfirm()).isEqualTo(Duration.ofSeconds(3));
+            assertThat(properties.writeChunkBytes()).isEqualTo(60_000);
+            assertThat(properties.pullRetries()).isEqualTo(3);
+            assertThat(properties.pullBackoff()).isEqualTo(Duration.ofSeconds(2));
         });
     }
 
@@ -88,6 +98,8 @@ class ConfigPropertiesBindingTest {
             LimitsProperties properties = context.getBean(LimitsProperties.class);
             assertThat(properties.body()).isEqualTo(org.springframework.util.unit.DataSize.ofMegabytes(1));
             assertThat(properties.toolOutput()).isEqualTo(org.springframework.util.unit.DataSize.ofKilobytes(256));
+            assertThat(properties.toolCaptureMargin()).isEqualTo(org.springframework.util.unit.DataSize.ofKilobytes(4));
+            assertThat(properties.bashTimeout()).isEqualTo(Duration.ofSeconds(30));
             assertThat(properties.bashTimeoutCap()).isEqualTo(Duration.ofMinutes(5));
         });
     }
