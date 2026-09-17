@@ -22,9 +22,12 @@
 
 ## Текущее состояние
 
-- Дизайн-базис завершён и закоммичен (MVP-уровень, D-01…D-42).
-- M1 «Ядро сессий»: openspec-чендж `m1-session-core` спроектирован, ревью-цикл закрыт (3×approve), закоммичен.
-- Следующий шаг: `/opsx:apply` по `openspec/changes/m1-session-core/tasks.md` (TDD, dev→review циклы субагентами).
+- Дизайн-базис завершён (D-01…D-46: MVP-уровень).
+- M1 «Ядро сессий»: чендж `m1-session-core` спроектирован и ревью-закрыт; идёт apply.
+- **Закоммичено**: A — фундамент+БД (`8d6c92d`), B — sso-gate+session-store (`e22409a`), C — llm-gateway+workspace-tools (`87e48c6`), D — turn-движок (`203316b`), D-2 — конвенции/тест-инфраструктура (`06eab98`). Задачи 1.1–7.6 отмечены в `tasks.md` (26/37).
+- **Осталось**: пачка E — API (`8.1–8.5`) + компакция (`9.1–9.2`); пачка F — приёмка (`10.1–10.4`), затем `/opsx:archive`.
+- **Открытый долг (решить владельцу)**: Contract-first не заведён в `tasks.md` (нет `openapi.yaml` + генерации серверных интерфейсов/DTO/тест-клиента, хотя `api-contracts.md`/`architecture.md` это декларируют); Spring AI `@Tool` не используется — инструменты объявляются вручную (`NativeAgentTools`/`TurnPayloads`).
+- Конвенции (обязательны): импорты вместо FQDN; `@RequiredArgsConstructor` + final-инъекция на всех Spring-компонентах (`lombok.config`); e2e-тесты — от единого `BaseApplicationTest` (Postgres+Keycloak+WireMock, без профилей-заглушек SSO); тесты в пакете `tests/`; `*Impl` — в `.impl`; никаких обходных SQL-хаков в джобах.
 
 ## Ключевые документы
 
