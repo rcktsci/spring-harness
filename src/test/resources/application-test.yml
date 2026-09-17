@@ -1,7 +1,3 @@
-spring:
-  liquibase:
-    change-log: classpath:db/changelog-test/changelog-test.xml
-
 harness:
   security:
     # Живой Keycloak тестового контекста (позитивный путь и groups-гейт — через реальный Keycloak)
@@ -23,3 +19,7 @@ harness:
     # Образ собирается DockerTestSupport'ом из docker/Dockerfile до первого docker-теста.
     helper-image: harness-helper:test
     workspace-root: ${java.io.tmpdir}/harness-it-workspaces
+
+spring:
+  liquibase:
+    change-log: classpath:db/changelog-test/changelog-test.xml

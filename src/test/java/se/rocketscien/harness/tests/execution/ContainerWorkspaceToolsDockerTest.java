@@ -221,16 +221,6 @@ class ContainerWorkspaceToolsDockerTest {
         assertThat(result.output()).contains("invalid include pattern");
     }
 
-    @Test
-    void pathTraversalIsRejectedWithoutTouchingHost() {
-        WorkspaceTools tools = tools(DataSize.ofMegabytes(1));
-
-        ToolResult result = tools.readFile(sessionId, "../../etc/passwd", null, null);
-
-        assertThat(result.status()).isEqualTo(ToolStatus.ERROR);
-        assertThat(result.output()).contains("escapes workspace");
-    }
-
     private WorkspaceTools tools(DataSize outputLimit) {
         DockerProperties docker = new DockerProperties(
                 helperImage,

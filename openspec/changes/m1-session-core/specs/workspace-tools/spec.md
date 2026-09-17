@@ -31,17 +31,12 @@ Helper-образ (минимальная ОС + find/grep/coreutils/git) SHALL 
 
 ### Requirement: Нативные инструменты
 
-Система SHALL предоставить инструменты: `read_file (path, offset?, limit?)`, `write_file (path, content)` → created|overwritten, `edit_file (path, oldString, newString, replaceAll?)` → ровно одно вхождение иначе `not-found`/`ambiguous`, `glob (pattern)`, `grep (pattern, include?)`, `bash (command, timeout?, cwd?)`. Все пути относительные, резолв от корня workspace; выход за пределы workspace (path traversal, `..`) запрещён.
+Система SHALL предоставить инструменты: `read_file (path, offset?, limit?)`, `write_file (path, content)` → created|overwritten, `edit_file (path, oldString, newString, replaceAll?)` → ровно одно вхождение иначе `not-found`/`ambiguous`, `glob (pattern)`, `grep (pattern, include?)`, `bash (command, timeout?, cwd?)`. Пути передаются в контейнер как есть; изоляция обеспечивается контейнером.
 
 #### Scenario: чтение файла
 
 - **WHEN** агент вызывает read_file с относительным путём существующего файла
 - **THEN** инструмент возвращает содержимое с учётом лимита вывода
-
-#### Scenario: path traversal
-
-- **WHEN** путь содержит `..` или указывает вне корня workspace
-- **THEN** инструмент возвращает ошибку, файловая система хоста не затрагивается
 
 #### Scenario: edit_file с неоднозначным вхождением
 

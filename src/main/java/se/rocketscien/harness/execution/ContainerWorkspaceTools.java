@@ -23,9 +23,9 @@ import java.util.stream.Collectors;
 
 /**
  * Нативные инструменты в per-session контейнере (agent-tools §1, specs/workspace-tools): файловые
- * операции и bash исполняются серверно утилитами helper-образа; хост-ФС не трогается. Все пути
- * относительные и проходят containment-гвард; вывод ограничен конфигом с маркером {@code truncated};
- * non-zero exit для bash — не ошибка инструмента.
+ * операции и bash исполняются серверно утилитами helper-образа; хост-ФС не трогается. Пути
+ * передаются в контейнер как есть — изоляция обеспечивается самим контейнером; вывод ограничен
+ * конфигом с маркером {@code truncated}; non-zero exit для bash — не ошибка инструмента.
  */
 @Service
 @RequiredArgsConstructor
@@ -43,7 +43,7 @@ public class ContainerWorkspaceTools implements WorkspaceTools {
     public ToolResult readFile(UUID sessionId, String path, Integer offset, Integer limit) {
         String tool = "read_file";
         try {
-            String containerPath = resolve(sessionId, path);
+            String containerPath = resolve(path);
             ContainerExecResult result = exec(sessionId, "cat -- \"$1\"", List.of(containerPath));
             if (result.exitCode() != 0) {
                 return ToolResult.error(callId(), tool, firstLine(result.output()));
@@ -52,10 +52,7 @@ public class ContainerWorkspaceTools implements WorkspaceTools {
             int from = offset == null ? 0 : Math.min(Math.max(offset, 0), bytes.length);
             int to = limit == null ? bytes.length : Math.min(from + Math.max(limit, 0), bytes.length);
             Limited limited = truncate(new String(bytes, from, to - from, StandardCharsets.UTF_8), result.truncated());
-            return ToolResult.ok(callId(), tool, limited.text(), null, limited.truncated(), null);
-        } catch (WorkspacePathException e) {
-            return ToolResult.error(callId(), tool, e.getMessage());
-        } catch (WorkspaceContainerException e) {
+            return ToolResult.ok(callId(), tool, limited.text(), null, limited.truncated(), null);        } catch (WorkspaceContainerException e) {
             return containerFailure(tool, e);
         }
     }
@@ -64,7 +61,7 @@ public class ContainerWorkspaceTools implements WorkspaceTools {
     public ToolResult writeFile(UUID sessionId, String path, String content) {
         String tool = "write_file";
         try {
-            String containerPath = resolve(sessionId, path);
+            String containerPath = resolve(path);
             ContainerExecResult exists = exec(sessionId, "test -e \"$1\"", List.of(containerPath));
             ContainerExecResult prepared = exec(sessionId,
                     "mkdir -p -- \"$(dirname -- \"$1\")\"", List.of(containerPath));
@@ -75,10 +72,7 @@ public class ContainerWorkspaceTools implements WorkspaceTools {
             if (written.exitCode() != 0) {
                 return ToolResult.error(callId(), tool, firstLine(written.output()));
             }
-            return ToolResult.ok(callId(), tool, exists.exitCode() == 0 ? "overwritten" : "created");
-        } catch (WorkspacePathException e) {
-            return ToolResult.error(callId(), tool, e.getMessage());
-        } catch (WorkspaceContainerException e) {
+            return ToolResult.ok(callId(), tool, exists.exitCode() == 0 ? "overwritten" : "created");        } catch (WorkspaceContainerException e) {
             return containerFailure(tool, e);
         }
     }
@@ -87,7 +81,7 @@ public class ContainerWorkspaceTools implements WorkspaceTools {
     public ToolResult editFile(UUID sessionId, String path, String oldString, String newString, boolean replaceAll) {
         String tool = "edit_file";
         try {
-            String containerPath = resolve(sessionId, path);
+            String containerPath = resolve(path);
             ContainerExecResult read = exec(sessionId, "cat -- \"$1\"", List.of(containerPath));
             if (read.exitCode() != 0) {
                 return ToolResult.error(callId(), tool, firstLine(read.output()));
@@ -108,10 +102,7 @@ public class ContainerWorkspaceTools implements WorkspaceTools {
             if (written.exitCode() != 0) {
                 return ToolResult.error(callId(), tool, firstLine(written.output()));
             }
-            return ToolResult.ok(callId(), tool, replaceAll ? "replaced-all" : "replaced");
-        } catch (WorkspacePathException e) {
-            return ToolResult.error(callId(), tool, e.getMessage());
-        } catch (WorkspaceContainerException e) {
+            return ToolResult.ok(callId(), tool, replaceAll ? "replaced-all" : "replaced");        } catch (WorkspaceContainerException e) {
             return containerFailure(tool, e);
         }
     }
@@ -134,10 +125,7 @@ public class ContainerWorkspaceTools implements WorkspaceTools {
                     .collect(Collectors.joining("\n"));
             return ToolResult.ok(callId(), tool, matches);
         } catch (PatternSyntaxException e) {
-            return ToolResult.error(callId(), tool, "invalid pattern: " + pattern);
-        } catch (WorkspacePathException e) {
-            return ToolResult.error(callId(), tool, e.getMessage());
-        } catch (WorkspaceContainerException e) {
+            return ToolResult.error(callId(), tool, "invalid pattern: " + pattern);        } catch (WorkspaceContainerException e) {
             return containerFailure(tool, e);
         }
     }
@@ -165,10 +153,7 @@ public class ContainerWorkspaceTools implements WorkspaceTools {
             Limited limited = truncate(output, result.truncated());
             return ToolResult.ok(callId(), tool, limited.text(), null, limited.truncated(), null);
         } catch (PatternSyntaxException e) {
-            return ToolResult.error(callId(), tool, "invalid include pattern: " + include);
-        } catch (WorkspacePathException e) {
-            return ToolResult.error(callId(), tool, e.getMessage());
-        } catch (WorkspaceContainerException e) {
+            return ToolResult.error(callId(), tool, "invalid include pattern: " + include);        } catch (WorkspaceContainerException e) {
             return containerFailure(tool, e);
         }
     }
@@ -196,7 +181,7 @@ public class ContainerWorkspaceTools implements WorkspaceTools {
         try {
             String containerCwd = cwd == null || cwd.isBlank()
                     ? MOUNT
-                    : resolve(sessionId, cwd);
+                    : resolve(cwd);
             Duration effective = effectiveBashTimeout(timeout);
             long seconds = Math.max(1, effective.toSeconds());
             Duration execDeadline = effective.plusSeconds(5);
@@ -232,11 +217,6 @@ public class ContainerWorkspaceTools implements WorkspaceTools {
             Limited limited = truncate(result.output(), result.truncated());
             return ToolResult.ok(callId, tool, limited.text(), result.exitCode(),
                     limited.truncated(), result.timedOut());
-        } catch (WorkspacePathException e) {
-            if (cancellation != null && cancellation.isCancelled()) {
-                return ToolResult.cancelled(callId, tool, "отменено пользователем");
-            }
-            return ToolResult.error(callId, tool, e.getMessage());
         } catch (WorkspaceContainerException e) {
             if (cancellation != null && cancellation.isCancelled()) {
                 return ToolResult.cancelled(callId, tool, "отменено пользователем");
@@ -370,10 +350,17 @@ public class ContainerWorkspaceTools implements WorkspaceTools {
         return chunks;
     }
 
-    private String resolve(UUID sessionId, String path) {
-        Path workspaceDir = containers.workspaceDir(sessionId);
-        Path hostPath = WorkspacePathGuard.resolveHostPath(workspaceDir, path);
-        return WorkspacePathGuard.toContainerPath(workspaceDir, hostPath);
+    /**
+     * Путь передаётся в контейнер как есть (директива владельца: изоляция — сам контейнер):
+     * относительные пути резолвятся от монтированного workspace ({@code /workspace}),
+     * абсолютные — уходят в контейнер без изменений (файловая система контейнера).
+     */
+    private String resolve(String path) {
+        if (path == null || path.isBlank()) {
+            return MOUNT;
+        }
+        String trimmed = path.trim();
+        return trimmed.startsWith("/") ? trimmed : MOUNT + "/" + trimmed;
     }
 
     private Duration effectiveBashTimeout(Duration timeout) {
