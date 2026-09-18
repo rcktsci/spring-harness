@@ -49,7 +49,7 @@
 - События: `message.created`, `session.status { runtimeStatus, lastTurnOutcome? }`, `ping` (комментарий `: ping`, 15 с; `retry: 5000`).
 
 ### 3.2 События задачи («следить вместе с оркестратором»)
-`GET /api/v1/tasks/{id}/events?since=` — события: `task.transition` (id = id записи истории, он же курсор), `task.status`, `subtask.terminal`, `task.comment`, `ping`; снапшот при коннекте.
+`GET /api/v1/tasks/{id}/events?since=` — события: `task.transition`, `task.status`, `subtask.terminal`, `task.comment`, `ping`; снапшот при коннекте. Курсор `since=` — `task_event_seq` (монотонный сквозной номер события задачи; durable в `task.task_event_seq`, инкремент транзакционно с эмиссией; см. data-model §4).
 
 ## 4. Задачи, workflow, триггеры, вебхуки
 
@@ -124,6 +124,7 @@ WebSocket `/api/v1/relay` (Bearer; для браузерного клиента 
 | `method-not-allowed` / `not-acceptable` / `unsupported-media-type` | 405/406/415 | |
 | `wrong-session-kind` | 409 | compact на STATE |
 | `task-not-waiting-webhook` / `task-already-terminal` | 409 | |
+| `wrong-transition` | 409 | transition не по разрешённому ребру / пустой reason |
 | `workspace-occupied` (WS error / close 4409) | — | |
 | `graph-invalid` / `dependency-invalid` / `params-schema` | 422 | |
 | `payload-too-large` | 413 | тело > лимита |

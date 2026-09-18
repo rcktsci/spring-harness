@@ -90,6 +90,7 @@ UNIQUE `(workflow_id, rev)`. UPDATE запрещён.
 | current_state | text | `state.code` из ревизии |
 | current_state_kind | enum AGENT \| BASH_SCRIPT \| WAIT_WEBHOOK \| WAIT_TASKS \| TERMINAL | денормализация для задачного POLL-скана; обновляется транзакционно с current_state |
 | state_attempt | int DEFAULT 0 | счётчик входов в текущее системное состояние (идемпотентность повторных прогонов bash) |
+| task_event_seq | bigint DEFAULT 0 | монотонный durable-счётчик событий задачи (все события, включая не-transition) — курсор SSE `tasks/{id}/events` (`since=`); переживает рестарт; инкремент транзакционно с эмиссией события (по стилю `last_seq`/`state_attempt`) |
 | deadline_at | timestamptz NULL | дедлайн таймаута состояния (BASH/WAIT/AGENT-timeout); таймаут-скан по индексу |
 | status_projection | enum RUNNING \| WAITING \| SUCCEEDED \| FAILED \| CANCELLED | денормализация текущего состояния, обновляется транзакционно с current_state |
 | params_jsonb | jsonb | параметр-мапа инстанса (`${task.params.<key>}`); **иммутабельны после создания** (api §4.1) |
@@ -98,7 +99,7 @@ UNIQUE `(workflow_id, rev)`. UPDATE запрещён.
 | suspended | bool DEFAULT false | аварийный стоп; планировщик пропускает |
 | created_at / updated_at | timestamptz | |
 
-INDEX `(parent_task_id, status_projection)` — оценка `WAIT_TASKS / ALL_CHILDREN`. INDEX `(tags)` GIN — для `TAGGED(x)`. INDEX `(current_state_kind)` WHERE WAIT_* — задачный POLL-скан; PARTIAL INDEX WHERE `current_state_kind = 'AGENT' AND status_projection = 'RUNNING'` — bootstrap-скан AGENT-без-сессии. INDEX `(deadline_at)` WHERE deadline_at IS NOT NULL — таймаут-скан. `owner_user_id` при создании задачи агентом наследуется от породившей сессии (см. глоссарий, Session).
+INDEX `(parent_task_id, status_projection)` — оценка `WAIT_TASKS / ALL_CHILDREN`. INDEX `(tags)` GIN — для `TAGGED(x)`. INDEX `(current_state_kind)` WHERE `current_state_kind = 'WAIT_TASKS'` — задачный POLL-скан (WAIT_WEBHOOK пассивен — его страхует таймаут-скан); PARTIAL INDEX WHERE `current_state_kind = 'AGENT' AND status_projection = 'RUNNING'` — bootstrap-скан AGENT-без-сессии. INDEX `(deadline_at)` WHERE deadline_at IS NOT NULL — таймаут-скан. `owner_user_id` при создании задачи агентом наследуется от породившей сессии (см. глоссарий, Session).
 
 ### task_dependency
 | Поле | Тип |
@@ -127,7 +128,7 @@ PK `(blocker_task_id, blocked_task_id)`. INDEX `(blocked_task_id)` — обра�
 | reason_jsonb | jsonb | bash: stdout/stderr + exit-код; агент: обязательный текст-обоснование; вебхук: источник + сводка; WAIT_TASKS: какие задачи закрыли условие |
 | created_at | timestamptz | |
 
-INDEX `(task_id, created_at)`.
+INDEX `(task_id, created_at, id)` — курсор истории — пара `(created_at, id)` (стабильная пагинация при равных `created_at`).
 
 ## 5. session
 

@@ -22,6 +22,8 @@ api → execution → { task, session, workflow } → identity
 intelligence, integration — драйвены контрактами (их знают только execution/api)
 ```
 
+- ArchUnit: `api` mayOnlyAccessLayers("execution", "intelligence", "session", "identity", "task", "workflow") — с M2 список дополнен `task`/`workflow` (контроллеры задач и вебхуков).
+
 - Домены `task`/`workflow` **не знают** про БД-детали сессий и про LLM — замена домена задач на Jira-адаптер или вынос исполнения в раннеры не трогает ядро.
 - `WorkspaceTools` — единственная дверь к файловой системе/bash. Реализации: `ContainerWorkspaceTools` (docker-java, per-session контейнер из helper-образа: минимальная ОС + find/grep/coreutils/git; workspace монтируется томом; имя `harness-<sessionId>` — D-30), `ClientRelayWorkspaceTools` (релей на подключённый клиент).
 - Источники инструментов агента — ровно два: нативные (через `WorkspaceTools`) и MCP-клиенты.
@@ -32,6 +34,8 @@ intelligence, integration — драйвены контрактами (их зн
 |---|---|---|
 | `WorkflowRegistry` | workflow | CRUD workflow/ревизий, валидация графа |
 | `TaskRegistry` | task | создание (пин к ревизии), переходы, зависимости, suspend |
+| `TaskEngine` | execution | цикл системных состояний (BASH/WAIT_*), CAS переходов, таймаут-скан; поверх `TaskRegistry` (execution → task) |
+| `TriggerRegistry` | task | внутренний контракт пакета `task` (CRUD/revoke триггеров); наружу роль триггеров закрывают `TaskRegistry` + `InboundTriggers` (будущие внешние интеграции) |
 | `SessionStore` | session | единственная дверь к сессиям/сообщениям (append-only) |
 | `WorkspaceTools` | execution | нативные инструменты workspace по биндингу |
 | `TurnManager` | execution | запуск/парковка/отмена Turn'ов, локи |
