@@ -2,8 +2,7 @@ package se.rocketscien.harness.intelligence;
 
 import io.micrometer.observation.ObservationRegistry;
 import lombok.RequiredArgsConstructor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
@@ -25,9 +24,9 @@ import java.util.Set;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ChatModelFactory {
 
-    private static final Logger log = LoggerFactory.getLogger(ChatModelFactory.class);
     private static final int NO_RETRIES = 0;
 
     private static final Set<String> KNOWN_PARAMS = Set.of(

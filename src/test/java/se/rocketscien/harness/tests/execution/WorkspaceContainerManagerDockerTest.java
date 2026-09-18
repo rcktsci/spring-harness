@@ -1,4 +1,6 @@
 package se.rocketscien.harness.tests.execution;
+
+import lombok.SneakyThrows;
 import java.util.List;
 
 
@@ -45,7 +47,8 @@ class WorkspaceContainerManagerDockerTest {
     }
 
     @AfterAll
-    static void tearDownClass() throws Exception {
+    @SneakyThrows
+    static void tearDownClass() {
         dockerClient.close();
     }
 
@@ -70,7 +73,8 @@ class WorkspaceContainerManagerDockerTest {
     }
 
     @Test
-    void mountsWorkspaceHostDirectoryAtWorkspace() throws Exception {
+    @SneakyThrows
+    void mountsWorkspaceHostDirectoryAtWorkspace() {
         manager = manager(helperImage);
         Path sessionDir = manager.workspaceDir(sessionId).toAbsolutePath();
         Files.createDirectories(sessionDir);

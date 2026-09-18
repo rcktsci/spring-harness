@@ -1,12 +1,11 @@
 package se.rocketscien.harness.identity;
 
 import jakarta.servlet.FilterChain;
-import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -15,7 +14,6 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.web.filter.OncePerRequestFilter;
 import se.rocketscien.harness.common.IdGenerator;
 
-import java.io.IOException;
 
 /**
  * Синхронизация пользователей (спека sso-gate): upsert по {@code keycloak_subject} при каждом
@@ -25,16 +23,17 @@ import java.io.IOException;
  * в {@link SecurityConfig} внутри security-цепочки.</p>
  */
 @RequiredArgsConstructor
+@Slf4j
 public class UserSyncFilter extends OncePerRequestFilter {
 
-    private static final Logger log = LoggerFactory.getLogger(UserSyncFilter.class);
 
     private final JdbcTemplate jdbcTemplate;
     private final IdGenerator idGenerator;
 
     @Override
+    @SneakyThrows
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
-            throws ServletException, IOException {
+ {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication instanceof JwtAuthenticationToken jwtAuthentication && jwtAuthentication.isAuthenticated()) {
             syncUser(jwtAuthentication.getToken());

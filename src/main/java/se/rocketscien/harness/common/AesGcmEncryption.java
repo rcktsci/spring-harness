@@ -1,5 +1,7 @@
 package se.rocketscien.harness.common;
 
+import lombok.SneakyThrows;
+
 import javax.crypto.Cipher;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
@@ -13,7 +15,8 @@ public class AesGcmEncryption {
     private static final int IV_SIZE = 12;
     private static final int TAG_LENGTH_BIT = 128;
 
-    public static String encrypt(String plainText, byte[] key) throws Exception {
+    @SneakyThrows
+    public static String encrypt(String plainText, byte[] key) {
         byte[] iv = new byte[IV_SIZE];
         new SecureRandom().nextBytes(iv);
 
@@ -30,7 +33,8 @@ public class AesGcmEncryption {
         return Base64.getEncoder().encodeToString(result);
     }
 
-    public static String decrypt(String cipherTextBase64, byte[] key) throws Exception {
+    @SneakyThrows
+    public static String decrypt(String cipherTextBase64, byte[] key) {
         byte[] cipherTextWithIv = Base64.getDecoder().decode(cipherTextBase64);
         byte[] iv = new byte[IV_SIZE];
         byte[] cipherText = new byte[cipherTextWithIv.length - IV_SIZE];

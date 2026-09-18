@@ -1,5 +1,7 @@
 package se.rocketscien.harness.tests.execution;
 
+import lombok.SneakyThrows;
+
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.utility.DockerImageName;
@@ -13,7 +15,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 class HelperImageDockerTest {
 
     @Test
-    void helperImageBuildsAndContainsRequiredUtilities() throws Exception {
+    @SneakyThrows
+    void helperImageBuildsAndContainsRequiredUtilities() {
         String image = DockerTestSupport.helperImage();
         assertThat(image).isEqualTo("harness-helper:test");
 

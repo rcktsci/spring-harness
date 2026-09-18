@@ -1,4 +1,6 @@
 package se.rocketscien.harness.tests.execution;
+
+import lombok.SneakyThrows;
 import java.nio.charset.StandardCharsets;
 
 
@@ -48,7 +50,8 @@ class ContainerWorkspaceToolsDockerTest {
     }
 
     @AfterAll
-    static void tearDownClass() throws Exception {
+    @SneakyThrows
+    static void tearDownClass() {
         dockerClient.close();
     }
 

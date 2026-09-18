@@ -4,8 +4,7 @@ import com.openai.errors.OpenAIIoException;
 import com.openai.errors.OpenAIRetryableException;
 import com.openai.errors.OpenAIServiceException;
 import lombok.RequiredArgsConstructor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
@@ -30,9 +29,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class LlmInvoker {
 
-    private static final Logger log = LoggerFactory.getLogger(LlmInvoker.class);
 
     private final LlmGateway llmGateway;
     private final TurnProperties turnProperties;

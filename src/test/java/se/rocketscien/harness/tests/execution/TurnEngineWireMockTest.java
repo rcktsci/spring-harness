@@ -1,4 +1,6 @@
 package se.rocketscien.harness.tests.execution;
+
+import lombok.SneakyThrows;
 import com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder;
 import com.github.tomakehurst.wiremock.stubbing.Scenario;
 import java.time.Duration;
@@ -173,7 +175,8 @@ class TurnEngineWireMockTest extends BaseApplicationTest {
     }
 
     @Test
-    void concurrentTryStartRunsExactlyOneTurn() throws Exception {
+    @SneakyThrows
+    void concurrentTryStartRunsExactlyOneTurn() {
         Session session = newSession();
         stubToolCallThenFinal();
 

@@ -1,5 +1,7 @@
 package se.rocketscien.harness.tests.execution;
 
+import lombok.SneakyThrows;
+
 import se.rocketscien.harness.execution.SessionLockManager;
 
 import net.javacrumbs.shedlock.core.LockProvider;
@@ -46,7 +48,8 @@ class SessionLockManagerTest extends BaseApplicationTest {
     private LockProperties lockProperties;
 
     @Test
-    void concurrentTryAcquireYieldsExactlyOneWinner() throws Exception {
+    @SneakyThrows
+    void concurrentTryAcquireYieldsExactlyOneWinner() {
         UUID sessionId = UUID.randomUUID();
 
         CountDownLatch startGate = new CountDownLatch(1);
@@ -100,7 +103,8 @@ class SessionLockManagerTest extends BaseApplicationTest {
     }
 
     @Test
-    void heartbeatExtendsLockUntil() throws Exception {
+    @SneakyThrows
+    void heartbeatExtendsLockUntil() {
         UUID sessionId = UUID.randomUUID();
 
         try (SessionLockManager.HeldLock held = sessionLocks.tryAcquire(sessionId).orElseThrow()) {

@@ -1,7 +1,5 @@
 package se.rocketscien.harness.execution;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.MessageAggregator;
@@ -9,6 +7,7 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Component;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import reactor.core.Disposable;
 import se.rocketscien.harness.common.IdGenerator;
 import se.rocketscien.harness.intelligence.LlmInvoker;
@@ -41,9 +40,9 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class AgentTurnEngine {
 
-    private static final Logger log = LoggerFactory.getLogger(AgentTurnEngine.class);
 
     private final SessionStore sessionStore;
     private final LlmInvoker llmInvoker;

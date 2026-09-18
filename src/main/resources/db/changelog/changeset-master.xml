@@ -4,7 +4,22 @@
                    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
                                        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
 
-    <includeAll path="migrations"
-                relativeToChangelogFile="true"/>
+    <!-- Порядок включений = порядок создания: FK-зависимости (llm_model → llm_credentials,
+         agent → llm_model, session → app_user/agent/session, session_message → session/app_user).
+         Индексы и констрейнты каждой таблицы — внутри её собственного файла. -->
+    <include file="migrations/2026/001_create_table_app_user.xml"
+             relativeToChangelogFile="true"/>
+    <include file="migrations/2026/002_create_table_llm_credentials.xml"
+             relativeToChangelogFile="true"/>
+    <include file="migrations/2026/003_create_table_llm_model.xml"
+             relativeToChangelogFile="true"/>
+    <include file="migrations/2026/004_create_table_agent.xml"
+             relativeToChangelogFile="true"/>
+    <include file="migrations/2026/005_create_table_session.xml"
+             relativeToChangelogFile="true"/>
+    <include file="migrations/2026/006_create_table_session_message.xml"
+             relativeToChangelogFile="true"/>
+    <include file="migrations/2026/007_create_table_shedlock.xml"
+             relativeToChangelogFile="true"/>
 
 </databaseChangeLog>

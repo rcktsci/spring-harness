@@ -1,5 +1,7 @@
 package se.rocketscien.harness.tests.intelligence;
 
+import lombok.SneakyThrows;
+
 import se.rocketscien.harness.intelligence.ChatModelFactory;
 import se.rocketscien.harness.intelligence.impl.AesGcmCredentialDecryptor;
 import se.rocketscien.harness.intelligence.impl.LlmGatewayImpl;
@@ -54,7 +56,8 @@ class LlmGatewayTest {
     }
 
     @Test
-    void buildsClientFromModelAndCredentialsAndCachesById() throws Exception {
+    @SneakyThrows
+    void buildsClientFromModelAndCredentialsAndCachesById() {
         UUID credentialsId = UUID.randomUUID();
         UUID modelId = UUID.randomUUID();
         LlmCredentials credentials = credentials(credentialsId, "http://localhost:1/v1", "sk-test", 1);

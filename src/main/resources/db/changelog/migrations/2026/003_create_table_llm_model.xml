@@ -1,0 +1,53 @@
+<?xml version="1.1" encoding="UTF-8" standalone="no"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                                       https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="3"
+               author="rocket-science">
+
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="llm_model"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="llm_model"
+                     remarks="конфигурация модели llm-провайдера">
+            <column name="id"
+                    type="UUID"
+                    remarks="идентификатор (uuid v7)">
+                <constraints nullable="false"
+                             primaryKey="true"
+                             primaryKeyName="pk_llm_model"/>
+            </column>
+
+            <column name="credentials_id"
+                    type="UUID"
+                    remarks="ссылка на учётные данные провайдера">
+                <constraints nullable="false"
+                             foreignKeyName="fk_llm_model__credentials_id__llm_credentials_id"
+                             referencedTableName="llm_credentials"
+                             referencedColumnNames="id"/>
+            </column>
+
+            <column name="model_id"
+                    type="TEXT"
+                    remarks="имя модели у провайдера">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="params_jsonb"
+                    type="JSONB"
+                    remarks="дополнительные параметры модели"/>
+
+            <column name="created_at"
+                    type="TIMESTAMP WITH TIME ZONE"
+                    remarks="время создания">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+</databaseChangeLog>

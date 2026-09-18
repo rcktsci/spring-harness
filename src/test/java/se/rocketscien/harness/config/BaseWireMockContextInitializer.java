@@ -4,6 +4,7 @@ import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import lombok.SneakyThrows;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
@@ -99,12 +100,14 @@ public abstract class BaseWireMockContextInitializer
     static class WireMockBeansRegistrar implements BeanDefinitionRegistryPostProcessor {
 
         @Override
-        public void postProcessBeanFactory(@NonNull ConfigurableListableBeanFactory ignored) throws BeansException {
+        @SneakyThrows
+        public void postProcessBeanFactory(@NonNull ConfigurableListableBeanFactory ignored) {
             // no-op
         }
 
         @Override
-        public void postProcessBeanDefinitionRegistry(@NonNull BeanDefinitionRegistry registry) throws BeansException {
+        @SneakyThrows
+        public void postProcessBeanDefinitionRegistry(@NonNull BeanDefinitionRegistry registry) {
             WIREMOCK_SERVERS_BY_QUALIFIER.forEach((beanName, singleton) -> register(registry, beanName, singleton));
         }
 

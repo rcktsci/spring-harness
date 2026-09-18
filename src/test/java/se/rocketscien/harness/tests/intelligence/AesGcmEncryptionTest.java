@@ -1,5 +1,7 @@
 package se.rocketscien.harness.tests.intelligence;
 
+import lombok.SneakyThrows;
+
 import org.junit.jupiter.api.Test;
 import se.rocketscien.harness.common.AesGcmEncryption;
 
@@ -12,7 +14,8 @@ class AesGcmEncryptionTest {
     private final byte[] key = "0123456789abcdef0123456789abcdef".getBytes(StandardCharsets.UTF_8);
 
     @Test
-    void roundtripRestoresPlaintext() throws Exception {
+    @SneakyThrows
+    void roundtripRestoresPlaintext() {
         String encrypted = AesGcmEncryption.encrypt("sk-secret", key);
 
         assertThat(encrypted).isNotEqualTo("sk-secret");
@@ -20,7 +23,8 @@ class AesGcmEncryptionTest {
     }
 
     @Test
-    void decryptWithWrongKeyFails() throws Exception {
+    @SneakyThrows
+    void decryptWithWrongKeyFails() {
         String encrypted = AesGcmEncryption.encrypt("sk-secret", key);
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> AesGcmEncryption.decrypt(

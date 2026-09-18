@@ -1,7 +1,7 @@
 package se.rocketscien.harness.execution;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
+
 
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -12,9 +12,9 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * в контейнере). После падения процесса незавершённая отмена доводится повторным stop
  * (идемпотентен) — отдельного recovery нет (D-41).
  */
+@Slf4j
 public final class TurnCancellation {
 
-    private static final Logger log = LoggerFactory.getLogger(TurnCancellation.class);
 
     private volatile boolean cancelled;
     private final CopyOnWriteArrayList<Runnable> interruptors = new CopyOnWriteArrayList<>();

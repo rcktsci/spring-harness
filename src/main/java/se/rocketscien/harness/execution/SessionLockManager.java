@@ -2,11 +2,10 @@ package se.rocketscien.harness.execution;
 
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.core.LockConfiguration;
 import net.javacrumbs.shedlock.core.LockProvider;
 import net.javacrumbs.shedlock.core.SimpleLock;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import se.rocketscien.harness.config.LockProperties;
 
@@ -32,9 +31,9 @@ import java.util.concurrent.TimeUnit;
  */
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class SessionLockManager {
 
-    private static final Logger log = LoggerFactory.getLogger(SessionLockManager.class);
     private static final Duration NO_MINIMUM = Duration.ZERO;
 
     private final LockProvider lockProvider;

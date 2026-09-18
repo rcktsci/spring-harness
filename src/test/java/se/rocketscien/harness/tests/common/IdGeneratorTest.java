@@ -1,5 +1,7 @@
 package se.rocketscien.harness.tests.common;
 
+import lombok.SneakyThrows;
+
 import se.rocketscien.harness.common.IdGenerator;
 import se.rocketscien.harness.common.UUIDv7Generator;
 
@@ -72,7 +74,8 @@ class IdGeneratorTest {
     }
 
     @Test
-    void ulidIsStrictlyMonotonicAcrossMilliseconds() throws InterruptedException {
+    @SneakyThrows
+    void ulidIsStrictlyMonotonicAcrossMilliseconds() {
         String first = idGenerator.newUlid();
 
         Thread.sleep(2);

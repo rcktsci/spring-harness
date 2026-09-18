@@ -2,8 +2,7 @@ package se.rocketscien.harness.execution.impl;
 
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import se.rocketscien.harness.execution.ActiveTurnRegistry;
 import se.rocketscien.harness.execution.AgentTurnEngine;
@@ -30,9 +29,9 @@ import java.util.concurrent.Executors;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 class TurnManagerImpl implements TurnManager {
 
-    private static final Logger log = LoggerFactory.getLogger(TurnManagerImpl.class);
 
     private final SessionStore sessionStore;
     private final SessionLockManager sessionLocks;

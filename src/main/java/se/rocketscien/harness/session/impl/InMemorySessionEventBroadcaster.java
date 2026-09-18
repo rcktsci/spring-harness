@@ -1,7 +1,7 @@
 package se.rocketscien.harness.session.impl;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.stereotype.Component;
 import se.rocketscien.harness.session.SessionEvent;
 import se.rocketscien.harness.session.SessionEventBroadcaster;
@@ -32,9 +32,9 @@ import java.util.function.Consumer;
  * живая доставка поверх этого базлайна.</p>
  */
 @Component
+@Slf4j
 public class InMemorySessionEventBroadcaster implements SessionEventBroadcaster, SessionEventListener {
 
-    private static final Logger log = LoggerFactory.getLogger(InMemorySessionEventBroadcaster.class);
 
     private final ConcurrentMap<UUID, SessionState> sessions = new ConcurrentHashMap<>();
 

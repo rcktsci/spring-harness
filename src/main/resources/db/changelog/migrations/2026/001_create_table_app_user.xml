@@ -1,0 +1,54 @@
+<?xml version="1.1" encoding="UTF-8" standalone="no"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                                       https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="1"
+               author="rocket-science">
+
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="app_user"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="app_user"
+                     remarks="пользователь, синхронизируемый из keycloak">
+            <column name="id"
+                    type="UUID"
+                    remarks="идентификатор (uuid v7)">
+                <constraints nullable="false"
+                             primaryKey="true"
+                             primaryKeyName="pk_app_user"/>
+            </column>
+
+            <column name="keycloak_subject"
+                    type="TEXT"
+                    remarks="subject из токена keycloak">
+                <constraints nullable="false"
+                             unique="true"
+                             uniqueConstraintName="uidx_app_user__keycloak_subject"/>
+            </column>
+
+            <column name="username"
+                    type="TEXT"
+                    remarks="имя пользователя">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="display_name"
+                    type="TEXT"
+                    remarks="отображаемое имя">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="created_at"
+                    type="TIMESTAMP WITH TIME ZONE"
+                    remarks="время создания">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+</databaseChangeLog>

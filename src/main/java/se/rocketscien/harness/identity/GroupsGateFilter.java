@@ -1,10 +1,10 @@
 package se.rocketscien.harness.identity;
 
 import jakarta.servlet.FilterChain;
-import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import lombok.SneakyThrows;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -12,7 +12,6 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.web.filter.OncePerRequestFilter;
 import se.rocketscien.harness.config.SecurityProperties;
 
-import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 
@@ -30,8 +29,9 @@ public class GroupsGateFilter extends OncePerRequestFilter {
     private final SecurityProperties securityProperties;
 
     @Override
+    @SneakyThrows
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
-            throws ServletException, IOException {
+ {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication instanceof JwtAuthenticationToken jwtAuthentication
                 && jwtAuthentication.isAuthenticated()

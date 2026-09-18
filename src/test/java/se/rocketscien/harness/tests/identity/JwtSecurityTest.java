@@ -1,4 +1,6 @@
 package se.rocketscien.harness.tests.identity;
+
+import lombok.SneakyThrows;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -60,7 +62,8 @@ class JwtSecurityTest extends BaseApplicationTest {
     }
 
     @Test
-    void noTokenReturns401ProblemDetailsWithoutChallenge() throws Exception {
+    @SneakyThrows
+    void noTokenReturns401ProblemDetailsWithoutChallenge() {
         Response response = get("/api/v1/ping", null);
 
         assertThat(response.status()).isEqualTo(401);
@@ -70,7 +73,8 @@ class JwtSecurityTest extends BaseApplicationTest {
     }
 
     @Test
-    void garbageTokenReturns401() throws Exception {
+    @SneakyThrows
+    void garbageTokenReturns401() {
         Response response = get("/api/v1/ping", "garbage-not-a-jwt");
 
         assertThat(response.status()).isEqualTo(401);
@@ -78,7 +82,8 @@ class JwtSecurityTest extends BaseApplicationTest {
     }
 
     @Test
-    void expiredTokenReturns401() throws Exception {
+    @SneakyThrows
+    void expiredTokenReturns401() {
         String token = selfSigned(claims -> claims
                 .expirationTime(Date.from(Instant.now().minusSeconds(60)))
                 .claim("groups", List.of(ALLOWED_GROUP)));
@@ -90,7 +95,8 @@ class JwtSecurityTest extends BaseApplicationTest {
     }
 
     @Test
-    void foreignIssuerTokenReturns401() throws Exception {
+    @SneakyThrows
+    void foreignIssuerTokenReturns401() {
         String token = selfSigned(claims -> claims
                 .issuer("https://foreign.issuer")
                 .claim("groups", List.of(ALLOWED_GROUP)));
@@ -102,7 +108,8 @@ class JwtSecurityTest extends BaseApplicationTest {
     }
 
     @Test
-    void tokenWithoutGroupsClaimReturns401() throws Exception {
+    @SneakyThrows
+    void tokenWithoutGroupsClaimReturns401() {
         // bob в realm без атрибута groups — реальный Keycloak-токен без claim groups
         Response response = get("/api/v1/ping", keycloakToken("bob", "bob-password"));
 
@@ -111,7 +118,8 @@ class JwtSecurityTest extends BaseApplicationTest {
     }
 
     @Test
-    void tokenOutsideAllowedGroupsReturns401() throws Exception {
+    @SneakyThrows
+    void tokenOutsideAllowedGroupsReturns401() {
         // bob'у выдаётся ЧУЖАЯ группа через Keycloak admin API — реальный токен,
         // groups-гейт отклоняет её
         setBobGroups(List.of("some-other-group"));
@@ -123,7 +131,8 @@ class JwtSecurityTest extends BaseApplicationTest {
     }
 
     @Test
-    void tokenInAllowedGroupGetsFullAccess() throws Exception {
+    @SneakyThrows
+    void tokenInAllowedGroupGetsFullAccess() {
         // alice в realm несёт groups=[harness-users] — позитивный путь через живой Keycloak
         Response response = get("/api/v1/ping", keycloakToken("alice", "alice-password"));
 
@@ -132,7 +141,8 @@ class JwtSecurityTest extends BaseApplicationTest {
     }
 
     @Test
-    void tokenSignedByUnknownKeyReturns401() throws Exception {
+    @SneakyThrows
+    void tokenSignedByUnknownKeyReturns401() {
         RSAKey foreignKey;
         try {
             foreignKey = new RSAKeyGenerator(2048)
@@ -151,7 +161,8 @@ class JwtSecurityTest extends BaseApplicationTest {
         assertThat(response.body()).contains("\"code\":\"unauthenticated\"");
     }
 
-    private Response get(String path, String bearerToken) throws IOException, InterruptedException {
+    @SneakyThrows
+    private Response get(String path, String bearerToken) {
         HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(URI.create(localServerUrl() + path))
                 .GET();
         if (bearerToken != null) {
@@ -180,7 +191,8 @@ class JwtSecurityTest extends BaseApplicationTest {
                 });
     }
 
-    private String keycloakToken(String username, String password) throws IOException, InterruptedException {
+    @SneakyThrows
+    private String keycloakToken(String username, String password) {
         String form = "grant_type=password"
                 + "&client_id=harness-cli"
                 + "&username=" + URLEncoder.encode(username, StandardCharsets.UTF_8)

@@ -1,0 +1,95 @@
+<?xml version="1.1" encoding="UTF-8" standalone="no"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                                       https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="11"
+               author="rocket-science">
+
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="session_message"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="session_message"
+                     remarks="append-only сообщение журнала сессии">
+            <column name="session_id"
+                    type="UUID"
+                    remarks="ссылка на сессию">
+                <constraints nullable="false"
+                             primaryKey="true"
+                             primaryKeyName="pk_session_message"
+                             foreignKeyName="fk_session_message__session_id__session_id"
+                             referencedTableName="session"
+                             referencedColumnNames="id"
+                             deleteCascade="true"/>
+            </column>
+
+            <column name="seq"
+                    type="BIGINT"
+                    remarks="сквозная нумерация в пределах сессии">
+                <constraints nullable="false"
+                             primaryKey="true"/>
+            </column>
+
+            <column name="id"
+                    type="TEXT"
+                    remarks="неизменяемый идентификатор события (ulid)">
+                <constraints nullable="false"
+                             unique="true"
+                             uniqueConstraintName="uidx_session_message__id"/>
+            </column>
+
+            <column name="kind"
+                    type="VARCHAR(16)"
+                    remarks="вид события">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="author_user_id"
+                    type="UUID"
+                    remarks="ссылка на автора для сообщений пользователя">
+                <constraints foreignKeyName="fk_session_message__author_user_id__app_user_id"
+                             referencedTableName="app_user"
+                             referencedColumnNames="id"/>
+            </column>
+
+            <column name="payload_jsonb"
+                    type="JSONB"
+                    remarks="контент события">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="tokens"
+                    type="INT"
+                    remarks="учёт стоимости вызова"/>
+
+            <column name="created_at"
+                    type="TIMESTAMP WITH TIME ZONE"
+                    remarks="время создания">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="12"
+               author="rocket-science">
+
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">
+                SELECT COUNT(*)
+                FROM pg_constraint
+                WHERE conname = 'ck_session_message__kind'
+            </sqlCheck>
+        </preConditions>
+
+        <sql>
+            ALTER TABLE session_message
+                ADD CONSTRAINT ck_session_message__kind
+                    CHECK (kind IN ('USER', 'ASSISTANT', 'SYSTEM', 'TOOL_CALL', 'TOOL_RESULT', 'COMPACT'));
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

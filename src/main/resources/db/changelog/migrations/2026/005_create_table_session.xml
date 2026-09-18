@@ -1,0 +1,179 @@
+<?xml version="1.1" encoding="UTF-8" standalone="no"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                                       https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="6"
+               author="rocket-science">
+
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="session"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="session"
+                     remarks="сессия агента (журнал и метаданные)">
+            <column name="id"
+                    type="UUID"
+                    remarks="идентификатор сессии (uuid v7)">
+                <constraints nullable="false"
+                             primaryKey="true"
+                             primaryKeyName="pk_session"/>
+            </column>
+
+            <column name="title"
+                    type="TEXT"
+                    remarks="название сессии"/>
+
+            <column name="owner_user_id"
+                    type="UUID"
+                    remarks="ссылка на пользователя-владельца">
+                <constraints nullable="false"
+                             foreignKeyName="fk_session__owner_user_id__app_user_id"
+                             referencedTableName="app_user"
+                             referencedColumnNames="id"
+                             deleteCascade="true"/>
+            </column>
+
+            <column name="kind"
+                    type="VARCHAR(16)"
+                    remarks="вид сессии">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="task_id"
+                    type="UUID"
+                    remarks="ссылка на задачу для сессий состояния"/>
+
+            <column name="state_code"
+                    type="TEXT"
+                    remarks="код состояния ревизии задачи"/>
+
+            <column name="agent_revision_id"
+                    type="UUID"
+                    remarks="ссылка на ревизию агента, закреплённую при создании">
+                <constraints foreignKeyName="fk_session__agent_revision_id__agent_id"
+                             referencedTableName="agent"
+                             referencedColumnNames="id"/>
+            </column>
+
+            <column name="parent_session_id"
+                    type="UUID"
+                    remarks="ссылка на родительскую сессию для субагентов">
+                <constraints foreignKeyName="fk_session__parent_session_id__session_id"
+                             referencedTableName="session"
+                             referencedColumnNames="id"
+                             deleteCascade="true"/>
+            </column>
+
+            <column name="cancel_requested"
+                    type="BOOLEAN"
+                    defaultValueBoolean="false"
+                    remarks="признак запроса отмены текущего хода">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="last_seq"
+                    type="BIGINT"
+                    defaultValueNumeric="0"
+                    remarks="максимальный seq сообщений сессии">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="last_consumed_seq"
+                    type="BIGINT"
+                    defaultValueNumeric="0"
+                    remarks="последний seq, вошедший в законченный модельный ход">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="last_turn_outcome"
+                    type="VARCHAR(16)"
+                    remarks="исход последнего хода"/>
+
+            <column name="last_activity_at"
+                    type="TIMESTAMP WITH TIME ZONE"
+                    remarks="время последней активности">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="created_at"
+                    type="TIMESTAMP WITH TIME ZONE"
+                    remarks="время создания">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="7"
+               author="rocket-science">
+
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists tableName="session"
+                             indexName="uidx_session__task_id_state_code"/>
+            </not>
+        </preConditions>
+
+        <sql>
+            CREATE UNIQUE INDEX uidx_session__task_id_state_code
+                ON session (task_id, state_code)
+                WHERE kind = 'STATE';
+        </sql>
+    </changeSet>
+
+    <changeSet id="8"
+               author="rocket-science">
+
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists tableName="session"
+                             indexName="idx_session__last_seq_pending"/>
+            </not>
+        </preConditions>
+
+        <sql>
+            CREATE INDEX idx_session__last_seq_pending
+                ON session (last_seq)
+                WHERE last_seq > last_consumed_seq;
+        </sql>
+    </changeSet>
+
+    <changeSet id="9"
+               author="rocket-science">
+
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">
+                SELECT COUNT(*)
+                FROM pg_constraint
+                WHERE conname = 'ck_session__kind'
+            </sqlCheck>
+        </preConditions>
+
+        <sql>
+            ALTER TABLE session
+                ADD CONSTRAINT ck_session__kind CHECK (kind IN ('FREE', 'STATE'));
+        </sql>
+    </changeSet>
+
+    <changeSet id="10"
+               author="rocket-science">
+
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">
+                SELECT COUNT(*)
+                FROM pg_constraint
+                WHERE conname = 'ck_session__last_turn_outcome'
+            </sqlCheck>
+        </preConditions>
+
+        <sql>
+            ALTER TABLE session
+                ADD CONSTRAINT ck_session__last_turn_outcome
+                    CHECK (last_turn_outcome IS NULL OR last_turn_outcome IN ('COMPLETED', 'FAILED', 'CANCELLED'));
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

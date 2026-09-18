@@ -1,4 +1,6 @@
 package se.rocketscien.harness.tests.execution;
+
+import lombok.SneakyThrows;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -50,7 +52,8 @@ class WorkspaceContainerFailureDockerTest {
     }
 
     @AfterAll
-    static void tearDownClass() throws Exception {
+    @SneakyThrows
+    static void tearDownClass() {
         dockerClient.close();
     }
 
@@ -62,7 +65,8 @@ class WorkspaceContainerFailureDockerTest {
     }
 
     @Test
-    void containerDeathDuringBashYieldsLost() throws Exception {
+    @SneakyThrows
+    void containerDeathDuringBashYieldsLost() {
         WorkspaceTools tools = tools(workspaceRoot.resolve("ws"));
         String containerId = manager.ensureContainer(sessionId);
 
@@ -95,7 +99,8 @@ class WorkspaceContainerFailureDockerTest {
     }
 
     @Test
-    void workspaceMountFailureYieldsError() throws Exception {
+    @SneakyThrows
+    void workspaceMountFailureYieldsError() {
         Path notADirectory = Files.createFile(workspaceRoot.resolve("blocked"));
         WorkspaceTools tools = tools(notADirectory);
 

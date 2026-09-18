@@ -8,8 +8,8 @@ import com.github.dockerjava.api.model.HostConfig;
 import com.github.dockerjava.api.model.Volume;
 import com.github.dockerjava.core.command.ExecStartResultCallback;
 import lombok.RequiredArgsConstructor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
+import lombok.SneakyThrows;
 import org.springframework.stereotype.Service;
 import se.rocketscien.harness.config.DockerProperties;
 import se.rocketscien.harness.config.LimitsProperties;
@@ -39,9 +39,9 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class WorkspaceContainerManager {
 
-    private static final Logger log = LoggerFactory.getLogger(WorkspaceContainerManager.class);
     private static final String WORKSPACE_MOUNT = "/workspace";
     private static final String CONTAINER_PREFIX = "harness-";
 
@@ -159,7 +159,8 @@ public class WorkspaceContainerManager {
             }
 
             @Override
-            public void close() throws java.io.IOException {
+            @SneakyThrows
+            public void close() {
                 try {
                     super.close();
                 } finally {

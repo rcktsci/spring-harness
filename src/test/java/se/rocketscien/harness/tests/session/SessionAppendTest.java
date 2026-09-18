@@ -1,4 +1,6 @@
 package se.rocketscien.harness.tests.session;
+
+import lombok.SneakyThrows;
 import java.util.ArrayList;
 
 
@@ -42,7 +44,8 @@ class SessionAppendTest extends BaseApplicationTest {
     private IdGenerator idGenerator;
 
     @Test
-    void concurrentAppendsHaveNoGapsAndNoDuplicates() throws Exception {
+    @SneakyThrows
+    void concurrentAppendsHaveNoGapsAndNoDuplicates() {
         Session session = SessionTestFixtures.createSession(jdbcTemplate, sessionStore, idGenerator);
 
         CountDownLatch startGate = new CountDownLatch(1);

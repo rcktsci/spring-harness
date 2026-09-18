@@ -1,5 +1,7 @@
 package se.rocketscien.harness.tests.identity;
 
+import lombok.SneakyThrows;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -47,7 +49,8 @@ class AppUserSyncTest extends BaseApplicationTest {
     }
 
     @Test
-    void firstRequestOfNewUserCreatesAppUser() throws Exception {
+    @SneakyThrows
+    void firstRequestOfNewUserCreatesAppUser() {
         String token = token("alice", "alice-password");
 
         HttpResponse<String> pingResponse = get("/api/v1/ping", token);
@@ -65,7 +68,8 @@ class AppUserSyncTest extends BaseApplicationTest {
     }
 
     @Test
-    void userOutsideGroupsGets401AndIsNotSynced() throws Exception {
+    @SneakyThrows
+    void userOutsideGroupsGets401AndIsNotSynced() {
         String token = token("bob", "bob-password");
 
         int status = get("/api/v1/ping", token).statusCode();
@@ -81,7 +85,8 @@ class AppUserSyncTest extends BaseApplicationTest {
     }
 
     @Test
-    void displayNameChangeInTokenUpdatesAppUser() throws Exception {
+    @SneakyThrows
+    void displayNameChangeInTokenUpdatesAppUser() {
         get("/api/v1/ping", token("carol", "carol-password"));
 
         try {
@@ -104,7 +109,8 @@ class AppUserSyncTest extends BaseApplicationTest {
         assertThat(displayName).isEqualTo("Caroline Danvers");
     }
 
-    private HttpResponse<String> get(String path, String bearerToken) throws IOException, InterruptedException {
+    @SneakyThrows
+    private HttpResponse<String> get(String path, String bearerToken) {
         HttpRequest request = HttpRequest.newBuilder(URI.create(localServerUrl() + path))
                 .header("Authorization", "Bearer " + bearerToken)
                 .GET()
@@ -112,7 +118,8 @@ class AppUserSyncTest extends BaseApplicationTest {
         return httpClient.send(request, HttpResponse.BodyHandlers.ofString());
     }
 
-    private String token(String username, String password) throws IOException, InterruptedException {
+    @SneakyThrows
+    private String token(String username, String password) {
         String form = "grant_type=password"
                 + "&client_id=harness-cli"
                 + "&username=" + URLEncoder.encode(username, StandardCharsets.UTF_8)

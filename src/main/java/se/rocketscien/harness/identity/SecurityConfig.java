@@ -1,5 +1,7 @@
 package se.rocketscien.harness.identity;
 
+import lombok.SneakyThrows;
+
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
@@ -34,6 +36,7 @@ import java.io.IOException;
 public class SecurityConfig {
 
     @Bean
+    @SneakyThrows
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http,
             JwtDecoder jwtDecoder,
@@ -41,7 +44,7 @@ public class SecurityConfig {
             SecurityProperties securityProperties,
             JdbcTemplate jdbcTemplate,
             IdGenerator idGenerator
-    ) throws Exception {
+    ) {
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -74,8 +77,9 @@ public class SecurityConfig {
                 response, objectMapper, exception);
     }
 
+    @SneakyThrows
     private static void writeProblemDetails(HttpServletResponse response, ObjectMapper objectMapper,
-                                            org.springframework.security.core.AuthenticationException exception) throws IOException {
+                                            org.springframework.security.core.AuthenticationException exception) {
         ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, exception.getMessage());
         problemDetail.setTitle("Unauthorized");
         problemDetail.setProperty("code", "unauthenticated");

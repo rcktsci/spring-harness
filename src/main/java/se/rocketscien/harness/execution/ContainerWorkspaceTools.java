@@ -1,8 +1,7 @@
 package se.rocketscien.harness.execution;
 
 import lombok.RequiredArgsConstructor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import se.rocketscien.harness.common.IdGenerator;
 import se.rocketscien.harness.config.DockerProperties;
@@ -29,9 +28,9 @@ import java.util.stream.Collectors;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ContainerWorkspaceTools implements WorkspaceTools {
 
-    private static final Logger log = LoggerFactory.getLogger(ContainerWorkspaceTools.class);
     private static final String MOUNT = "/workspace";
 
     private final WorkspaceContainerManager containers;

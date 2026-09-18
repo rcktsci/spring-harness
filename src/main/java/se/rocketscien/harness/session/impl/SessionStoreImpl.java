@@ -3,8 +3,7 @@ package se.rocketscien.harness.session.impl;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,9 +41,9 @@ import java.util.UUID;
 @Repository
 @Transactional
 @RequiredArgsConstructor
+@Slf4j
 public class SessionStoreImpl implements SessionStore {
 
-    private static final Logger log = LoggerFactory.getLogger(SessionStoreImpl.class);
 
     private final AgentRevisionRepository agentRevisionRepository;
     private final SessionMessageRepository sessionMessageRepository;

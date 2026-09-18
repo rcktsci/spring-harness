@@ -1,5 +1,7 @@
 package se.rocketscien.harness.tests.intelligence;
 
+import lombok.SneakyThrows;
+
 import se.rocketscien.harness.intelligence.CredentialDecryptor;
 import se.rocketscien.harness.intelligence.impl.AesGcmCredentialDecryptor;
 import se.rocketscien.harness.intelligence.LlmConfigurationException;
@@ -19,7 +21,8 @@ class AesGcmCredentialDecryptorTest {
     private static final byte[] KEY = "0123456789abcdef0123456789abcdef".getBytes(StandardCharsets.UTF_8);
 
     @Test
-    void decryptsWithKeyOfMatchingVersion() throws Exception {
+    @SneakyThrows
+    void decryptsWithKeyOfMatchingVersion() {
         CredentialDecryptor decryptor = new AesGcmCredentialDecryptor(
                 Map.of(1, Base64.getEncoder().encodeToString(KEY)));
         String encrypted = AesGcmEncryption.encrypt("sk-1", KEY);
@@ -28,7 +31,8 @@ class AesGcmCredentialDecryptorTest {
     }
 
     @Test
-    void missingKeyVersionFails() throws Exception {
+    @SneakyThrows
+    void missingKeyVersionFails() {
         CredentialDecryptor decryptor = new AesGcmCredentialDecryptor(
                 Map.of(2, Base64.getEncoder().encodeToString(KEY)));
         String encrypted = AesGcmEncryption.encrypt("sk-1", KEY);

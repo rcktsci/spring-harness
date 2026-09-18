@@ -1,11 +1,10 @@
 package se.rocketscien.harness.execution;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import se.rocketscien.harness.session.MessageKind;
 import se.rocketscien.harness.session.SessionMessageEntity;
 import se.rocketscien.harness.session.SessionStore;
@@ -23,9 +22,9 @@ import java.util.UUID;
  */
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class RestartScanRunner {
 
-    private static final Logger log = LoggerFactory.getLogger(RestartScanRunner.class);
     static final String LOST_REASON = "операция потеряна при перезапуске";
 
     private final SessionStore sessionStore;
