@@ -69,3 +69,29 @@ docs/design/decisions.md; тексты D-M1-4 (design.md) и tasks.md (7.4) об
 от \/workspace\, абсолютные — в ФС контейнера). Canonical-гвард вернётся в эндпоинте
 скачивания §8. Спека \specs/workspace-tools/spec.md\ согласована (сценарий
 path traversal и запрет \..\ убраны).
+
+## Шаг 2 contract-first: генерация из замороженной спеки (S-J-9)
+
+Спека: `src/main/resources/api/openapi.yaml` (OpenAPI 3.1). Обязательные пункты склейки
+(судейский вердикт `docs/temp/review/m1-spec-judge.md`, DS F1/F2/F9/F10):
+
+- **`openApiNullable=false`** в конфиге openapi-generator (версия — самая свежая): иначе
+  nullable-поля (`type: [string, 'null']` — `SessionDto.title`, `UpdateSessionRequest.title`)
+  разворачиваются в `JsonNullable<T>` и тянут `jackson-databind-nullable` (Jackson 2) в
+  main-runtime. Jackson 2 в проект не тащить: компиляционные нужды генератора —
+  provided/test-scope, HTTP-слой — Jackson 3 (AGENTS.md).
+- **SSE-эндпоинт `GET /sessions/{id}/events` исключить из генерации** (`.openapi-generator-ignore`
+  или операционный фильтр): контроллер — SseEmitter вручную (бэкфилл из SessionStore по
+  `?since=`/`Last-Event-ID` + живой broadcaster, базлайн D-J-5); сгенерированный метод
+  (`ResponseEntity<Void>`-стиль) с SseEmitter несовместим. Схемы кадров — якоря
+  `MessageDto`/`SessionStatusEvent` в спеке.
+- **RFC 9457-хендлеры с кастомным `code`** для фреймворковых исключений, которые Spring сам
+  не форматирует: 405 (method-not-allowed), 406 (not-acceptable), 415 (unsupported-media-type),
+  413 (payload-too-large, лимит `harness.limits.body`); 401 (unauthenticated) — без
+  WWW-Authenticate-челленджа. Все ошибки — `application/problem+json` с `code` из каталога
+  (ProblemDetail+расширения спеки).
+- **Пробельные строки**: `minLength: 1` не ловит `" "` — blank-проверка title/text/agentKey —
+  сервисное правило, если требуется (решить при 8.x).
+- **Разрыв контракт↔код (DS F5)**: `SessionEvent.StatusChanged`/broadcaster сейчас не несут
+  `lastTurnOutcome`, а контракт §3.1 (снапшот + `session.status`) — несёт; дополнить
+  broadcaster/снапшот при реализации 8.5.

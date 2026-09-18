@@ -37,7 +37,7 @@
 | `POST /api/v1/sessions/{id}/stop` | `→ 202` — отмена Turn'а + поддерева |
 | `GET /api/v1/sessions/{id}/tree` | `?depth=` (по умолчанию всё поддерево) → `{ items: TreeNode[] }`; `TreeNode = { id, parentSessionId, kind, agent {key,rev}, runtimeStatus, lastSeq, taskId?, lastActivityAt }` — «проваливание» в субагентов |
 
-**SessionDto**: `id, kind, title, owner, taskId?, stateCode?, agent {key, rev}, parentSessionId?, workspaceBinding { type, pathTemplate?, logicalKey? }, runtimeStatus: IDLE|TURN_RUNNING|PARKED_ASYNC|PARKED_CLIENT, lastTurnOutcome?, lastSeq, lastActivityAt, createdAt`.
+**SessionDto**: `id, kind, title, owner, taskId?, stateCode?, agent {key, rev}, parentSessionId?, workspaceBinding { type, pathTemplate?, logicalKey? }, runtimeStatus: IDLE|TURN_RUNNING|PARKED_ASYNC|PARKED_CLIENT, lastTurnOutcome?, lastSeq, lastActivityAt, createdAt`. `owner` — **username** владельца (`preferred_username` из JWT; не `keycloak_subject` — тот остаётся внутренней идентичностью `app_user`; резолв `owner_user_id → username` — забота серверного слоя).
 
 **MessageDto**: `id (ULID), seq, kind: USER|ASSISTANT|SYSTEM|TOOL_CALL|TOOL_RESULT|COMPACT, author? (username; только USER), payload, callId?, late?, tokens?, createdAt`. Сообщения неизменяемы: PATCH/DELETE не существует.
 

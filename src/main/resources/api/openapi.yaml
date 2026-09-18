@@ -1,0 +1,732 @@
+openapi: 3.1.0
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+info:
+  title: spring-harness API (M1)
+  version: 1.0.0-m1
+  description: >-
+    Машиночитаемый контракт M1 — подмножество api-contracts v3 (§0–§3.1, §6) и
+    openspec/changes/m1-session-core/specs/session-api. Источники истины — эти документы
+    и docs/glossary.md; файл замораживается для генерации серверных интерфейсов и тест-клиента.
+
+    Общие правила (api-contracts §0):
+    * **Авторизация**: `Authorization: Bearer <Keycloak JWT>` на всех эндпоинтах; JWT обязан
+      содержать группу из `harness.security.allowed-groups` (SSO-гейт, claim `groups`).
+      Внутри — одно правило: аутентифицированный видит всё и пишет куда угодно (D-41).
+    * **Ошибки**: RFC 9457 Problem Details (`application/problem+json`) с обязательным полем
+      `code` из каталога (см. ProblemCode); `code` вне каталога — дефект реализации.
+      Для 422 — расширение `errors[]` {pointer, rule, message}.
+    * `405 method-not-allowed` возможен на любом пути чужим HTTP-методом — в operations
+      не перечисляется (в OpenAPI невыразимо); `406 not-acceptable` — на всех ответах
+      с JSON-телом; `415 unsupported-media-type` и `413 payload-too-large` — на всех
+      эндпоинтах, принимающих тело (лимит `harness.limits.body`, дефолт 1 МБ).
+    * **Пагинация**: конверт `{ items: [...], nextCursor? }` с `?cursor=&limit=`;
+      потоковые выборки (messages, events) — `?since=<seq>`, интервал `(since, …]`.
+    * **PATCH** — JSON Merge Patch (RFC 7396): отсутствующее поле — не менять,
+      `null` — очистить.
+    * `201` всегда с заголовком `Location`. Пути — kebab-case, поля — camelCase,
+      enum — SCREAMING_SNAKE, время — ISO-8601 UTC.
+
+    Обязательные опции генерации (шаг 2): `openApiNullable=false` — nullable-поля
+    (`type: [x, 'null']`) без JsonNullable и без jackson-databind-nullable; зависимости
+    Jackson 2 в main-runtime запрещены (AGENTS.md: HTTP-слой — Jackson 3, компиляционные
+    нужды генератора — provided/test-scope). SSE-эндпоинт из генерации интерфейсов
+    исключается — реализуется на SseEmitter вручную (пункты шага 2:
+    openspec/changes/m1-session-core/apply-notes.md).
+servers:
+  - url: /api/v1
+security:
+  - bearerJWT: []
+tags:
+  - name: Agents
+    description: Каталог агентов (управление ревизиями — вручную в БД, MVP)
+  - name: Sessions
+    description: Жизненный цикл сессий
+  - name: SessionMessages
+    description: Журнал сообщений сессии (append-only)
+  - name: SessionCommands
+    description: RPC-команды сессии (compact, stop) — осознанный RPC-стиль
+  - name: SessionEvents
+    description: SSE-поток событий сессии
+paths:
+  /agents:
+    get:
+      tags: [Agents]
+      operationId: listAgents
+      summary: Каталог агентов
+      description: >-
+        Все агенты с последней ревизией каждого ключа. Управление ревизиями через API
+        не предоставляется (вручную в БД, MVP).
+      responses:
+        '200':
+          description: Каталог агентов (возможно пустой).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentCatalog'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+  /sessions:
+    post:
+      tags: [Sessions]
+      operationId: createSession
+      summary: Создать FREE-сессию
+      description: >-
+        Создаёт только FREE-сессию (STATE создаёт движок задач, M2). Ревизия агента пинится:
+        указанная `agentRev` или последняя на момент создания.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionRequest'
+      responses:
+        '201':
+          description: Сессия создана; Location — URL созданного ресурса.
+          headers:
+            Location:
+              description: URL созданной сессии (/api/v1/sessions/{id}).
+              schema:
+                type: string
+                format: uri-reference
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionDto'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/AgentNotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    get:
+      tags: [Sessions]
+      operationId: listSessions
+      summary: Список сессий
+      description: Конверт-пагинация; сортировка по lastActivityAt desc (api-contracts §2).
+      parameters:
+        - name: mine
+          in: query
+          required: false
+          description: Только сессии текущего пользователя (owner из JWT).
+          schema:
+            type: boolean
+        - name: kind
+          in: query
+          required: false
+          description: Фильтр по роду; в M1 существуют только FREE.
+          schema:
+            $ref: '#/components/schemas/SessionKind'
+        - name: q
+          in: query
+          required: false
+          description: Подстрока title.
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          required: false
+          description: Непрозрачный курсор из nextCursor предыдущей страницы.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Страница сессий.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionPage'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /sessions/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    get:
+      tags: [Sessions]
+      operationId: getSession
+      summary: Сессия по идентификатору
+      responses:
+        '200':
+          description: Сессия.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionDto'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/SessionNotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+    patch:
+      tags: [Sessions]
+      operationId: patchSession
+      summary: Переименовать сессию (merge-patch)
+      description: >-
+        JSON Merge Patch (RFC 7396). Семантика: отсутствующее поле — не менять; null —
+        очистить title; "" (пустая строка) — 422 validation-failed; неизвестные поля патча
+        игнорируются. В M1 изменяемо только title; сообщения неизменяемы — отдельных
+        PATCH/DELETE у них нет.
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: '#/components/schemas/UpdateSessionRequest'
+      responses:
+        '200':
+          description: Обновлённая сессия.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionDto'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/SessionNotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /sessions/{id}/messages:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    post:
+      tags: [SessionMessages]
+      operationId: sendMessage
+      summary: Отправить USER-сообщение
+      description: >-
+        Атрибуция автора — из JWT (username). Асинхронно: событие записывается в журнал,
+        Turn пробуждается (wake EVENT) либо будет поднят POLL-джобой; результат виден
+        в SSE-потоке. Ответ — 202 с идентификаторами записанного события.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMessageRequest'
+      responses:
+        '202':
+          description: Сообщение принято и записано в журнал.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendMessageAccepted'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/SessionNotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    get:
+      tags: [SessionMessages]
+      operationId: listMessages
+      summary: Читать видимые события журнала
+      description: >-
+        Интервал (since, …], порядок возрастания seq. Только видимые события: скрытые
+        более поздним COMPACT не возвращаются (оригиналы читает агент инструментом
+        read_compacted, M3).
+      parameters:
+        - $ref: '#/components/parameters/Since'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Страница видимых событий по возрастанию seq.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessagePage'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/SessionNotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /sessions/{id}/compact:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    post:
+      tags: [SessionCommands]
+      operationId: compactSession
+      summary: Команда компакции (только FREE)
+      description: >-
+        Команда асинхронна: результат — COMPACT-событие в потоке, на границе раунда/после
+        wake. Применима только к FREE; для STATE — 409 wrong-session-kind.
+      responses:
+        '202':
+          description: Команда принята; COMPACT-событие появится в потоке.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/SessionNotFound' }
+        '409': { $ref: '#/components/responses/WrongSessionKind' }
+  /sessions/{id}/stop:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    post:
+      tags: [SessionCommands]
+      operationId: stopSession
+      summary: Отменить активный Turn
+      description: >-
+        Отмена Turn'а сессии (в M3 — и всего поддерева субагентов). Идемпотентна:
+        повторный вызов безопасен. Сессия не умирает — резюмируема.
+      responses:
+        '202':
+          description: Команда отмены принята.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/SessionNotFound' }
+  /sessions/{id}/events:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    get:
+      tags: [SessionEvents]
+      operationId: streamSessionEvents
+      summary: SSE-поток событий сессии
+      description: >-
+        Поток `text/event-stream` (api-contracts §3.1). Первым при коннекте/реконнекте
+        отправляется снапшот `session.status` {runtimeStatus, lastTurnOutcome?}.
+        Далее события: `message.created` — новое видимое событие журнала, данные —
+        MessageDto (#/components/schemas/MessageDto; SSE `id:` = seq), `session.status` —
+        при смене runtimeStatus/lastTurnOutcome, данные — SessionStatusEvent
+        (#/components/schemas/SessionStatusEvent), `ping` — комментарий `: ping` каждые 15 с
+        (`harness.sse.ping-interval`); в начале потока — `retry: 5000`.
+        Продолжение после разрыва: заголовок `Last-Event-ID` приоритетнее `?since=`;
+        доставка за интервал (since, …] — без пропусков и дублей.
+        Эндпоинт исключается из генерации интерфейсов (шаг 2): контроллер реализуется
+        на SseEmitter вручную; сгенерированный метод этой операции не используется.
+      parameters:
+        - $ref: '#/components/parameters/Since'
+        - name: Last-Event-ID
+          in: header
+          required: false
+          description: seq последнего полученного события (стандартный SSE-реконнект); приоритетнее query-параметра since.
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+      responses:
+        '200':
+          description: >-
+            Поток событий; семантика и схемы кадров — в description операции. Тело схемой
+            не типизируется (SSE-фреймы), генерация тела не производится — сервер отдаёт
+            поток напрямую.
+          content:
+            text/event-stream:
+              examples:
+                frame:
+                  description: Пример кадра message.created (пустая строка — разделитель кадров SSE).
+                  value: |-
+                    id: 15
+                    event: message.created
+                    data: {"id":"01ARZ3NDEKTSV4RRFFQ69G5FAV","seq":15,"kind":"USER","author":"ivanov","payload":{"text":"привет"},"createdAt":"2026-09-18T10:15:00Z"}
+
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/SessionNotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+components:
+  securitySchemes:
+    bearerJWT:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    SessionId:
+      name: id
+      in: path
+      required: true
+      description: Идентификатор сессии.
+      schema:
+        type: string
+        format: uuid
+    Since:
+      name: since
+      in: query
+      required: false
+      description: Курсор seq — события с seq > since (интервал (since, …]); 0 или отсутствие — с начала журнала.
+      schema:
+        type: integer
+        format: int64
+        minimum: 0
+        default: 0
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Максимум элементов страницы; минимум 1, верхняя граница — конфиг сервера.
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+  responses:
+    Unauthorized:
+      description: '401, code=unauthenticated — нет/невалиден Bearer-токен либо группа JWT вне allowed-groups (SSO-гейт).'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    SessionNotFound:
+      description: '404, code=session-not-found.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    AgentNotFound:
+      description: '404, code=agent-not-found — agentKey или agentRev не существуют.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    WrongSessionKind:
+      description: '409, code=wrong-session-kind — команда неприменима к роду сессии (compact на STATE).'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    PayloadTooLarge:
+      description: '413, code=payload-too-large — тело превышает harness.limits.body (дефолт 1 МБ).'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    MethodNotAllowed:
+      description: >-
+        405, code=method-not-allowed — путь существует, метод не поддержан. Возможен на любом
+        пути чужим методом; в operations не перечисляется (в OpenAPI невыразимо).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    NotAcceptable:
+      description: '406, code=not-acceptable — Accept не содержит поддерживаемого представления (application/json; для SSE-потока — text/event-stream).'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    UnsupportedMediaType:
+      description: '415, code=unsupported-media-type — Content-Type не поддержан (для PATCH только application/merge-patch+json).'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    ValidationFailed:
+      description: '422, code=validation-failed — тело/параметры невалидны; errors[] с pointer/rule/message.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+  schemas:
+    SessionKind:
+      type: string
+      enum: [FREE, STATE]
+      description: >-
+        Род сессии. POST /sessions создаёт только FREE; STATE принадлежит паре
+        «задача × состояние» и появляется в M2 (движок задач).
+    SessionRuntimeStatus:
+      type: string
+      enum: [IDLE, TURN_RUNNING]
+      description: >-
+        M1-подмножество: IDLE — активного Turn'а нет; TURN_RUNNING — Turn выполняется.
+        Значения PARKED_ASYNC/PARKED_CLIENT (M3) в контракт M1 не входят.
+    TurnOutcome:
+      type: string
+      enum: [COMPLETED, FAILED, CANCELLED]
+      description: Исход последнего Turn'а.
+    SessionStatusEvent:
+      type: object
+      description: >-
+        Данные кадра `session.status` SSE-потока (и снапшота при коннекте/реконнекте).
+        Тело SSE схемой не типизируется — схема служит машинным якорем для ручного
+        парсера (клиент 8.5, attach-CLI).
+      required: [runtimeStatus]
+      properties:
+        runtimeStatus:
+          $ref: '#/components/schemas/SessionRuntimeStatus'
+        lastTurnOutcome:
+          $ref: '#/components/schemas/TurnOutcome'
+          description: Отсутствует/null до завершения первого Turn'а.
+    MessageKind:
+      type: string
+      enum: [USER, ASSISTANT, SYSTEM, TOOL_CALL, TOOL_RESULT, COMPACT]
+      description: >-
+        Вид события журнала. COMPACT скрывает покрываемые им события — видимость производная
+        (сообщение скрыто ⟺ существует более поздний COMPACT, покрывающий его).
+    ProblemCode:
+      type: string
+      enum:
+        - validation-failed
+        - unauthenticated
+        - session-not-found
+        - agent-not-found
+        - wrong-session-kind
+        - payload-too-large
+        - method-not-allowed
+        - not-acceptable
+        - unsupported-media-type
+      description: >-
+        Каталог кодов ошибок M1 (api-contracts §6). Точное значение для каждого ответа
+        зафиксировано в description соответствующего response-компонента.
+    AgentRef:
+      type: object
+      description: Ссылка на пиннутую ревизию агента.
+      required: [key, rev]
+      properties:
+        key:
+          type: string
+        rev:
+          type: integer
+          format: int32
+          minimum: 1
+    WorkspaceBinding:
+      type: object
+      description: >-
+        Привязка workspace. В M1 все сессии — SERVER_DIR (auto: workspaces/sessions/{sessionId});
+        CLIENT_EXEC и pathTemplate/logicalKey — последующие фазы.
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [SERVER_DIR]
+    AgentCatalogItem:
+      type: object
+      required: [key, name, latestRev]
+      properties:
+        key:
+          type: string
+        name:
+          type: string
+        latestRev:
+          type: integer
+          format: int32
+          minimum: 1
+        description:
+          type: string
+    SessionDto:
+      type: object
+      description: >-
+        Состояние сессии; M1-подмножество api-contracts §2 — без task/stateCode/parentSessionId,
+        runtimeStatus без PARKED_* (появляются в M2–M3).
+      required: [id, kind, title, owner, agent, workspaceBinding, runtimeStatus, lastSeq, lastActivityAt, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          $ref: '#/components/schemas/SessionKind'
+        title:
+          type: [string, 'null']
+          description: Название; поле присутствует всегда, null — если не задано при создании.
+        owner:
+          type: string
+          description: username владельца; метаданные для UI/фильтра mine (не барьер доступа, D-41).
+        agent:
+          $ref: '#/components/schemas/AgentRef'
+        workspaceBinding:
+          $ref: '#/components/schemas/WorkspaceBinding'
+        runtimeStatus:
+          $ref: '#/components/schemas/SessionRuntimeStatus'
+        lastTurnOutcome:
+          $ref: '#/components/schemas/TurnOutcome'
+          description: Отсутствует до завершения первого Turn'а.
+        lastSeq:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Позиция последнего события журнала (курсор для attach).
+        lastActivityAt:
+          type: string
+          format: date-time
+          description: ISO-8601 UTC; по ней сортируется список сессий (desc).
+        createdAt:
+          type: string
+          format: date-time
+    MessageDto:
+      type: object
+      description: Событие журнала сессии (append-only; PATCH/DELETE не существует).
+      required: [id, seq, kind, payload, createdAt]
+      properties:
+        id:
+          type: string
+          description: ULID (26 символов, Crockford base32 — без I, L, O, U).
+          pattern: '^[0-9A-HJKMNP-TV-Z]{26}$'
+          minLength: 26
+          maxLength: 26
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Позиция в журнале сессии; курсор since и SSE id.
+        kind:
+          $ref: '#/components/schemas/MessageKind'
+        author:
+          type: string
+          description: username автора; только для kind=USER (иначе отсутствует).
+        payload:
+          type: object
+          additionalProperties: true
+          description: >-
+            JSONB-объект; форма зависит от kind (форматы зафиксированы TurnPayloads):
+            USER/ASSISTANT/SYSTEM — {"text": string} (SYSTEM — причина сбоя тем же ключом);
+            TOOL_CALL — {"callId": ULID, "toolCallId"?: string, "tool": string, "arguments": object};
+            TOOL_RESULT — {"callId": ULID, "tool": string, "status": OK|ERROR|CANCELLED|LOST,
+            "output"?, "exitCode"?, "truncated"?, "timedOut"?};
+            COMPACT — {"covers": [{"from": seq, "to": seq}, ...], "summary": string}
+            (D-44; видимость = журнал минус объединение covers).
+          examples:
+            - text: первый вопрос
+            - callId: 01ARZ3NDEKTSV4RRFFQ69G5FAV
+              tool: bash
+              arguments: {command: 'ls -la'}
+            - covers: [{from: 1, to: 12}]
+              summary: Разбор первой задачи — договорились о подходе
+        callId:
+          type: string
+          description: ULID вызова инструмента; только для TOOL_CALL/TOOL_RESULT.
+          pattern: '^[0-9A-HJKMNP-TV-Z]{26}$'
+          minLength: 26
+          maxLength: 26
+        late:
+          type: boolean
+          description: >-
+            Поле M3: признак второго TOOL_RESULT завершившегося асинхронного инструмента.
+            В M1 не возвращается.
+        tokens:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Оценка токенов события (для компакции); может отсутствовать.
+        createdAt:
+          type: string
+          format: date-time
+    AgentCatalog:
+      type: object
+      description: Конверт каталога агентов (без пагинации).
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentCatalogItem'
+    SessionPage:
+      type: object
+      description: Конверт-страница сессий (сортировка lastActivityAt desc).
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SessionDto'
+        nextCursor:
+          type: string
+          description: >-
+            Непрозрачный (opaque) курсор следующей страницы (?cursor=) — клиент не
+            интерпретирует его содержимое; отсутствует, когда страниц больше нет.
+    MessagePage:
+      type: object
+      description: Конверт-страница событий журнала (порядок возрастания seq).
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MessageDto'
+        nextCursor:
+          type: integer
+          format: int64
+          description: >-
+            seq последнего события страницы — НЕ непрозрачный курсор: подставляется
+            в следующий ?since= (та же seq-семантика); отсутствует, когда событий
+            больше нет.
+    CreateSessionRequest:
+      type: object
+      required: [agentKey]
+      example:
+        title: Разбор пайплайна
+        agentKey: coder
+        agentRev: 3
+      properties:
+        title:
+          type: string
+          minLength: 1
+          description: Опционально; пустая строка невалидна (422).
+        agentKey:
+          type: string
+          minLength: 1
+          description: >-
+            Ключ агента из каталога; пустая строка — 422 validation-failed,
+            неизвестный ключ — 404 agent-not-found.
+        agentRev:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Пин к конкретной ревизии; отсутствует — берётся последняя (и тоже пинится).
+    UpdateSessionRequest:
+      type: object
+      description: >-
+        JSON Merge Patch (RFC 7396): отсутствующее поле — не менять; null — очистить title;
+        пустая строка — 422 validation-failed; неизвестные члены патча допустимы и
+        игнорируются.
+      additionalProperties: true
+      properties:
+        title:
+          type: [string, 'null']
+          minLength: 1
+          description: null — очистить title; строка — новый title (пустая строка невалидна, 422).
+    SendMessageRequest:
+      type: object
+      required: [text]
+      example:
+        text: проверь, почему падает сборка на CI
+      properties:
+        text:
+          type: string
+          minLength: 1
+          description: Текст USER-сообщения; автор атрибуцируется из JWT. Пустая строка невалидна (422).
+    SendMessageAccepted:
+      type: object
+      description: Идентификаторы записанного события (обработка Turn'ом — асинхронная).
+      required: [messageId, seq]
+      properties:
+        messageId:
+          type: string
+          description: ULID записанного события.
+          pattern: '^[0-9A-HJKMNP-TV-Z]{26}$'
+          minLength: 26
+          maxLength: 26
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+    ValidationErrorItem:
+      type: object
+      required: [pointer, rule, message]
+      properties:
+        pointer:
+          type: string
+          description: JSON Pointer (RFC 6901) невалидного поля.
+          examples:
+            - /agentKey
+        rule:
+          type: string
+          description: Машинное имя нарушенного правила (например required, minLength).
+        message:
+          type: string
+          description: Человекочитаемое описание (по-русски).
+    ProblemDetail:
+      type: object
+      description: RFC 9457 Problem Details + расширения code/errors (api-contracts §0.2, §6).
+      required: [code]
+      properties:
+        type:
+          type: string
+          description: URI-тип проблемы; по умолчанию about:blank.
+        title:
+          type: string
+        status:
+          type: integer
+          format: int32
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+        instance:
+          type: string
+        code:
+          $ref: '#/components/schemas/ProblemCode'
+        errors:
+          type: array
+          description: Только для 422 validation-failed.
+          items:
+            $ref: '#/components/schemas/ValidationErrorItem'
