@@ -53,7 +53,7 @@
 5. `WAIT_WEBHOOK` и `WAIT_TASKS`-states имеют **и** ERROR, **и** TIMEOUT переходы (движок обязан иметь путь выхода и по неудаче валидации payload/условия, и по таймауту — без ERROR-ребра движок клинчится).
 6. Из любого state достижим хотя бы один `TERMINAL`.
 7. Fan-out запрещён: для каждого `state.code` — не более одного исходящего перехода каждого `kind` (≤1 NEXT, ≤1 ERROR, ≤1 TIMEOUT). Единственный NEXT без ERROR — допустим; единственный ERROR без NEXT — допустим (задача сразу в терминал по неудаче); несколько переходов одного kind — запрещены.
-8. `transition.kind ∈ { NEXT, ERROR, TIMEOUT, CANCEL }`; CANCEL — служебный, в графе не обязан (используется движком принудительной отмены через `'$CANCELLED'`).
+8. `transition.kind ∈ { NEXT, ERROR, TIMEOUT }`; CANCEL зарезервирован для движка stop (запись в истории принудительной отмены через `'$CANCELLED'` — псевдо-код вне `codes` ревизии); CANCEL-рёбра в присылаемом графе невалидны → `422 graph-invalid` (rule=cancel-edge-forbidden).
 
 Нарушения → `422 graph-invalid` с массивом `errors[]`.
 

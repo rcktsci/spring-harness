@@ -1,4 +1,8 @@
 harness:
+  webhook:
+    # Секрет HMAC capability-токенов вебхуков (token = HMAC-SHA256(secret, kind:entityId),
+    # api-contracts §4.4); в рантайме VM — через env HARNESS_WEBHOOK_SECRET.
+    secret: ${HARNESS_WEBHOOK_SECRET:dev-webhook-secret-not-for-prod}
   security:
     allowed-groups: [harness-users]
     issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8080/realms/harness}

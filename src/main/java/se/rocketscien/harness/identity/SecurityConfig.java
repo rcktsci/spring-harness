@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -30,12 +31,48 @@ import java.io.IOException;
  * Resource server: Bearer JWT на всех {@code /api/v1/**} (спека sso-gate). Отказ — всегда
  * {@code 401} Problem Details RFC 9457 с {@code code: unauthenticated}, без WWW-Authenticate
  * challenge. Порядок фильтров: BearerTokenAuthenticationFilter → GroupsGateFilter → UserSyncFilter.
+ *
+ * <p>Вебхуки ({@code /api/webhooks/**}, api-contracts §4.4) — отдельная цепочка {@code @Order(1)}
+ * без oauth2ResourceServer: чужой/мусорный {@code Authorization: Bearer} не валидируется как JWT
+ * и не меняет исход (контроль — HMAC capability-токена в контроллере, 401 signature-invalid).
+ * Catch-all цепочка ({@code @Order(2)}) — denyAll для всего неописанного: аноним получает
+ * {@code 401 unauthenticated} через общий entry point (не 403/200).
  */
 @Configuration(proxyBeanMethods = false)
 @EnableWebSecurity
 public class SecurityConfig {
 
+    /** Вебхуки — без JWT и без Bearer-резолвера (GLM M-1); доступ — capability-токен в пути. */
     @Bean
+    @Order(1)
+    @SneakyThrows
+    public SecurityFilterChain webhooksFilterChain(HttpSecurity http) {
+        http
+                .securityMatcher("/api/webhooks/**")
+                .csrf(AbstractHttpConfigurer::disable)
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
+        return http.build();
+    }
+
+    /** Catch-all (N-1): всё вне /api/webhooks/** и /api/v1/** — закрыто, анониму — 401. */
+    @Bean
+    @Order(3)
+    @SneakyThrows
+    public SecurityFilterChain denyAllFilterChain(
+            HttpSecurity http,
+            AuthenticationEntryPoint unauthenticatedEntryPoint) {
+        http
+                .securityMatcher("/**")
+                .csrf(AbstractHttpConfigurer::disable)
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth.anyRequest().denyAll())
+                .exceptionHandling(handling -> handling.authenticationEntryPoint(unauthenticatedEntryPoint));
+        return http.build();
+    }
+
+    @Bean
+    @Order(2)
     @SneakyThrows
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http,
@@ -46,6 +83,7 @@ public class SecurityConfig {
             IdGenerator idGenerator
     ) {
         http
+                .securityMatcher("/api/v1/**")
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth

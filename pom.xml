@@ -223,12 +223,15 @@
             <artifactId>assertj-core</artifactId>
             <scope>test</scope>
         </dependency>
-        <!-- Тест-клиент из openapi.yaml (генератор java/native): сериализация — Jackson 2,
-             только test-scope; main-runtime на Jackson 3 (AGENTS.md). Версии — jackson-2-bom Boot. -->
+        <!-- Тест-клиент из openapi.yaml (генератор java/native): сериализация — Jackson 2;
+             версии — jackson-2-bom Boot. provided (не test): на compile+test classpath,
+             в main-runtime (упаковку) не попадает. Нужда: (1) сгенерированные модели
+             сервера с uniqueItems тянут @JsonDeserialize (D.2); (2) тест-клиент
+             сериализует Jackson 2. Main-runtime остаётся на Jackson 3 (AGENTS.md). -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
-            <scope>test</scope>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.datatype</groupId>
@@ -300,10 +303,11 @@
             </plugin>
 
             <!-- Шаг 2 contract-first (S-J-9): генерация из замороженной спеки
-                 src/main/resources/api/openapi.yaml. SSE-операция (тег SessionEvents)
-                 исключена из генерации — контроллер на SseEmitter вручную (D-M1-8).
-                 openApiNullable=false — nullable-поля без JsonNullable/Jackson-2
-                 (jackson-databind-nullable в main-runtime запрещён). -->
+                 src/main/resources/api/openapi.yaml. SSE-операции (теги SessionEvents,
+                 TaskEvents) исключены из генерации — контроллеры на SseEmitter вручную
+                 (D-M1-8; M2 — D.2). openApiNullable=false — nullable-поля без
+                 JsonNullable/Jackson-2 (jackson-databind-nullable в main-runtime
+                 запрещён). -->
             <plugin>
                 <groupId>org.openapitools</groupId>
                 <artifactId>openapi-generator-maven-plugin</artifactId>
@@ -332,7 +336,7 @@
                                 <hideGenerationTimestamp>true</hideGenerationTimestamp>
                             </configOptions>
                             <globalProperties>
-                                <apis>Agents,Sessions,SessionMessages,SessionCommands</apis>
+                                <apis>Agents,Sessions,SessionMessages,SessionCommands,Tasks,TaskCommands,Workflows,Triggers,Webhooks</apis>
                                 <models></models>
                             </globalProperties>
                         </configuration>
@@ -360,7 +364,7 @@
                                 <hideGenerationTimestamp>true</hideGenerationTimestamp>
                             </configOptions>
                             <globalProperties>
-                                <apis>Agents,Sessions,SessionMessages,SessionCommands</apis>
+                                <apis>Agents,Sessions,SessionMessages,SessionCommands,Tasks,TaskCommands,Workflows,Triggers,Webhooks</apis>
                                 <models></models>
                                 <supportingFiles></supportingFiles>
                             </globalProperties>

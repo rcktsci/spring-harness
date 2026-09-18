@@ -8,6 +8,7 @@ import se.rocketscien.harness.api.gen.model.CreateSessionRequest;
 import se.rocketscien.harness.api.gen.model.SessionDto;
 import se.rocketscien.harness.api.gen.model.SessionKind;
 import se.rocketscien.harness.api.gen.model.SessionPage;
+import se.rocketscien.harness.api.gen.model.SessionTreePage;
 import se.rocketscien.harness.api.gen.model.UpdateSessionRequest;
 import se.rocketscien.harness.config.LimitsProperties;
 import se.rocketscien.harness.identity.AppUserDirectory;
@@ -118,6 +119,11 @@ public class SessionsController implements SessionsApi {
             }
         }
         return getSession(id);
+    }
+
+    @Override
+    public ResponseEntity<SessionTreePage> getSessionTree(UUID id, Integer depth) {
+        throw new ApiNotImplementedException("D.2: stub — реализация в пачках H/I/J/K/L");
     }
 
     private SessionDto toDto(Session session, UUID ownerUserId) {

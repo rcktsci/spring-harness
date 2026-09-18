@@ -86,7 +86,7 @@
 
 #### Scenario: чтение истории
 
-- **WHEN** клиент читает историю с `since=0`
+- **WHEN** клиент читает историю без `since`
 - **THEN** возвращаются все записи `task_transition_history` для задачи в порядке `created_at` asc
 
 ### Requirement: Комментарии

@@ -22,8 +22,9 @@ import java.io.IOException;
 import java.util.List;
 
 /**
- * Все ошибки API — RFC 9457 Problem Details с {@code code} из каталога M1 (api-contracts §0.2, §6);
- * 422 — с {@code errors[]} {pointer, rule, message}. Коды вне каталога — дефект реализации.
+ * Все ошибки API — RFC 9457 Problem Details с {@code code} из каталога M1+M2
+ * (api-contracts §0.2, §6); 422 — с {@code errors[]} {pointer, rule, message}.
+ * Коды вне каталога — дефект реализации.
  */
 @RestControllerAdvice
 @RequiredArgsConstructor
@@ -113,6 +114,18 @@ public class ApiExceptionHandler {
                 .toList();
         problemWriter.write(response, HttpStatus.UNPROCESSABLE_ENTITY,
                 ProblemCodes.VALIDATION_FAILED, "Параметры запроса невалидны", errors);
+    }
+
+    @ExceptionHandler(SignatureInvalidException.class)
+    public void signatureInvalid(SignatureInvalidException exception, HttpServletResponse response) throws IOException {
+        problemWriter.write(response, HttpStatus.UNAUTHORIZED, ProblemCodes.SIGNATURE_INVALID,
+                exception.getMessage(), null);
+    }
+
+    @ExceptionHandler(ApiNotImplementedException.class)
+    public void notImplemented(ApiNotImplementedException exception, HttpServletResponse response) throws IOException {
+        problemWriter.write(response, HttpStatus.NOT_IMPLEMENTED, ProblemCodes.NOT_IMPLEMENTED,
+                exception.getMessage(), null);
     }
 
     @ExceptionHandler(Exception.class)

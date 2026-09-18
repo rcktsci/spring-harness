@@ -18,6 +18,8 @@ final class ProblemCodes {
     static final String METHOD_NOT_ALLOWED = ProblemCode.METHOD_NOT_ALLOWED.getValue();
     static final String NOT_ACCEPTABLE = ProblemCode.NOT_ACCEPTABLE.getValue();
     static final String UNSUPPORTED_MEDIA_TYPE = ProblemCode.UNSUPPORTED_MEDIA_TYPE.getValue();
+    static final String SIGNATURE_INVALID = ProblemCode.SIGNATURE_INVALID.getValue();
+    static final String NOT_IMPLEMENTED = ProblemCode.NOT_IMPLEMENTED.getValue();
 
     private ProblemCodes() {
     }

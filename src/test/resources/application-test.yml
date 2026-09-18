@@ -1,4 +1,7 @@
 harness:
+  webhook:
+    # Фиксированный секрет capability-токенов для тестов (WebhooksRoutingTest считает HMAC по нему же).
+    secret: test-webhook-secret
   security:
     # Живой Keycloak тестового контекста (позитивный путь и groups-гейт — через реальный Keycloak)
     issuer-uri: ${containers.keycloak.url}/realms/harness

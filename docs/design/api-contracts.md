@@ -8,7 +8,7 @@
 1. **Auth**: `Authorization: Bearer <Keycloak JWT>` на всех эндпоинтах, кроме входящих вебхуков (capability-токен в URL, §4.4). **SSO-гейт**: JWT должен содержать группу из `harness.security.allowed-groups` (claim `groups`). Внутри — одно правило: **аутентифицированный видит всё и пишет куда угодно** (D-41).
 2. **Ошибки**: RFC 9457 Problem Details + `code` из каталога §6; любой `code` вне каталога — дефект реализации. Для `422`: `errors[]: { pointer, rule, message }`.
 3. **Идемпотентность**: хранилища нет (D-41). Задача-вебхук идемпотентен по построению (`409` вне WAIT_WEBHOOK); дубль POST-сообщения survivable.
-4. **Пагинация**: списковые ответы — конверт `{ items: T[], nextCursor? }` (`?cursor=&limit=`). Потоковые (messages, events, history) — `?since=<seq>`, интервал `(since, …]`.
+4. **Пагинация**: списковые ответы — конверт `{ items: T[], nextCursor? }` (`?cursor=&limit=`). Потоковые (messages, events) — `?since=<seq>`, интервал `(since, …]`; история задачи (history) — `?since=<opaque>` (непрозрачный курсор — пара `(created_at, id)` записи `task_transition_history`; стабильная пагинация при равных `created_at`), интервал `(since, …]`.
 5. **Версионирование**: `/api/v1/...`; вебхуки `/api/webhooks/**` — без версии (ломка последними).
 6. **PATCH**: JSON Merge Patch (RFC 7396): отсутствующее поле — не менять, `null` — очистить.
 7. **201**: всегда с `Location: <url ресурса>`.
@@ -129,6 +129,7 @@ WebSocket `/api/v1/relay` (Bearer; для браузерного клиента 
 | `graph-invalid` / `dependency-invalid` / `params-schema` | 422 | |
 | `payload-too-large` | 413 | тело > лимита |
 | `trigger-revoked` | 410 | |
+| `not-implemented` | 501 | метод ещё не реализован в текущем apply-проходе (stubs); не ошибка контракта |
 
 ## 7. Доступ
 

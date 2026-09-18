@@ -1,11 +1,13 @@
 openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
-  title: spring-harness API (M1)
-  version: 1.0.0-m1
+  title: spring-harness API (M1+M2)
+  version: 1.1.0-m2
   description: >-
-    Машиночитаемый контракт M1 — подмножество api-contracts v3 (§0–§3.1, §6) и
-    openspec/changes/m1-session-core/specs/session-api. Источники истины — эти документы
+    Машиночитаемый контракт M1+M2 — подмножество api-contracts v3: M1 — §0–§3.1 и
+    openspec/changes/archive/2026-09-18-m1-session-core/specs/session-api (замороженная база; расширения
+    M1-поверхностей — только аддитивные), M2 — задачный домен §4 и SSE задач §3.2
+    (openspec/changes/m2-workflow-engine/specs). Источники истины — эти документы
     и docs/glossary.md; файл замораживается для генерации серверных интерфейсов и тест-клиента.
 
     Общие правила (api-contracts §0):
@@ -29,9 +31,26 @@ info:
     Обязательные опции генерации (шаг 2): `openApiNullable=false` — nullable-поля
     (`type: [x, 'null']`) без JsonNullable и без jackson-databind-nullable; зависимости
     Jackson 2 в main-runtime запрещены (AGENTS.md: HTTP-слой — Jackson 3, компиляционные
-    нужды генератора — provided/test-scope). SSE-эндпоинт из генерации интерфейсов
-    исключается — реализуется на SseEmitter вручную (пункты шага 2:
-    openspec/changes/m1-session-core/apply-notes.md).
+    нужды генератора — provided/test-scope). SSE-эндпоинты из генерации интерфейсов
+    исключаются — реализуются на SseEmitter вручную (пункты шага 2:
+    openspec/changes/archive/2026-09-18-m1-session-core/apply-notes.md; для M2 — тег TaskEvents).
+
+    Дополнение M2 (api-contracts §4, §3.2, §6):
+    * Входящие вебхуки `/api/webhooks/**` — без `/v1`, без JWT: аутентификация
+      capability-токеном в пути (`token = HMAC-SHA256(server_secret, kind+':'+entityId)`);
+      ошибки — RFC 9457 с кодом из каталога (схема WebhookError).
+    * SSE задач `tasks/{id}/events` — курсор `task_event_seq` (монотонный, durable),
+      снапшот при коннекте — последний `task.status`; из генерации исключён (ручной
+      SseEmitter), схема — машинный якорь для парсера клиента.
+    * Расширения M1-поверхностей (аддитивные): SessionDto дополнен `taskId`/`stateCode`
+      (только STATE-сессии), `runtimeStatus` расширен до
+      `IDLE|TURN_RUNNING|PARKED_ASYNC|PARKED_CLIENT` (присвоение PARKED_* — M3/M4),
+      добавлен `GET /sessions/{id}/tree` (`taskId`+`stateCode` для STATE-узлов).
+      MessageDto в M2 не меняется.
+    * Инструмент агента `transition(toState, kind, reason)` — гейт metaTools
+      (instructionSource=USER, task-engine/agent-turn) — REST-поверхности не требует;
+      код `wrong-transition` (409) в каталоге ошибок достигается этим инструментом,
+      не REST-операцией.
 servers:
   - url: /api/v1
 security:
@@ -47,6 +66,18 @@ tags:
     description: RPC-команды сессии (compact, stop) — осознанный RPC-стиль
   - name: SessionEvents
     description: SSE-поток событий сессии
+  - name: Tasks
+    description: Задачи — создание, просмотр, подзадачи, зависимости, история, комментарии, дерево
+  - name: TaskCommands
+    description: RPC-команды задачи (suspend, resume, stop) — осознанный RPC-стиль
+  - name: TaskEvents
+    description: SSE-поток событий задачи (из генерации исключён — ручной SseEmitter)
+  - name: Workflows
+    description: Шаблоны workflow и иммутабельные ревизии
+  - name: Triggers
+    description: Входящие триггеры (capability-URL → создание задачи)
+  - name: Webhooks
+    description: Входящие вебхуки (без JWT, без /v1; capability-токен в пути)
 paths:
   /agents:
     get:
@@ -113,7 +144,7 @@ paths:
         - name: kind
           in: query
           required: false
-          description: Фильтр по роду; в M1 существуют только FREE.
+          description: Фильтр по роду (FREE — пользовательские; STATE — сессии состояний задач, M2).
           schema:
             $ref: '#/components/schemas/SessionKind'
         - name: q
@@ -322,6 +353,807 @@ paths:
         '404': { $ref: '#/components/responses/SessionNotFound' }
         '406': { $ref: '#/components/responses/NotAcceptable' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
+  /sessions/{id}/tree:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    get:
+      tags: [Sessions]
+      operationId: getSessionTree
+      summary: Поддерево сессий («проваливание» в субагентов)
+      description: >-
+        Обход поддерева по parentSessionId (api-contracts §2). Для STATE-узлов
+        (сессии состояний задачи, M2) дополнительно возвращаются taskId и stateCode.
+        Пагинации нет — возвращается всё поддерево; depth ограничивает глубину.
+      parameters:
+        - $ref: '#/components/parameters/Depth'
+      responses:
+        '200':
+          description: Узел сессии и его потомки.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionTreePage'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/SessionNotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /tasks:
+    post:
+      tags: [Tasks]
+      operationId: createTask
+      summary: Создать задачу (пин ревизии workflow)
+      description: >-
+        Задача пинится к конкретной ревизии workflow (`rev` из запроса или latestRev).
+        `params` валидируются `paramsSchema` ревизии (если объявлена) — невалидные →
+        422 params-schema. STATE-сессия при создании не появляется — её порождает
+        вход задачи в AGENT-состояние.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskRequest'
+      responses:
+        '201':
+          description: Задача создана; Location — URL созданной задачи.
+          headers:
+            Location:
+              description: URL созданной задачи (/api/v1/tasks/{id}).
+              schema:
+                type: string
+                format: uri-reference
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDto'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/WorkflowNotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422':
+          description: '422, code=validation-failed (тело) либо code=params-schema (params против paramsSchema ревизии).'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+    get:
+      tags: [Tasks]
+      operationId: listTasks
+      summary: Список задач
+      description: >-
+        Конверт-пагинация; сортировка updatedAt desc. Фильтры: parent — подзадачи
+        указанной задачи; status — по statusProjection; mine — только владельца
+        (owner из JWT); tags — задача содержит все указанные теги; q — подстрока
+        title/description.
+      parameters:
+        - name: parent
+          in: query
+          required: false
+          description: taskId родителя — вернуть только подзадачи.
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          required: false
+          description: Фильтр по проекции статуса.
+          schema:
+            $ref: '#/components/schemas/TaskStatusProjection'
+        - name: mine
+          in: query
+          required: false
+          description: Только задачи текущего пользователя (owner из JWT).
+          schema:
+            type: boolean
+        - name: tags
+          in: query
+          required: false
+          description: Теги через запятую; задача должна содержать все указанные.
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: false
+        - name: q
+          in: query
+          required: false
+          description: Подстрока title/description.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Страница задач.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskPage'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /tasks/{id}:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    get:
+      tags: [Tasks]
+      operationId: getTask
+      summary: Задача по идентификатору
+      responses:
+        '200':
+          description: Задача.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDto'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/TaskNotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+    patch:
+      tags: [Tasks]
+      operationId: patchTask
+      summary: Изменить задачу (merge-patch)
+      description: >-
+        JSON Merge Patch (RFC 7396): title, description, tags. `params` иммутабельны
+        после создания — включение `params` в патч → 422 validation-failed с ошибкой
+        rule=immutable. Неизвестные члены патча игнорируются.
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: '#/components/schemas/UpdateTaskRequest'
+      responses:
+        '200':
+          description: Обновлённая задача.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDto'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/TaskNotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /tasks/{id}/subtasks:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags: [Tasks]
+      operationId: createSubtask
+      summary: Создать подзадачу
+      description: >-
+        Тело и семантика — как POST /tasks; новая задача получает parentTaskId={id}.
+        owner наследуется от родителя (инициатор — агент сессии состояния) или берётся
+        из JWT (инициатор — пользователь).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskRequest'
+      responses:
+        '201':
+          description: Подзадача создана; Location — URL созданной подзадачи.
+          headers:
+            Location:
+              description: URL созданной подзадачи (/api/v1/tasks/{id}).
+              schema:
+                type: string
+                format: uri-reference
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDto'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: '404, code=task-not-found (родитель {id}) либо code=workflow-not-found (неизвестный workflowKey тела).'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422':
+          description: '422, code=validation-failed (тело) либо code=params-schema.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /tasks/{id}/suspend:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags: [TaskCommands]
+      operationId: suspendTask
+      summary: Приостановить задачу (идемпотентно)
+      description: >-
+        Устанавливает suspended=true: планировщик пропускает задачу, новые переходы
+        блокируются флагом. Активный Turn сессии состояния дорабатывает без
+        прерывания (suspend — флаг, не отмена). cascade=true — дополнительно
+        приостановить всё поддерево подзадач. Повторный вызов безопасен.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SuspendTaskRequest'
+      responses:
+        '204':
+          description: Флаг установлен (или уже был установлен — идемпотентно).
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/TaskNotFound' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /tasks/{id}/resume:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags: [TaskCommands]
+      operationId: resumeTask
+      summary: Возобновить задачу
+      description: >-
+        Снимает suspended для нетерминальной задачи и публикует task-wake:
+        переоценка WAIT_TASKS / bootstrap AGENT-state подхватывают задачу без
+        ожидания POLL. Для терминальной (SUCCEEDED|FAILED|CANCELLED) — 409
+        task-already-terminal.
+      responses:
+        '204':
+          description: Флаг снят; wake опубликован.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/TaskNotFound' }
+        '409': { $ref: '#/components/responses/TaskAlreadyTerminal' }
+  /tasks/{id}/stop:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags: [TaskCommands]
+      operationId: stopTask
+      summary: Принудительно отменить задачу (всегда каскадно)
+      description: >-
+        suspend + отмена активных Turn'ов сессий состояния задачи и всех подзадач
+        (каскад всегда — параметра cascade нет) + атомарный CAS
+        current_state='$CANCELLED' (зарезервированный псевдо-код вне codes ревизии;
+        запись в истории kind=CANCEL) + statusProjection=CANCELLED. Терминальная
+        задача → 409 task-already-terminal; resume остановленной — тоже.
+      responses:
+        '202':
+          description: Отмена принята; терминал появится в истории и SSE задачи.
+          content:
+            application/json:
+              schema: {}
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/TaskNotFound' }
+        '409': { $ref: '#/components/responses/TaskAlreadyTerminal' }
+  /tasks/{id}/dependencies:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags: [Tasks]
+      operationId: addTaskDependencies
+      summary: Добавить зависимости (blocked_by)
+      description: >-
+        Атомарно добавляет рёбра blocked_by. Валидация: все taskId существуют;
+        нет self-loop; нет цикла (DFS по графу зависимостей) — нарушения →
+        422 dependency-invalid с errors[]. После добавления ребра заинтересованные
+        WAIT_TASKS-задачи переоцениваются.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddTaskDependenciesRequest'
+      responses:
+        '201':
+          description: >-
+            Рёбра добавлены; Location — URL блокированной задачи (осознанно — ребро
+            blocked_by собственного URL не имеет).
+          headers:
+            Location:
+              description: URL блокированной задачи (/api/v1/tasks/{id}) — созданное ребро отдельного ресурса не образует (api-contracts §4.1).
+              schema:
+                type: string
+                format: uri-reference
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/TaskNotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422':
+          description: '422, code=validation-failed (тело) либо code=dependency-invalid (self-loop/цикл/несуществующий taskId).'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /tasks/{id}/dependencies/{blockerId}:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+      - $ref: '#/components/parameters/BlockerId'
+    delete:
+      tags: [Tasks]
+      operationId: removeTaskDependency
+      summary: Снять зависимость
+      description: >-
+        Снимает ребро blocked_by; отсутствующее ребро — идемпотентный 204.
+      responses:
+        '204':
+          description: Ребро снято (или отсутствовало).
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/TaskNotFound' }
+  /tasks/{id}/history:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    get:
+      tags: [Tasks]
+      operationId: listTaskHistory
+      summary: История переходов
+      description: >-
+        Конверт-страница за интервал (since, …] в порядке createdAt asc. Курсор —
+        непрозрачная пара (createdAt, id) записи истории (стабильная пагинация при
+        равных createdAt); nextCursor подставляется в следующий ?since=.
+      parameters:
+        - name: since
+          in: query
+          required: false
+          description: >-
+            Непрозрачный курсор — пара (createdAt, id) записи истории из nextCursor
+            предыдущей страницы; отсутствие — с начала. Числовой seq (§0.4 для
+            messages/events) здесь не применяется — курсор-пара санкционирована
+            task-engine (стабильная пагинация при равных createdAt).
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Страница переходов.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransitionPage'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/TaskNotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /tasks/{id}/comments:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags: [Tasks]
+      operationId: addTaskComment
+      summary: Добавить комментарий (append-only)
+      description: >-
+        Комментарии иммутабельны (PATCH/DELETE не существует). Автор — username из
+        JWT; агентские комментарии (из сессии состояния) — author=null.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddTaskCommentRequest'
+      responses:
+        '201':
+          description: Комментарий записан; Location — URL комментария.
+          headers:
+            Location:
+              description: >-
+                URL коллекции комментариев (/api/v1/tasks/{id}/comments) — GET
+                одиночного комментария в контракте отсутствует; идентификатор —
+                в теле ответа.
+              schema:
+                type: string
+                format: uri-reference
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommentDto'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/TaskNotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    get:
+      tags: [Tasks]
+      operationId: listTaskComments
+      summary: Список комментариев
+      description: Конверт-пагинация; порядок createdAt asc.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Страница комментариев.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommentPage'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/TaskNotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /tasks/{id}/tree:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    get:
+      tags: [Tasks]
+      operationId: getTaskTree
+      summary: Поддерево подзадач
+      description: >-
+        Обход по parentTaskId; без depth — всё поддерево, depth=N — N уровней
+        потомков. Узел несёт текущее состояние и проекцию статуса.
+      parameters:
+        - $ref: '#/components/parameters/Depth'
+      responses:
+        '200':
+          description: Узлы поддерева.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskTreePage'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/TaskNotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /tasks/{id}/events:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    get:
+      tags: [TaskEvents]
+      operationId: streamTaskEvents
+      summary: SSE-поток событий задачи
+      description: >-
+        Поток `text/event-stream` (api-contracts §3.2). Первым при коннекте/реконнекте
+        отправляется снапшот — последний `task.status` (TaskStatusEvent). Далее события:
+        `task.transition` — переход задачи (SSE `id:` = task_event_seq, данные —
+        TaskTransitionEvent), `task.status` — при смене состояния/статуса (данные —
+        TaskStatusEvent), `subtask.terminal` — терминал подзадачи (данные —
+        SubtaskTerminalEvent), `task.comment` — новый комментарий (данные —
+        TaskCommentEvent), `ping` — комментарий `: ping` (`harness.sse.ping-interval`);
+        в начале потока — `retry: 5000`.
+        Курсор `since` — `task_event_seq` задачи: монотонный сквозной номер события
+        (нумеруются все события, включая не-transition), durable (колонка
+        `task.task_event_seq`), инкремент транзакционно с эмиссией события — курсор
+        переживает рестарт. Отсутствие/0 `since` — снапшот + полная история задачи
+        (интервал (0, …]); отправная точка live-подписки — taskEventSeq из снапшота.
+        Продолжение после разрыва: заголовок `Last-Event-ID`
+        приоритетнее `?since=`; доставка за интервал (since, …] — без пропусков
+        и дублей.
+        Эндпоинт исключается из генерации интерфейсов (тег TaskEvents): контроллер
+        реализуется на SseEmitter вручную; сгенерированный метод не используется.
+      parameters:
+        - name: since
+          in: query
+          required: false
+          description: >-
+            task_event_seq — события с seq > since (интервал (since, …]). Отсутствие
+            или 0 — снапшот + полная история задачи (интервал (0, …]); клиенту,
+            которому нужен только live, следует передать taskEventSeq из снапшота
+            (кадр task.status).
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+            default: 0
+        - name: Last-Event-ID
+          in: header
+          required: false
+          description: task_event_seq последнего полученного события (стандартный SSE-реконнект); приоритетнее query-параметра since.
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+      responses:
+        '200':
+          description: >-
+            Поток событий; семантика и схемы кадров — в description операции. Тело
+            схемой не типизируется (SSE-фреймы), генерация тела не производится —
+            сервер отдаёт поток напрямую.
+          content:
+            text/event-stream:
+              examples:
+                transitionFrame:
+                  description: Пример кадра task.transition (пустая строка — разделитель кадров SSE).
+                  value: |-
+                    id: 7
+                    event: task.transition
+                    data: {"id":"019947f0-7a2b-7dc1-a5f5-3b9c2d4e6f80","taskId":"019947e8-3c1a-7b2d-9e4f-5a6b7c8d9e0f","fromState":"plan","toState":"run-checks","kind":"NEXT","reason":{"text":"проверки зелёные, перевожу дальше"},"createdAt":"2026-09-18T12:00:00Z"}
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/TaskNotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /workflows:
+    get:
+      tags: [Workflows]
+      operationId: listWorkflows
+      summary: Список workflow
+      description: Конверт-пагинация; сортировка createdAt desc.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Страница workflow.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowPage'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    post:
+      tags: [Workflows]
+      operationId: createWorkflow
+      summary: Создать workflow (ревизия rev=1)
+      description: >-
+        Граф валидируется перед сохранением (уникальность codes, замкнутость
+        переходов, ≥1 исходящий у нетерминальных, ERROR+TIMEOUT у BASH/WAIT_*,
+        достижимость TERMINAL, запрет fan-out) — нарушения → 422 graph-invalid с
+        errors[] {pointer, rule, message}. key — kebab-case, уникален среди workflow.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWorkflowRequest'
+      responses:
+        '201':
+          description: Workflow создан (latestRev=1); Location — URL workflow.
+          headers:
+            Location:
+              description: URL workflow (/api/v1/workflows/{key}).
+              schema:
+                type: string
+                format: uri-reference
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowDto'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422':
+          description: '422, code=validation-failed (тело; дубликат key — rule=key-unique) либо code=graph-invalid (нарушения правил графа).'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /workflows/{key}:
+    parameters:
+      - $ref: '#/components/parameters/WorkflowKey'
+    get:
+      tags: [Workflows]
+      operationId: getWorkflow
+      summary: Метаданные workflow и список ревизий
+      responses:
+        '200':
+          description: Метаданные + ревизии [{rev, createdAt}] (по возрастанию rev).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowDto'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/WorkflowNotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+  /workflows/{key}/revisions:
+    parameters:
+      - $ref: '#/components/parameters/WorkflowKey'
+    post:
+      tags: [Workflows]
+      operationId: createWorkflowRevision
+      summary: Создать новую ревизию графа
+      description: >-
+        rev = prev + 1; существующие ревизии иммутабельны (UNIQUE (workflow_id, rev)).
+        Идущие задачи остаются на своих пинах — новая ревизия применяется только
+        к новым задачам.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWorkflowRevisionRequest'
+      responses:
+        '201':
+          description: Ревизия создана; Location — URL ревизии.
+          headers:
+            Location:
+              description: URL ревизии (/api/v1/workflows/{key}/revisions/{rev}).
+              schema:
+                type: string
+                format: uri-reference
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowRevisionDto'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/WorkflowNotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422':
+          description: '422, code=validation-failed (тело) либо code=graph-invalid.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /workflows/{key}/revisions/{rev}:
+    parameters:
+      - $ref: '#/components/parameters/WorkflowKey'
+      - $ref: '#/components/parameters/Revision'
+    get:
+      tags: [Workflows]
+      operationId: getWorkflowRevision
+      summary: Граф конкретной ревизии
+      responses:
+        '200':
+          description: Ревизия с графом.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowRevisionDto'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/WorkflowNotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+  /triggers:
+    post:
+      tags: [Triggers]
+      operationId: createTrigger
+      summary: Создать триггер (capability-URL)
+      description: >-
+        rev пинится при создании (из запроса или latestRev); params валидируются
+        paramsSchema пиннутой ревизии — 422 params-schema. Возвращаемый url содержит
+        HMAC-токен — рабочий эндпоинт /api/webhooks/triggers/{triggerId}/{token}.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTriggerRequest'
+      responses:
+        '201':
+          description: Триггер создан; Location — URL триггера.
+          headers:
+            Location:
+              description: URL триггера (/api/v1/triggers/{id}).
+              schema:
+                type: string
+                format: uri-reference
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerDto'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/WorkflowNotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422':
+          description: '422, code=validation-failed (тело) либо code=params-schema.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+    get:
+      tags: [Triggers]
+      operationId: listTriggers
+      summary: Список триггеров
+      description: Конверт-пагинация; сортировка createdAt desc.
+      parameters:
+        - name: mine
+          in: query
+          required: false
+          description: Только триггеры текущего пользователя (owner из JWT).
+          schema:
+            type: boolean
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Страница триггеров.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerPage'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /triggers/{id}:
+    parameters:
+      - $ref: '#/components/parameters/TriggerId'
+    delete:
+      tags: [Triggers]
+      operationId: revokeTrigger
+      summary: Отозвать триггер
+      description: >-
+        DELETE = revoke: revoked_at=now(), capability-URL умирает мгновенно —
+        последующие POST'ы → 410 trigger-revoked. Обратного включения нет.
+      responses:
+        '204':
+          description: Триггер отозван.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/TriggerNotFound' }
+  /webhooks/tasks/{taskId}/{token}:
+    servers:
+      - url: /api
+        description: Вебхуки — вне /v1 (api-contracts §0.5); без JWT.
+    parameters:
+      - $ref: '#/components/parameters/WebhookTaskId'
+      - $ref: '#/components/parameters/WebhookToken'
+    post:
+      tags: [Webhooks]
+      operationId: handleTaskWebhook
+      summary: Вебхук задачи (WAIT_WEBHOOK → NEXT)
+      description: >-
+        Без JWT: token = HMAC-SHA256(server_secret, "task:"+taskId); невалидный →
+        401 signature-invalid (тело не парсится). Задача должна существовать и быть
+        в WAIT_WEBHOOK — иначе 409 task-not-waiting-webhook (идемпотентность по
+        построению: повторная доставка после перехода — тоже 409). Payload, не
+        прошедший payloadSchema состояния (если объявлена; ограниченный профиль
+        JSON-Schema) → 202 + переход ERROR с reason {validationErrors}. Успех — 202:
+        атомарный CAS переход NEXT, payload+source → reason {kind:webhook, source,
+        payloadSummary}. Тело обязательно — POST без тела или без Content-Type
+        application/json → 415 unsupported-media-type (до проверки состояния).
+        Результат виден в SSE задачи.
+      security: []
+      parameters:
+        - name: source
+          in: query
+          required: false
+          description: Метка источника для reason перехода (например имя внешней системы).
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              description: Обязательный JSON-payload вебхука (произвольный объект); валидность — по payloadSchema состояния (если объявлена, ограниченный профиль D-58).
+      responses:
+        '202':
+          description: Payload принят (переход NEXT или ERROR — в истории/SSE задачи).
+          content:
+            application/json:
+              schema: {}
+        '401': { $ref: '#/components/responses/SignatureInvalid' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+        '409': { $ref: '#/components/responses/TaskNotWaitingWebhook' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+  /webhooks/triggers/{triggerId}/{token}:
+    servers:
+      - url: /api
+        description: Вебхуки — вне /v1 (api-contracts §0.5); без JWT.
+    parameters:
+      - $ref: '#/components/parameters/WebhookTriggerId'
+      - $ref: '#/components/parameters/WebhookToken'
+    post:
+      tags: [Webhooks]
+      operationId: handleTriggerWebhook
+      summary: Вебхук триггера (создание задачи)
+      description: >-
+        Без JWT: token = HMAC-SHA256(server_secret, "trigger:"+triggerId); невалидный
+        → 401 signature-invalid. Отозванный триггер → 410 trigger-revoked. Успех —
+        202 {taskId}: задача создана на пиннутой ревизии с params/tags/owner
+        триггера; AGENT-стартовое состояние бутстрэпится движком. Тело запроса
+        не принимается.
+      security: []
+      responses:
+        '202':
+          description: Задача создана.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerWebhookAccepted'
+        '401': { $ref: '#/components/responses/SignatureInvalid' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+        '410': { $ref: '#/components/responses/TriggerRevoked' }
 components:
   securitySchemes:
     bearerJWT:
@@ -356,6 +1188,87 @@ components:
         type: integer
         format: int32
         minimum: 1
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Непрозрачный (opaque) курсор из nextCursor предыдущей страницы.
+      schema:
+        type: string
+    Depth:
+      name: depth
+      in: query
+      required: false
+      description: Максимальная глубина поддерева; отсутствие — всё поддерево.
+      schema:
+        type: integer
+        format: int32
+        minimum: 0
+    TaskId:
+      name: id
+      in: path
+      required: true
+      description: Идентификатор задачи.
+      schema:
+        type: string
+        format: uuid
+    BlockerId:
+      name: blockerId
+      in: path
+      required: true
+      description: Идентификатор блокирующей задачи (ребро blocked_by).
+      schema:
+        type: string
+        format: uuid
+    WorkflowKey:
+      name: key
+      in: path
+      required: true
+      description: Ключ workflow (kebab-case).
+      schema:
+        type: string
+        minLength: 1
+    Revision:
+      name: rev
+      in: path
+      required: true
+      description: Номер ревизии (1, 2, …).
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+    TriggerId:
+      name: id
+      in: path
+      required: true
+      description: Идентификатор триггера.
+      schema:
+        type: string
+        format: uuid
+    WebhookTaskId:
+      name: taskId
+      in: path
+      required: true
+      description: Идентификатор задачи в capability-URL.
+      schema:
+        type: string
+        format: uuid
+    WebhookTriggerId:
+      name: triggerId
+      in: path
+      required: true
+      description: Идентификатор триггера в capability-URL.
+      schema:
+        type: string
+        format: uuid
+    WebhookToken:
+      name: token
+      in: path
+      required: true
+      description: Capability-токен — HMAC-SHA256(server_secret, kind+':'+entityId); неверный → 401 signature-invalid.
+      schema:
+        type: string
+        minLength: 1
   responses:
     Unauthorized:
       description: '401, code=unauthenticated — нет/невалиден Bearer-токен либо группа JWT вне allowed-groups (SSO-гейт).'
@@ -413,19 +1326,95 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/ProblemDetail'
+    TaskNotFound:
+      description: '404, code=task-not-found.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    WorkflowNotFound:
+      description: '404, code=workflow-not-found — ключ или ревизия workflow не существуют.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    TriggerNotFound:
+      description: '404, code=trigger-not-found.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    TaskAlreadyTerminal:
+      description: '409, code=task-already-terminal — задача в терминале (SUCCEEDED|FAILED|CANCELLED); resume/stop неприменимы.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    WrongTransition:
+      description: >-
+        409, code=wrong-transition — переход не по разрешённому исходящему ребру
+        текущего состояния (rule=not-an-outgoing-edge) либо пустой reason
+        (rule=reason-required). Достигается инструментом агента `transition`
+        (гейт metaTools), не REST-операцией M2; в каталоге §6 — для полноты.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    GraphInvalid:
+      description: '422, code=graph-invalid — граф нарушает правила построения; errors[] {pointer, rule, message}.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    DependencyInvalid:
+      description: '422, code=dependency-invalid — self-loop, цикл или несуществующий taskId; errors[].'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    ParamsSchema:
+      description: '422, code=params-schema — params не прошли paramsSchema ревизии (ограниченный профиль JSON-Schema); errors[] по схеме.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    SignatureInvalid:
+      description: >-
+        401, code=signature-invalid — capability-токен не прошёл HMAC-проверку;
+        без challenge, тело запроса не парсится. Только на вебхуках (без JWT).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/WebhookError'
+    TaskNotWaitingWebhook:
+      description: >-
+        409, code=task-not-waiting-webhook — задачи нет либо она вне WAIT_WEBHOOK;
+        идемпотентность вебхука по построению (повторная доставка — тоже 409).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/WebhookError'
+    TriggerRevoked:
+      description: '410, code=trigger-revoked — триггер отозван (revoked_at установлен), capability-URL умер.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/WebhookError'
   schemas:
     SessionKind:
       type: string
       enum: [FREE, STATE]
       description: >-
         Род сессии. POST /sessions создаёт только FREE; STATE принадлежит паре
-        «задача × состояние» и появляется в M2 (движок задач).
+        «задача × состояние» и создаётся/резюмируется движком задач (M2).
     SessionRuntimeStatus:
       type: string
-      enum: [IDLE, TURN_RUNNING]
+      enum: [IDLE, TURN_RUNNING, PARKED_ASYNC, PARKED_CLIENT]
       description: >-
-        M1-подмножество: IDLE — активного Turn'а нет; TURN_RUNNING — Turn выполняется.
-        Значения PARKED_ASYNC/PARKED_CLIENT (M3) в контракт M1 не входят.
+        M2: enum расширен до четырёх значений. IDLE — активного Turn'а нет;
+        TURN_RUNNING — Turn выполняется; PARKED_ASYNC — ждёт асинхронный инструмент
+        (присвоение с M3); PARKED_CLIENT — задача на клиенте-реле (присвоение с M4).
+        В M2 фактически встречаются IDLE и TURN_RUNNING.
     TurnOutcome:
       type: string
       enum: [COMPLETED, FAILED, CANCELLED]
@@ -461,9 +1450,26 @@ components:
         - method-not-allowed
         - not-acceptable
         - unsupported-media-type
+        - task-not-found
+        - workflow-not-found
+        - trigger-not-found
+        - task-not-waiting-webhook
+        - task-already-terminal
+        - wrong-transition
+        - graph-invalid
+        - dependency-invalid
+        - params-schema
+        - trigger-revoked
+        - signature-invalid
+        - not-implemented
       description: >-
-        Каталог кодов ошибок M1 (api-contracts §6). Точное значение для каждого ответа
-        зафиксировано в description соответствующего response-компонента.
+        Каталог кодов ошибок M1+M2 (api-contracts §6). Точное значение для каждого ответа
+        зафиксировано в description соответствующего response-компонента. M2-коды:
+        task-not-found, workflow-not-found, trigger-not-found, task-not-waiting-webhook,
+        task-already-terminal, wrong-transition (переход не по ребру/пустой reason —
+        инструмент агента), graph-invalid, dependency-invalid, params-schema,
+        trigger-revoked, signature-invalid (вебхуки), not-implemented (501 — метод ещё
+        не реализован в текущем apply-проходе; не ошибка контракта).
     AgentRef:
       type: object
       description: Ссылка на пиннутую ревизию агента.
@@ -502,8 +1508,9 @@ components:
     SessionDto:
       type: object
       description: >-
-        Состояние сессии; M1-подмножество api-contracts §2 — без task/stateCode/parentSessionId,
-        runtimeStatus без PARKED_* (появляются в M2–M3).
+        Состояние сессии. M2: добавлены taskId/stateCode — только для STATE-сессий
+        (пара «задача × состояние»; у FREE отсутствуют/null); runtimeStatus расширен
+        до PARKED_* (присвоение — M3/M4). parentSessionId — M3 (субагенты).
       required: [id, kind, title, owner, agent, workspaceBinding, runtimeStatus, lastSeq, lastActivityAt, createdAt]
       properties:
         id:
@@ -516,7 +1523,7 @@ components:
           description: Название; поле присутствует всегда, null — если не задано при создании.
         owner:
           type: string
-          description: username владельца; метаданные для UI/фильтра mine (не барьер доступа, D-41).
+          description: username владельца; метаданные для UI/фильтра mine (не барьер доступа, D-41). У STATE-сессии — владелец задачи.
         agent:
           $ref: '#/components/schemas/AgentRef'
         workspaceBinding:
@@ -526,6 +1533,13 @@ components:
         lastTurnOutcome:
           $ref: '#/components/schemas/TurnOutcome'
           description: Отсутствует до завершения первого Turn'а.
+        taskId:
+          type: string
+          format: uuid
+          description: Только STATE-сессии — идентификатор задачи; у FREE отсутствует/null.
+        stateCode:
+          type: string
+          description: Только STATE-сессии — code состояния ревизии задачи; у FREE отсутствует/null.
         lastSeq:
           type: integer
           format: int64
@@ -733,6 +1747,749 @@ components:
           $ref: '#/components/schemas/ProblemCode'
         errors:
           type: array
-          description: Только для 422 validation-failed.
+          description: Для 422-кодов — validation-failed, graph-invalid, dependency-invalid, params-schema.
           items:
             $ref: '#/components/schemas/ValidationErrorItem'
+    WebhookProblemCode:
+      type: string
+      enum:
+        - signature-invalid
+        - task-not-waiting-webhook
+        - trigger-revoked
+      description: >-
+        Вебхук-специфичные коды каталога §6 (без JWT — unauthenticated и codes
+        задачного CRUD на вебхуках недостижимы). Инфраструктурные 406/413/415
+        на вебхуках отдаются стандартным ProblemDetail с полным каталогом
+        ProblemCode — консистентность с M1 (схемой WebhookError не типизируются).
+    WebhookError:
+      type: object
+      description: >-
+        RFC 9457 Problem Details для вебхук-специфичных ошибок (401/409/410) — как
+        ProblemDetail, но code ограничен вебхук-подмножеством каталога
+        (WebhookProblemCode). 406/413/415 на вебхуках — стандартный ProblemDetail
+        (консистентность с M1).
+      required: [code]
+      properties:
+        type:
+          type: string
+          description: URI-тип проблемы; по умолчанию about:blank.
+        title:
+          type: string
+        status:
+          type: integer
+          format: int32
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+        instance:
+          type: string
+        code:
+          $ref: '#/components/schemas/WebhookProblemCode'
+        errors:
+          type: array
+          description: Только для 422-кодов (в M2 на вебхуках не возникает).
+          items:
+            $ref: '#/components/schemas/ValidationErrorItem'
+    TaskStatusProjection:
+      type: string
+      enum: [RUNNING, WAITING, SUCCEEDED, FAILED, CANCELLED]
+      description: >-
+        Денормализация текущего состояния задачи (data-model §4), обновляется
+        транзакционно с current_state: RUNNING — исполняется; WAITING — системное
+        ожидание (WAIT_WEBHOOK/WAIT_TASKS); SUCCEEDED/FAILED — терминалы по outcome;
+        CANCELLED — принудительная отмена (stop).
+    TransitionKind:
+      type: string
+      enum: [NEXT, ERROR, TIMEOUT, CANCEL]
+      description: >-
+        Тип перехода. NEXT — успех/по ребру NEXT; ERROR — неудача (exit≠0, провал
+        валидации, решение агента по ERROR-ребру); TIMEOUT — таймаут состояния;
+        CANCEL — служебный (принудительная отмена в '$CANCELLED'; в графе не обязан).
+    WorkflowStateType:
+      type: string
+      enum: [AGENT, BASH_SCRIPT, WAIT_WEBHOOK, WAIT_TASKS, TERMINAL]
+      description: Тип состояния графа (workflow-domain §2).
+    TerminalOutcome:
+      type: string
+      enum: [SUCCESS, FAILED, CANCELLED]
+      description: outcome TERMINAL-состояния → проекция статуса задачи.
+    WorkflowRef:
+      type: object
+      description: Ссылка на пиннутую ревизию workflow.
+      required: [key, rev]
+      properties:
+        key:
+          type: string
+        rev:
+          type: integer
+          format: int32
+          minimum: 1
+    TaskDto:
+      type: object
+      description: >-
+        Состояние задачи (api-contracts §4.1). currentState — code из пиннутой
+        ревизии или зарезервированный '$CANCELLED' (после stop). webhookUrl
+        присутствует, когда currentState в WAIT_WEBHOOK-состоянии.
+      required: [id, title, description, owner, author, workflow, currentState, statusProjection, suspended, tags, params, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+        owner:
+          type: string
+          description: username владельца; при создании агентом наследуется от породившей сессии.
+        author:
+          type: [string, 'null']
+          description: username автора-пользователя; null — задача создана агентом/триггером (авторство агента — через историю переходов).
+        workflow:
+          $ref: '#/components/schemas/WorkflowRef'
+        currentState:
+          type: string
+          description: code текущего состояния (из ревизии) либо '$CANCELLED' (после stop).
+        statusProjection:
+          $ref: '#/components/schemas/TaskStatusProjection'
+        suspended:
+          type: boolean
+          description: Аварийный флаг — планировщик пропускает задачу, новые переходы блокированы.
+        parentTaskId:
+          type: string
+          format: uuid
+          description: Только у подзадач.
+        tags:
+          type: array
+          items:
+            type: string
+        params:
+          type: object
+          additionalProperties: true
+          description: JSONB-параметры инстанса; иммутабельны после создания (PATCH params → 422 rule=immutable).
+        webhookUrl:
+          type: string
+          format: uri
+          description: Capability-URL вебхука (/api/webhooks/tasks/{taskId}/{token}); присутствует, когда currentState — WAIT_WEBHOOK-состояние.
+        workspaceBindings:
+          type: array
+          description: Привязки workspace по состояниям (для CLIENT_EXEC-поверхности, M4); в M2 обычно отсутствует.
+          items:
+            type: object
+            required: [stateCode, logicalKey]
+            properties:
+              stateCode:
+                type: string
+              logicalKey:
+                type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    TransitionDto:
+      type: object
+      description: >-
+        Запись истории переходов (append-only, task_transition_history). reason —
+        JSONB, форма зависит от источника: bash — {exitCode, stdout, stderr,
+        durationMs, attempt}; агент — {text} (обязательное обоснование); вебхук —
+        {kind:webhook, source, payloadSummary}; WAIT_TASKS — {closedBy:[taskId]} или
+        {failed:[taskId]}; stop — {kind:stop, actor:user}.
+      required: [id, fromState, toState, kind, reason, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Идентификатор записи истории (SSE id кадра task.transition — task_event_seq, не этот id).
+        fromState:
+          type: string
+          description: code исходного состояния.
+        toState:
+          type: string
+          description: code целевого состояния ('$CANCELLED' для stop).
+        kind:
+          $ref: '#/components/schemas/TransitionKind'
+        reason:
+          type: object
+          additionalProperties: true
+          description: Обоснование перехода (см. description схемы).
+        createdAt:
+          type: string
+          format: date-time
+    CommentDto:
+      type: object
+      description: Комментарий задачи (append-only; PATCH/DELETE не существует).
+      required: [id, taskId, body, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        taskId:
+          type: string
+          format: uuid
+        body:
+          type: string
+        author:
+          type: [string, 'null']
+          description: username автора; null/отсутствует — агентский комментарий (NULL + агент-пометка в хранении).
+        createdAt:
+          type: string
+          format: date-time
+    TaskTreeNode:
+      type: object
+      description: Узел поддерева подзадач (обход по parentTaskId; children — уровень ниже, отсутствует на листьях/дне depth).
+      required: [id, title, currentState, statusProjection, suspended]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        currentState:
+          type: string
+          description: code текущего состояния ('$CANCELLED' для остановленных).
+        statusProjection:
+          $ref: '#/components/schemas/TaskStatusProjection'
+        suspended:
+          type: boolean
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskTreeNode'
+    TaskPage:
+      type: object
+      description: Конверт-страница задач (сортировка updatedAt desc).
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskDto'
+        nextCursor:
+          type: string
+          description: Непрозрачный курсор следующей страницы (?cursor=); отсутствует, когда страниц больше нет.
+    TransitionPage:
+      type: object
+      description: Конверт-страница истории переходов (порядок createdAt asc; курсор — пара (createdAt, id)).
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransitionDto'
+        nextCursor:
+          type: string
+          description: Непрозрачная пара (createdAt, id) последней записи страницы — в следующий ?since=; отсутствует, когда записей больше нет.
+    CommentPage:
+      type: object
+      description: Конверт-страница комментариев (порядок createdAt asc).
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CommentDto'
+        nextCursor:
+          type: string
+          description: Непрозрачный курсор следующей страницы; отсутствует, когда страниц больше нет.
+    TaskTreePage:
+      type: object
+      description: Поддерево подзадач (пагинации нет).
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskTreeNode'
+    CreateTaskRequest:
+      type: object
+      description: Тело создания задачи (POST /tasks и POST /tasks/{id}/subtasks).
+      required: [title, description, workflowKey]
+      example:
+        title: Реализовать модуль биллинга
+        description: По спеке contract-first, с тестами
+        workflowKey: feature-delivery
+        params:
+          module: billing
+        tags: [backend]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          description: Пустая строка невалидна (422 validation-failed).
+        description:
+          type: string
+        workflowKey:
+          type: string
+          minLength: 1
+          description: Ключ workflow; неизвестный — 404 workflow-not-found.
+        rev:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Пин к конкретной ревизии; отсутствует — берётся latestRev (и пинится).
+        params:
+          type: object
+          additionalProperties: true
+          description: Параметры инстанса; валидируются paramsSchema ревизии (422 params-schema); иммутабельны после создания.
+        tags:
+          type: array
+          items:
+            type: string
+    UpdateTaskRequest:
+      type: object
+      description: >-
+        JSON Merge Patch (RFC 7396): отсутствующее поле — не менять; null — очистить.
+        `params` иммутабельны: включение params в патч → 422 validation-failed с
+        ошибкой rule=immutable. Неизвестные члены патча допустимы и игнорируются.
+      additionalProperties: true
+      properties:
+        title:
+          type: [string, 'null']
+          minLength: 1
+          description: null — очистить; строка — новый title (пустая строка невалидна, 422).
+        description:
+          type: [string, 'null']
+          minLength: 1
+          description: null — очистить; строка — новое описание.
+        tags:
+          type: [array, 'null']
+          items:
+            type: string
+          description: null — очистить теги; массив — заменить целиком.
+    SuspendTaskRequest:
+      type: object
+      required: [cascade]
+      properties:
+        cascade:
+          type: boolean
+          description: true — приостановить также всё поддерево подзадач.
+    AddTaskDependenciesRequest:
+      type: object
+      description: Рёбра blocked_by — атомарно, с валидацией циклов (422 dependency-invalid).
+      required: [blockedBy]
+      properties:
+        blockedBy:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+          description: Идентификаторы блокирующих задач (эта задача не стартует, пока они не в нужном терминале).
+    AddTaskCommentRequest:
+      type: object
+      required: [body]
+      properties:
+        body:
+          type: string
+          minLength: 1
+          description: Текст комментария; пустая строка невалидна (422).
+    TaskTransitionEvent:
+      type: object
+      description: Данные кадра `task.transition` SSE-потока задачи; SSE `id:` — task_event_seq. Тело SSE схемой не типизируется — машинный якорь для ручного парсера (клиент 8.5).
+      required: [id, taskId, fromState, toState, kind, reason, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Идентификатор записи истории (TransitionDto.id).
+        taskId:
+          type: string
+          format: uuid
+        fromState:
+          type: string
+        toState:
+          type: string
+        kind:
+          $ref: '#/components/schemas/TransitionKind'
+        reason:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+    TaskStatusEvent:
+      type: object
+      description: >-
+        Данные кадра `task.status` (и снапшота при коннекте/реконнекте — последний
+        статус задачи). taskEventSeq — текущий task_event_seq задачи: отправная
+        точка для Last-Event-ID/?since при live-подписке после снапшота. Тело SSE
+        схемой не типизируется — машинный якорь.
+      required: [taskId, currentState, statusProjection, suspended, taskEventSeq]
+      properties:
+        taskId:
+          type: string
+          format: uuid
+        currentState:
+          type: string
+        statusProjection:
+          $ref: '#/components/schemas/TaskStatusProjection'
+        suspended:
+          type: boolean
+        taskEventSeq:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Текущий task_event_seq задачи (курсор SSE); в снапшоте — отправная точка для реконнекта.
+    SubtaskTerminalEvent:
+      type: object
+      description: Данные кадра `subtask.terminal` — терминал подзадачи (для оркестратора «следить вместе»).
+      required: [taskId, terminalTaskId, terminalStatus]
+      properties:
+        taskId:
+          type: string
+          format: uuid
+          description: Задача-подписчик (родитель).
+        terminalTaskId:
+          type: string
+          format: uuid
+          description: Достигшая терминала подзадача.
+        terminalStatus:
+          $ref: '#/components/schemas/TaskStatusProjection'
+          description: Терминальный статус — SUCCEEDED|FAILED|CANCELLED.
+    TaskCommentEvent:
+      type: object
+      description: Данные кадра `task.comment` — новый комментарий (зеркало CommentDto).
+      required: [id, taskId, body, author, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        taskId:
+          type: string
+          format: uuid
+        body:
+          type: string
+        author:
+          type: [string, 'null']
+          description: username автора; null — агентский комментарий.
+        createdAt:
+          type: string
+          format: date-time
+    WorkflowDto:
+      type: object
+      description: >-
+        Метаданные workflow. В списке (GET /workflows) — без revisions; при просмотре
+        (GET /workflows/{key}) — со списком ревизий по возрастанию rev.
+      required: [key, name, latestRev]
+      properties:
+        key:
+          type: string
+        name:
+          type: string
+        latestRev:
+          type: integer
+          format: int32
+          minimum: 1
+        revisions:
+          type: array
+          description: Только в GET /workflows/{key}.
+          items:
+            $ref: '#/components/schemas/WorkflowRevisionSummary'
+    WorkflowRevisionSummary:
+      type: object
+      description: Краткая сводка ревизии (без графа).
+      required: [rev, createdAt]
+      properties:
+        rev:
+          type: integer
+          format: int32
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+    WorkflowRevisionDto:
+      type: object
+      description: Ревизия workflow с графом (иммутабельна; задачи пинятся на неё).
+      required: [workflowKey, rev, graph, createdAt]
+      properties:
+        workflowKey:
+          type: string
+        rev:
+          type: integer
+          format: int32
+          minimum: 1
+        graph:
+          $ref: '#/components/schemas/WorkflowGraph'
+        createdAt:
+          type: string
+          format: date-time
+    WorkflowGraph:
+      type: object
+      description: >-
+        Граф состояний (graph_jsonb; workflow-domain §2). Валидируется при
+        сохранении (rules §2): уникальные codes, замкнутые переходы, ≥1 исходящий
+        у нетерминальных, ERROR+TIMEOUT у BASH_SCRIPT/WAIT_*, достижимость TERMINAL,
+        запрет fan-out. Циклы (возвраты) легальны.
+      required: [states, transitions]
+      properties:
+        states:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/WorkflowState'
+        transitions:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowTransition'
+    WorkflowState:
+      type: object
+      description: >-
+        Состояние графа. Поля по типу (workflow-domain §2): agent_key — AGENT;
+        script — BASH_SCRIPT; scope+condition — WAIT_TASKS; payloadSchema —
+        WAIT_WEBHOOK; paramsSchema — любая ревизия; timeout — BASH/WAIT (обязателен
+        по правилам) и AGENT (предохранитель); outcome — TERMINAL. Имена полей —
+        как в контракте graph_jsonb (agent_key — исключение из camelCase-правила API,
+        унаследовано из контракта графа).
+      required: [code, type]
+      properties:
+        code:
+          type: string
+          minLength: 1
+          description: Уникален в ревизии (придумывает оркестратор); '$'-префиксы зарезервированы движком ('$CANCELLED').
+        type:
+          $ref: '#/components/schemas/WorkflowStateType'
+        workspace:
+          $ref: '#/components/schemas/WorkflowWorkspace'
+        agent_key:
+          type: string
+          description: Для AGENT — ключ агента (ревизия фиксируется на STATE-сессии при входе).
+        script:
+          type: string
+          description: Для BASH_SCRIPT — текст скрипта (запуск через WorkspaceTools; должен быть идемпотентным).
+        scope:
+          type: string
+          description: Для WAIT_TASKS — ALL_CHILDREN | BLOCKED_BY | TAGGED(<tag>) | EXPLICIT(${task.params.<key>}).
+        condition:
+          type: string
+          enum: [ALL_TERMINAL, ALL_SUCCESS]
+          description: Для WAIT_TASKS — условие закрытия.
+        payloadSchema:
+          type: object
+          additionalProperties: true
+          description: Для WAIT_WEBHOOK — JSON-Schema валидации тела вебхука (ограниченный профиль D-58 — required, type, enum, items, properties первого уровня).
+        paramsSchema:
+          type: object
+          additionalProperties: true
+          description: JSON-Schema для params задач этой ревизии (ограниченный профиль D-58); создание задачи/триггера валидирует.
+        timeout:
+          type: string
+          description: Длительность таймаута состояния (ISO-8601 duration, напр. PT30S, PT5M; семантика — kind-timeouts конфига движка).
+        outcome:
+          $ref: '#/components/schemas/TerminalOutcome'
+    WorkflowWorkspace:
+      type: object
+      description: Привязка workspace состояния (workflow-domain §2).
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [SERVER_DIR, CLIENT_EXEC]
+        mode:
+          type: string
+          enum: [AUTO, PATH]
+          default: AUTO
+          description: >-
+            Для SERVER_DIR; по умолчанию AUTO. AUTO эквивалентно PATH, path=${task.id}
+            (task-engine §BASH_SCRIPT — одно и то же место на диске); PATH — явный
+            path-шаблон.
+        path:
+          type: string
+          description: Для mode=PATH — шаблон с подстановками (${task.id}, ${task.params.*}).
+    WorkflowTransition:
+      type: object
+      description: Переход графа; fan-out запрещён — не более одного исходящего перехода каждого kind у состояния.
+      required: [from, to, kind]
+      properties:
+        from:
+          type: string
+          description: code исходного состояния.
+        to:
+          type: string
+          description: code целевого состояния.
+        kind:
+          type: string
+          enum: [NEXT, ERROR, TIMEOUT]
+          description: >-
+            Только рёбра графа. CANCEL в присылаемом графе невалиден → 422
+            graph-invalid (rule=cancel-edge-forbidden): CANCEL — служебный движковый
+            переход (запись в истории при stop), '$CANCELLED' — псевдо-код вне codes
+            ревизии (D-54); CANCEL-рёбра в графе не объявляются.
+    CreateWorkflowRequest:
+      type: object
+      required: [key, name, graph]
+      example:
+        key: feature-delivery
+        name: Поставка фичи
+        graph:
+          states:
+            - code: plan
+              type: AGENT
+              agent_key: orchestrator
+              timeout: PT30M
+            - code: done
+              type: TERMINAL
+              outcome: SUCCESS
+          transitions:
+            - from: plan
+              to: done
+              kind: NEXT
+      properties:
+        key:
+          type: string
+          minLength: 1
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          description: Kebab-case, уникален среди workflow (дубликат — 422 validation-failed, rule=key-unique).
+        name:
+          type: string
+          minLength: 1
+        graph:
+          $ref: '#/components/schemas/WorkflowGraph'
+    CreateWorkflowRevisionRequest:
+      type: object
+      required: [graph]
+      properties:
+        graph:
+          $ref: '#/components/schemas/WorkflowGraph'
+    WorkflowPage:
+      type: object
+      description: Конверт-страница workflow (сортировка createdAt desc).
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowDto'
+        nextCursor:
+          type: string
+          description: Непрозрачный курсор следующей страницы; отсутствует, когда страниц больше нет.
+    TriggerDto:
+      type: object
+      description: >-
+        Входящий триггер: capability-URL создаёт задачу на пиннутой ревизии workflow
+        с params/tags/owner триггера. url содержит HMAC-токен — секрет, утечка
+        равнозначна потере контроля (revoke мгновенно умирает).
+      required: [id, name, workflowKey, rev, params, tags, owner, url, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        workflowKey:
+          type: string
+        rev:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Пин ревизии при создании триггера.
+        params:
+          type: object
+          additionalProperties: true
+          description: Параметры создаваемых задач (валидированы paramsSchema ревизии при создании триггера).
+        tags:
+          type: array
+          items:
+            type: string
+        owner:
+          type: string
+          description: username владельца (owner создаваемых задач).
+        url:
+          type: string
+          format: uri
+          description: Рабочий capability-URL (/api/webhooks/triggers/{triggerId}/{token}); умирает при revoke.
+        revokedAt:
+          type: [string, 'null']
+          format: date-time
+          description: Момент отзыва; null — активен.
+        createdAt:
+          type: string
+          format: date-time
+    TriggerPage:
+      type: object
+      description: Конверт-страница триггеров (сортировка createdAt desc).
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TriggerDto'
+        nextCursor:
+          type: string
+          description: Непрозрачный курсор следующей страницы; отсутствует, когда страниц больше нет.
+    CreateTriggerRequest:
+      type: object
+      required: [name, workflowKey]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        workflowKey:
+          type: string
+          minLength: 1
+          description: Неизвестный — 404 workflow-not-found.
+        rev:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Пин к конкретной ревизии; отсутствует — latestRev (и пинится).
+        params:
+          type: object
+          additionalProperties: true
+          description: Параметры создаваемых задач; валидируются paramsSchema ревизии (422 params-schema).
+        tags:
+          type: array
+          items:
+            type: string
+    TriggerWebhookAccepted:
+      type: object
+      description: Ответ вебхука триггера — созданная задача.
+      required: [taskId]
+      properties:
+        taskId:
+          type: string
+          format: uuid
+    SessionTreeNode:
+      type: object
+      description: Узел поддерева сессий; для STATE-узлов дополнительно taskId/stateCode (M2).
+      required: [id, parentSessionId, kind, agent, runtimeStatus, lastSeq, lastActivityAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        parentSessionId:
+          type: [string, 'null']
+          format: uuid
+          description: null у корневой сессии поддерева.
+        kind:
+          $ref: '#/components/schemas/SessionKind'
+        agent:
+          $ref: '#/components/schemas/AgentRef'
+        runtimeStatus:
+          $ref: '#/components/schemas/SessionRuntimeStatus'
+        lastSeq:
+          type: integer
+          format: int64
+          minimum: 0
+        taskId:
+          type: string
+          format: uuid
+          description: Только STATE-узлы.
+        stateCode:
+          type: string
+          description: Только STATE-узлы.
+        lastActivityAt:
+          type: string
+          format: date-time
+    SessionTreePage:
+      type: object
+      description: Поддерево сессий (пагинации нет).
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SessionTreeNode'

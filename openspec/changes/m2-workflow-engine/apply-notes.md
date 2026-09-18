@@ -1,0 +1,119 @@
+# Apply-заметки: m2-workflow-engine
+
+## Пачка D.2 — генерация из замороженной спеки + wiring
+
+### Зафиксированные решения пачки
+
+- **`jackson-databind`: `test` → `provided`.** Единственный сгенерированный main-класс с
+  databind-импортом — `AddTaskDependenciesRequest` (`uniqueItems: true` → `@JsonDeserialize(as =
+  LinkedHashSet.class)`). provided = compile+test classpath, в упаковку не попадает; Jackson 3 в
+  main-runtime не тронут (AGENTS.md). jsr310 остался test (только тест-клиент).
+- **`@RequestMapping("/api")` на WebhooksController.** openapi-generator не поддерживает
+  path-item `servers` (ни server, ни client): интерфейсы мапятся на корневой `/api/v1`. Локальная
+  аннотация класса затеняет интерфейсную → сервер слушает `/api/webhooks/**` (§0.5).
+- **Тест-клиент вебхуков** (DS F-1): у сгенерированного `WebhooksApi` пути `/webhooks/...`
+  относительно baseUri; для e2e конструировать `ApiClient` + `updateBaseUri("<server>/api")` —
+  закреплено тестом `WebhooksRoutingTest.generatedClientResolvesApiBasePath`. Паттерн обязателен
+  для L.3.
+- **Security — две цепочки** (GLM M-1): вебхуки — отдельная `SecurityFilterChain` `@Order(1)`
+  с `securityMatcher("/api/webhooks/**")` без oauth2ResourceServer (чужой `Authorization: Bearer`
+  не валидируется как JWT и не меняет исход); основная цепочка сужена до
+  `securityMatcher("/api/v1/**")`. HMAC capability-токена — в контроллере (гейт D.2), полный
+  верификатор — L.2, обработчики — L.3.
+- **`harness.webhook.secret`** — новый конфиг (`WebhookProperties`): секрет HMAC
+  capability-токенов; env `HARNESS_WEBHOOK_SECRET` в рантайме VM, dev-дефолт в application.yml.
+- **Стабы → `501 not-implemented`** (DS F-4): `ApiNotImplementedException` вместо
+  `UnsupportedOperationException` — ответ RFC 9457 с каталожным кодом (добавлен в §6 и в
+  ProblemCode спеки; не ошибка контракта). `SignatureInvalidException` → `401 signature-invalid`.
+
+### Пачка D.2 — план удаления переходного кода
+
+- **`not-implemented` (501)** — код переходного периода: удаляется после **L.4** (последняя
+  пачка реализации M2): из ProblemCode спеки (openapi.yaml), api-contracts §6,
+  `ProblemCodes.java`, `ApiExceptionHandler` и всех стабов (к L.4 реализованных). Напоминание —
+  задача L.5 в tasks.md; verify — main-компиляция без упоминаний not-implemented.
+
+### Ревью-цикл D.2 (round 2)
+
+- Mercury: APPROVE. GLM: REJECT (M-1 + 2 nit) → фиксы. DeepSeek: REJECT (F-1 major, F-2 medium,
+  F-3 minor, F-4 nit) → фиксы.
+- Принято: F-1 (basePath клиент вебхуков + тест), F-2 (`WebhooksRoutingTest`: bad-token →
+  401 signature-invalid; чужой Bearer → signature-invalid, не unauthenticated;
+  `/api/v1/webhooks/**` → 401 unauthenticated — маппинга без /v1 нет; valid token → 501
+  not-implemented), F-3 (эта секция), F-4 (501 not-implemented, код в §6/спеке/ProblemCodes),
+  GLM M-1 (две security-цепочки), GLM N-1/N-2 (закреплено тестом; Javadoc TaskEventsController
+  уточнён: «ручной SseEmitter по api-contracts §3.2; сгенерированный интерфейс исключён из
+  генерации»).
+- **Round 2**: N-1 (catch-all-цепочка `@Order(2)` denyAll с общим entry point — аноним на
+  неописанных путях получает 401 unauthenticated, не 200/403; тесты на `/error` и
+  `/actuator/prometheus`), N-2 (эта секция «план удаления» + задача-напоминание L.5 в tasks.md),
+  N-3 (HMAC вынесен из контроллера в `common/security/WebhookSignatureVerifier` — базовая
+  структура L.2, расширение тестами за L.2).
+
+## Пачка D — спека M2 (D.1) — отклонения dev
+
+Отклонения от api-contracts §4/§0 при проектировании OpenAPI-подмножества
+(`src/main/resources/api/openapi.yaml`, v1.1.0-m2). Прошли ревью-цикл D.1
+(GLM-Flash + DeepSeek-Flash + Mercury: `docs/temp/review/m2-d-{glm,deepseek,mercury}.md`),
+фиксы ревью применены.
+
+1. **`wrong-transition` (409) не привязан к REST-операции.** Response-компонент
+   и код в ProblemCode есть, но ни одна REST-операция его не возвращает: путь
+   перехода — инструмент агента `transition` (D-59, гейт metaTools,
+   instructionSource=USER); REST-генерации не требует (agent-turn).
+2. **`WorkflowState.agent_key` — snake_case.** Взят буквально из контракта
+   `graph_jsonb` (workflow-domain §2) — доменный контракт графа, исключение из
+   camelCase-правила §0.8 для API-полей; сосуществует с camelCase
+   `payloadSchema`/`paramsSchema` того же контракта.
+3. **`WorkflowState.timeout` — string, ISO-8601 duration** (напр. `PT30M`).
+   Формат в источниках нигде не зафиксирован; выбран по аналогии с конвенцией
+   времени §0.8. Конфиг движка — Spring-стиль (`30s`); конвертация на границе.
+4. **DELETE `/tasks/{id}/dependencies/{blockerId}`: отсутствующее ребро →
+   идемпотентный 204** (в §4.1 не оговорено; повторный вызов безопасен).
+5. **Дубликат `key` workflow → 422 validation-failed, rule=key-unique**
+   (каталог §6 не имеет 409-конфликт-кода; выбран каталог-консистентный вариант).
+6. **Webhook задачи: несуществующая задача → 409 task-not-waiting-webhook**
+   (без отдельного 404) — по дельте inbound-triggers: «задача существует и в
+   WAIT_WEBHOOK, иначе → 409»; идемпотентность по построению.
+7. **WebhookProblemCode — подмножество каталога** (signature-invalid,
+   task-not-waiting-webhook, trigger-revoked). Инфраструктурные 406/413/415 на
+   вебхуках — стандартный ProblemDetail с полным ProblemCode (консистентность
+   с M1; фикс F-4 ревью).
+8. **`TransitionDto.reason` агентского перехода — `{text}`** — форма обёртки
+   обоснования в источниках зафиксирована не буквально (task-engine: «текст-
+   обоснование»); остальные формы — по спекам (bash/webhook/WAIT_TASKS/stop).
+9. **История: `?since=` — opaque-пара (createdAt, id)** вместо числового seq
+   §0.4 — санкционировано task-engine (стабильная пагинация при равных
+   `created_at`); после F-1 выровнено: api-contracts §0.4 обновлён, сценарий
+   «since=0» в дельте заменён на «без since».
+10. **`TaskDto.author` — required+nullable** (M1-паттерн «поле присутствует
+    всегда», api-contracts пишет `author?`); `CommentDto.author` — nullable,
+    вне required (фикс F-5: агентский комментарий — NULL + агент-пометка).
+11. **`GET /sessions/{id}/tree` добавлен в спеку пачкой D** — в замороженной
+    M1-спеке отсутствовал (хотя есть в api-contracts §2); включён по постановке
+    D.1 («слияние с M1-операциями», taskId+stateCode для STATE-узлов);
+    регенерация D.2 заставит создать контроллер.
+12. **Генерация (D.2): pom `<apis>` расширяется** на
+    `Tasks,TaskCommands,Workflows,Triggers,Webhooks`; SSE-теги (`SessionEvents`,
+    `TaskEvents`) исключены — контроллеры на SseEmitter вручную;
+    `openApiNullable=false` стоит с M1 в обоих executions.
+
+### Результаты ревью-цикла D.1
+
+- Mercury: APPROVE. GLM: REJECT (3 minor + 4 nit) → фиксы. DeepSeek: REJECT
+  (2 major + 4 minor + 3 nit) → фиксы.
+- **Принято и применено**: DS F-1 (курсор истории — выравнивание трёх источников,
+  правки в openapi.yaml + api-contracts §0.4 + дельта task-engine), F-2 (404
+  workflow-not-found у subtasks), F-3 (Location комментария → коллекция),
+  F-4 (406/413/415 вебхуков — ProblemDetail, WebhookProblemCode урезан),
+  F-5 (author в CommentDto — nullable, вне required), F-6 (Location зависимостей
+  задокументирован как осознанный), F-7 (`blockerTaskId` → `blockerId`, как в
+  §4.1/K.3), F-8 (архивные ссылки M1, kind-фильтр), F-9+GLM M1 (тело вебхука
+  обязательное — зафиксировано), GLM M2 (errors[] для всех 422-кодов),
+  GLM M3 (since=0 = снапшот + полная история), GLM N1 (AUTO default +
+  эквивалентность PATH, path=${task.id}), GLM N3 (CANCEL-рёбра в графе
+  невалидны, enum без CANCEL).
+- **Отклонено**: GLM N2 («cascade required без обоснования») — оставлен
+  required: явность каскада при suspend осознанная; замечание ссылалось на
+  J-22 (убран cascade из stop API — stop всегда каскадный), к suspend не
+  относится.
