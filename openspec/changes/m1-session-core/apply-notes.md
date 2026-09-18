@@ -138,3 +138,50 @@ path traversal и запрет \..\ убраны).
   сериализует отсутствующие объектные поля явно (`"late":null`, `"lastTurnOutcome":null`) —
   включение ALWAYS. Поле `late` в M1 всегда null (M3), клиенты толерантны (внутренний MVP);
   спека не правится.
+
+## Пачка F (задачи 10.1, 10.2, 10.4; 10.3 отменена владельцем)
+
+`mvn clean verify` — BUILD SUCCESS, **209 тестов** (до пачки — 200; +8 ArchUnit, +1 приёмочный
+e2e), 0 провалов. Линии 429/503 в логах — ожидаемый шум retry-тестов WireMock.
+
+### 10.1 — ArchUnit (`tests/architecture/ArchitectureRulesTest.java`, чистый unit)
+
+- Импорт только main-классов (`target/classes`, включая сгенерированный `api.gen`);
+  тест-классы и test-клиент в границы не входят. `common`/`config` — технические пакеты,
+  правил не имеют (config легитимно собирает бины из impl-пакетов, напр. `LlmConfig`
+  → `AesGcmCredentialDecryptor`).
+- Слои (layeredArchitecture, optional layers — пустые `task`/`workflow` M2 не фейлят):
+  `api → {execution, intelligence, session, identity}`;
+  `execution → {session, identity, task, workflow, intelligence}`;
+  `task`/`workflow → identity`; `session → identity`; `identity` изолирована;
+  `api` никем не доступается; `intelligence ↛ execution/api`; циклы между модулями запрещены
+  (slices по доменным пакетам, common/config из графа исключены).
+- **Отклонение от текста задачи (осознанное)**: в правиле для `execution` разрешён
+  `intelligence` — «контракты intelligence знают только execution/api» (architecture.md §2),
+  фактическая зависимость `AgentTurnEngine → LlmInvoker`; текст задачи перечислил
+  `{session, identity}` не исчерпывающе.
+- Impl-правило: чужой `<модуль>.impl.*` вне модуля не импортируется (параметризовано по
+  session/execution/intelligence/identity).
+
+### 10.2 — приёмочный e2e (`tests/api/AcceptanceEndToEndTest.java`, критерий M1 — выполнен)
+
+Полный срез от живого Keycloak до реального helper-контейнера: alice (password grant) →
+FREE-сессия по реальному агенту (сгенерированный клиент) → POST сообщения → WireMock-LLM
+4 раунда → инструменты в реальном контейнере `harness-<sessionId>` (write_file →
+`wc -l` → read_file) → финальный ответ. Проверено: переходы `IDLE → TURN_RUNNING → IDLE`
+по живому SSE; seq 1..11 без дыр; текст финального ASSISTANT непустой; TOOL_RESULT видимы
+клиенту; `callId` парный; файл физически в host-workspace сессии (bind-mount — доказательство
+реального контейнера); ровно 4 вызова LLM.
+
+- Нюанс тест-стаба: arguments tool-call'а — вложенный JSON, `\n` в wire-стриме должен
+  экранироваться дважды (иначе внешний парсинг чанка даёт сырой newline внутри
+  JSON-строки → аргументы не парсятся → content=null). Хелпер `toolCallChunk` в тесте
+  экранирует бэкслеши и кавычки.
+
+### Итог по критерию M1 (roadmap.md)
+
+Выполнен: FREE-сессия через минимальный attach (SSE+POST) работает end-to-end — сообщение →
+модель → инструменты в helper-контейнере → стриминг; контейнер поднимается лениво и
+переживает Turn (рестарт-скан чистит сирот — пачка D); сессии персистентны (append-only
+журнал, Postgres). «Рестарт сервера не теряет сессии» — покрыто пост-краш-тестами 7.6
+(10.3 отменена владельцем).
