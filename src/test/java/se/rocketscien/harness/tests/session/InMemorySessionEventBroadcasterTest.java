@@ -7,6 +7,7 @@ import se.rocketscien.harness.session.MessageKind;
 import se.rocketscien.harness.session.SessionEvent;
 import se.rocketscien.harness.session.SessionEventBroadcaster;
 import se.rocketscien.harness.session.SessionRuntimeStatus;
+import se.rocketscien.harness.session.TurnOutcome;
 
 import org.junit.jupiter.api.Test;
 
@@ -76,10 +77,11 @@ class InMemorySessionEventBroadcasterTest {
 
     @Test
     void statusSnapshotDefaultsToIdleAndTracksChanges() {
-        assertThat(broadcaster.runtimeStatus(sessionId)).isEqualTo(SessionRuntimeStatus.IDLE);
+        assertThat(broadcaster.statusSnapshot(sessionId).runtimeStatus()).isEqualTo(SessionRuntimeStatus.IDLE);
+        assertThat(broadcaster.statusSnapshot(sessionId).lastTurnOutcome()).isNull();
 
-        broadcaster.publishStatus(sessionId, SessionRuntimeStatus.TURN_RUNNING);
-        assertThat(broadcaster.runtimeStatus(sessionId)).isEqualTo(SessionRuntimeStatus.TURN_RUNNING);
+        broadcaster.publishStatus(sessionId, SessionRuntimeStatus.TURN_RUNNING, null);
+        assertThat(broadcaster.statusSnapshot(sessionId).runtimeStatus()).isEqualTo(SessionRuntimeStatus.TURN_RUNNING);
 
         List<SessionEvent.StatusChanged> statuses = new ArrayList<>();
         broadcaster.subscribe(sessionId, event -> {
@@ -87,11 +89,14 @@ class InMemorySessionEventBroadcasterTest {
                 statuses.add(status);
             }
         });
-        broadcaster.publishStatus(sessionId, SessionRuntimeStatus.IDLE);
+        broadcaster.publishStatus(sessionId, SessionRuntimeStatus.IDLE, TurnOutcome.COMPLETED);
 
         assertThat(statuses).hasSize(1);
         assertThat(statuses.getFirst().runtimeStatus()).isEqualTo(SessionRuntimeStatus.IDLE);
-        assertThat(broadcaster.runtimeStatus(sessionId)).isEqualTo(SessionRuntimeStatus.IDLE);
+        // DS F5: статусные события несут lastTurnOutcome (api-contracts §3.1)
+        assertThat(statuses.getFirst().lastTurnOutcome()).isEqualTo(TurnOutcome.COMPLETED);
+        assertThat(broadcaster.statusSnapshot(sessionId).runtimeStatus()).isEqualTo(SessionRuntimeStatus.IDLE);
+        assertThat(broadcaster.statusSnapshot(sessionId).lastTurnOutcome()).isEqualTo(TurnOutcome.COMPLETED);
     }
 
     @Test

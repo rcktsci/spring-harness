@@ -41,6 +41,8 @@
 
         <git-commit-id-maven-plugin.version>10.0.0</git-commit-id-maven-plugin.version>
         <jacoco-maven-plugin.version>0.8.15</jacoco-maven-plugin.version>
+
+        <openapi-generator-maven-plugin.version>7.25.0</openapi-generator-maven-plugin.version>
     </properties>
 
     <dependencyManagement>
@@ -159,6 +161,18 @@
             <version>${ulid-creator.version}</version>
         </dependency>
 
+        <!-- Компиляционная нужда сгенерированных DTO (openapi-generator spring): аннотации
+             com.fasterxml.jackson.annotation (JsonProperty и пр.). Jackson 3 использует тот же
+             jackson-annotations 2.x и читает эти аннотации — функционального дефекта нет;
+             provided лишь фиксирует, что артефакт не зависит от них в рантайме (на classpath
+             runtime они присутствуют транзитивно). Никакого Jackson 2 databind /
+             jackson-databind-nullable в main (AGENTS.md). -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-annotations</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
         <!-- TESTING -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -207,6 +221,18 @@
         <dependency>
             <groupId>org.assertj</groupId>
             <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Тест-клиент из openapi.yaml (генератор java/native): сериализация — Jackson 2,
+             только test-scope; main-runtime на Jackson 3 (AGENTS.md). Версии — jackson-2-bom Boot. -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -269,6 +295,76 @@
                         <goals>
                             <goal>report</goal>
                         </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Шаг 2 contract-first (S-J-9): генерация из замороженной спеки
+                 src/main/resources/api/openapi.yaml. SSE-операция (тег SessionEvents)
+                 исключена из генерации — контроллер на SseEmitter вручную (D-M1-8).
+                 openApiNullable=false — nullable-поля без JsonNullable/Jackson-2
+                 (jackson-databind-nullable в main-runtime запрещён). -->
+            <plugin>
+                <groupId>org.openapitools</groupId>
+                <artifactId>openapi-generator-maven-plugin</artifactId>
+                <version>${openapi-generator-maven-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <id>generate-api-server</id>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <inputSpec>${project.basedir}/src/main/resources/api/openapi.yaml</inputSpec>
+                            <generatorName>spring</generatorName>
+                            <output>${project.build.directory}/generated-sources/openapi-server</output>
+                            <apiPackage>se.rocketscien.harness.api.gen</apiPackage>
+                            <modelPackage>se.rocketscien.harness.api.gen.model</modelPackage>
+                            <configOptions>
+                                <interfaceOnly>true</interfaceOnly>
+                                <skipDefaultInterface>true</skipDefaultInterface>
+                                <useSpringBoot3>true</useSpringBoot3>
+                                <openApiNullable>false</openApiNullable>
+                                <useTags>true</useTags>
+                                <requestMappingMode>api_interface</requestMappingMode>
+                                <documentationProvider>none</documentationProvider>
+                                <useBeanValidation>true</useBeanValidation>
+                                <hideGenerationTimestamp>true</hideGenerationTimestamp>
+                            </configOptions>
+                            <globalProperties>
+                                <apis>Agents,Sessions,SessionMessages,SessionCommands</apis>
+                                <models></models>
+                            </globalProperties>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>generate-api-test-client</id>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <phase>generate-test-sources</phase>
+                        <configuration>
+                            <inputSpec>${project.basedir}/src/main/resources/api/openapi.yaml</inputSpec>
+                            <generatorName>java</generatorName>
+                            <library>native</library>
+                            <output>${project.build.directory}/generated-test-sources/openapi-client</output>
+                            <apiPackage>se.rocketscien.harness.testclient.api</apiPackage>
+                            <modelPackage>se.rocketscien.harness.testclient.model</modelPackage>
+                            <invokerPackage>se.rocketscien.harness.testclient</invokerPackage>
+                            <addCompileSourceRoot>false</addCompileSourceRoot>
+                            <addTestCompileSourceRoot>true</addTestCompileSourceRoot>
+                            <configOptions>
+                                <openApiNullable>false</openApiNullable>
+                                <useJakartaEe>true</useJakartaEe>
+                                <dateLibrary>java8</dateLibrary>
+                                <hideGenerationTimestamp>true</hideGenerationTimestamp>
+                            </configOptions>
+                            <globalProperties>
+                                <apis>Agents,Sessions,SessionMessages,SessionCommands</apis>
+                                <models></models>
+                                <supportingFiles></supportingFiles>
+                            </globalProperties>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>

@@ -7,7 +7,8 @@ import java.time.Duration;
 
 /**
  * Эксплуатационные лимиты: тело запроса, вывод инструмента (с маркером truncated), запас к пределу
- * bounded-захвата вывода exec (C-J-1), таймаут bash по умолчанию и верхняя граница таймаута bash.
+ * bounded-захвата вывода exec (C-J-1), таймаут bash по умолчанию и верхняя граница таймаута bash,
+ * верхняя граница размера страницы списков (api-contracts §0).
  */
 @ConfigurationProperties(prefix = "harness.limits")
 public record LimitsProperties(
@@ -15,6 +16,7 @@ public record LimitsProperties(
         DataSize toolOutput,
         DataSize toolCaptureMargin,
         Duration bashTimeout,
-        Duration bashTimeoutCap
+        Duration bashTimeoutCap,
+        int page
 ) {
 }

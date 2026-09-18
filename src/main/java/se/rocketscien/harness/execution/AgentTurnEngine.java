@@ -182,10 +182,13 @@ public class AgentTurnEngine {
             }
         });
         try {
+            // Агрегат приходит в consumer aggregate()'а (responseRef::set); выходной поток —
+            // сырые чанки, поэтому в subscribe onNext — no-op: последний чанк (finish/usage,
+            // пустой delta) затирал бы агрегат пустым текстом ASSISTANT (E-J-2)
             Disposable subscription = new MessageAggregator()
-                    .aggregate(llmInvoker.stream(agent.llmModelId(), prompt, toolCallbacks), chunk -> { })
+                    .aggregate(llmInvoker.stream(agent.llmModelId(), prompt, toolCallbacks), responseRef::set)
                     .doOnCancel(done::countDown)
-                    .subscribe(responseRef::set,
+                    .subscribe(chunk -> { },
                             error -> {
                                 errorRef.set(error);
                                 done.countDown();

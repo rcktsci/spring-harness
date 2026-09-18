@@ -95,3 +95,46 @@ path traversal и запрет \..\ убраны).
 - **Разрыв контракт↔код (DS F5)**: `SessionEvent.StatusChanged`/broadcaster сейчас не несут
   `lastTurnOutcome`, а контракт §3.1 (снапшот + `session.status`) — несёт; дополнить
   broadcaster/снапшот при реализации 8.5.
+
+### Реализация шага 2 (пачка E, 8.1–8.5) — факты и отклонения
+
+- Генерация: openapi-generator-maven-plugin **7.25.0** (latest release), генератор `spring`,
+  `interfaceOnly`+`skipDefaultInterface`+`requestMappingMode=api_interface`+`useSpringBoot3`,
+  `openApiNullable=false`; SSE-операция исключена селективной генерацией
+  (`globalProperties.apis` без тега SessionEvents). Тест-клиент — генератор `java` (library
+  `native`), test-scope, тот же фильтр.
+- **Отклонение 1 (Jackson 2-аннотации)**: шаблоны spring-генератора жёстко кладут в DTO
+  `com.fasterxml.jackson.annotation.*` (JsonProperty/JsonValue/…). Jackson 3 использует тот же
+  `jackson-annotations` 2.x и **читает эти аннотации** — функционального дефекта нет (E-J-5);
+  зависимость объявлена **provided** — фиксация компиляционной нужды, в рантайме аннотации
+  присутствуют транзитивно. Сверено тестами: nullable title, payload, enum'ы, OffsetDateTime.
+- **Отклонение 2 (produces на командах) — СНЯТО правкой спеки (E-J-4, судейское решение)**:
+  в 202 compact/stop добавлен `content: {application/json: {schema: {}}}` — единственная
+  аддитивная правка замороженной спеки. Генератор теперь объявляет
+  `produces={application/json, application/problem+json}` — `Accept: application/json`
+  проходит content negotiation, костыль `Accept: */*` из тестов убран. Факт генератора
+  7.25.0: пустая schema разворачивается в `ResponseEntity<Object>` (не Void, как ожидалось
+  судьёй) — контроллер возвращает `ResponseEntity.accepted().<Object>build()` (тело пустое).
+- **merge-patch absent/null**: типизированный DTO различить не может → converter
+  `application/merge-patch+json` читает JSON-дерево и отдаёт контроллеру через
+  `MergePatchBodyContext` (ThreadLocal, очистка фильтром). Дефолтный Jackson-конвертер
+  Spring 7 принимает `application/*+json`, поэтому кастомный конвертер регистрируется первым.
+- **413**: фильтр `PayloadSizeFilter` — Content-Length до диспетчеризации + лимитирующий
+  поток для chunked; `harness.limits.body`.
+- 406-ответ пишется вручную (`ApiProblemWriter`) — content negotiation при `Accept: text/plain`
+  не вернул бы problem+json тело.
+- **Курсор страницы (E-J-3)**: opaque-курсор кодирует `Instant.toString()` (полная точность —
+  микросекунды Postgres не теряются) + id; битый/подделанный курсор → 422 validation-failed
+  (обёртка IllegalArgumentException в контроллере). Тай-брейк сортировки — пара
+  (lastActivityAt, id); тест «сиды в одну миллисекунду».
+- Broadcaster дополнен (DS F5): `StatusChanged`/`statusSnapshot` несут `lastTurnOutcome`;
+  TurnManagerImpl публикует исход при завершении Turn'а.
+- **Пустой text ASSISTANT — починен (E-J-2)**: причина — `subscribe(responseRef::set)` получал
+  сырые чанки `aggregate()` (выходной поток — pass-through), последний чанк (finish/usage,
+  пустой delta) затирал агрегат пустым текстом. Фикс: агрегат — в consumer
+  `aggregate(stream, responseRef::set)`, в subscribe onNext — no-op. Ассерты текста добавлены
+  в тесты 7.2 (fullCycle: финальный ASSISTANT = «готово») и 8.3 (wake-тест).
+- **Явные null'ы J3 (E-J-6, принято как поведение)**: Jackson 3 в Boot-конфигурации
+  сериализует отсутствующие объектные поля явно (`"late":null`, `"lastTurnOutcome":null`) —
+  включение ALWAYS. Поле `late` в M1 всегда null (M3), клиенты толерантны (внутренний MVP);
+  спека не правится.

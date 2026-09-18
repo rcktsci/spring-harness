@@ -65,7 +65,8 @@ class TurnManagerImpl implements TurnManager {
             return;
         }
         TurnCancellation cancellation = activeTurns.register(sessionId);
-        broadcaster.publishStatus(sessionId, SessionRuntimeStatus.TURN_RUNNING);
+        broadcaster.publishStatus(sessionId, SessionRuntimeStatus.TURN_RUNNING,
+                sessionStore.findSession(sessionId).map(Session::lastTurnOutcome).orElse(null));
         try {
             // Сброс флага на старте нового Turn'а (спека agent-turn; stop по IDLE не гасит новые ходы)
             sessionStore.resetCancelRequested(sessionId);
@@ -80,7 +81,9 @@ class TurnManagerImpl implements TurnManager {
                 log.error("Не удалось зафиксировать FAILED для сессии {}", sessionId, finishFailure);
             }
         } finally {
-            broadcaster.publishStatus(sessionId, SessionRuntimeStatus.IDLE);
+            // DS F5: кадр session.status обязан нести lastTurnOutcome (api-contracts §3.1)
+            broadcaster.publishStatus(sessionId, SessionRuntimeStatus.IDLE,
+                    sessionStore.findSession(sessionId).map(Session::lastTurnOutcome).orElse(null));
             activeTurns.unregister(sessionId);
             lock.get().close();
         }

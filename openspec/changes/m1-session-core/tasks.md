@@ -51,11 +51,11 @@
 
 ## 8. API (specs/session-api)
 
-- [ ] 8.1 Инфраструктура ошибок: RFC 9457 Problem Details + `code`-каталог M1-подмножества, `errors[]` для 422, лимит тела → `413`; тесты каждой ошибки
-- [ ] 8.2 `GET /agents`; `POST/GET/PATCH /sessions` (201+Location, фильтры `?mine&kind&q`, конверт-пагинация, сортировка lastActivityAt desc); MockMvc+Testcontainers тесты
-- [ ] 8.3 `POST /sessions/{id}/messages` (202 `{messageId, seq}`, атрибуция из JWT) и `GET /sessions/{id}/messages ?since&limit` (только видимые); тесты
-- [ ] 8.4 `POST /compact` (только FREE, иначе `409 wrong-session-kind` — STATE-строка в тесте фиксируется напрямую в БД) и `POST /stop` (202); тесты кодов (появление COMPACT-события в потоке — задача 9.2)
-- [ ] 8.5 SSE `GET /sessions/{id}/events`: `message.created` (id=seq), снапшот `session.status` при коннекте, `Last-Event-ID` > `?since`, ping-комментарий + `retry: 5000`; тест с реальным SSE-клиентом (доставка, реконнект без дублей)
+- [x] 8.1 Инфраструктура ошибок: RFC 9457 Problem Details + `code`-каталог M1-подмножества, `errors[]` для 422, лимит тела → `413`; тесты каждой ошибки
+- [x] 8.2 `GET /agents`; `POST/GET/PATCH /sessions` (201+Location, фильтры `?mine&kind&q`, конверт-пагинация, сортировка lastActivityAt desc); MockMvc+Testcontainers тесты
+- [x] 8.3 `POST /sessions/{id}/messages` (202 `{messageId, seq}`, атрибуция из JWT) и `GET /sessions/{id}/messages ?since&limit` (только видимые); тесты
+- [x] 8.4 `POST /compact` (только FREE, иначе `409 wrong-session-kind` — STATE-строка в тесте фиксируется напрямую в БД) и `POST /stop` (202); тесты кодов (появление COMPACT-события в потоке — задача 9.2)
+- [x] 8.5 SSE `GET /sessions/{id}/events`: `message.created` (id=seq), снапшот `session.status` при коннекте, `Last-Event-ID` > `?since`, ping-комментарий + `retry: 5000`; тест с реальным SSE-клиентом (доставка, реконнект без дублей)
 
 ## 9. Компакция (specs/session-store)
 

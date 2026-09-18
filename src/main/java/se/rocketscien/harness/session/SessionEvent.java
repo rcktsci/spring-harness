@@ -27,6 +27,10 @@ public sealed interface SessionEvent {
     }
 
     /** Изменился рантайм-статус сессии (эквивалент SSE {@code session.status}). */
-    record StatusChanged(UUID sessionId, SessionRuntimeStatus runtimeStatus) implements SessionEvent {
+    record StatusChanged(
+            UUID sessionId,
+            SessionRuntimeStatus runtimeStatus,
+            TurnOutcome lastTurnOutcome
+    ) implements SessionEvent {
     }
 }

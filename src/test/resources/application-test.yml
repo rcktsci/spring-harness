@@ -3,6 +3,13 @@ harness:
     # Живой Keycloak тестового контекста (позитивный путь и groups-гейт — через реальный Keycloak)
     issuer-uri: ${containers.keycloak.url}/realms/harness
     jwk-set-uri: ${containers.keycloak.url}/realms/harness/protocol/openid-connect/certs
+  sse:
+    # Быстрый ping для проверки ping-кадров реальным SSE-клиентом (задача 8.5).
+    ping-interval: 200ms
+  limits:
+    # Малый лимит тела для проверки 413 без гигантских запросов (задача 8.1).
+    body: 8KB
+    page: 100
   llm:
     # Тестовый ключ шифрования api_key (32 байта, base64) — тот же, что в тестовых фикстурах.
     encryption-keys:

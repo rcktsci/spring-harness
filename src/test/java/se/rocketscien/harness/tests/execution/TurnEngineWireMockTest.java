@@ -92,6 +92,9 @@ class TurnEngineWireMockTest extends BaseApplicationTest {
         assertThat(journalKinds(session.id())).containsExactly(
                 "USER", "ASSISTANT", "TOOL_CALL", "TOOL_RESULT", "ASSISTANT");
 
+        // E-J-2: текст финального ASSISTANT обязан доходить из стрима, а не теряться агрегацией
+        assertThat(journalField(session.id(), "ASSISTANT", "text")).isEqualTo("готово");
+
         assertThat(journalField(session.id(), "TOOL_RESULT", "status")).isEqualTo("OK");
         assertThat(journalField(session.id(), "TOOL_RESULT", "output")).contains("hello-from-tool");
         Session after = sessionStore.findSession(session.id()).orElseThrow();

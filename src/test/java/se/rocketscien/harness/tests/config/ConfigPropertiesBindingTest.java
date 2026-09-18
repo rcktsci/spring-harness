@@ -98,6 +98,7 @@ class ConfigPropertiesBindingTest {
         contextRunner.run(context -> {
             SseProperties properties = context.getBean(SseProperties.class);
             assertThat(properties.pingInterval()).isEqualTo(Duration.ofSeconds(15));
+            assertThat(properties.timeout()).isEqualTo(Duration.ZERO);
         });
     }
 
@@ -110,6 +111,7 @@ class ConfigPropertiesBindingTest {
             assertThat(properties.toolCaptureMargin()).isEqualTo(org.springframework.util.unit.DataSize.ofKilobytes(4));
             assertThat(properties.bashTimeout()).isEqualTo(Duration.ofSeconds(30));
             assertThat(properties.bashTimeoutCap()).isEqualTo(Duration.ofMinutes(5));
+            assertThat(properties.page()).isEqualTo(100);
         });
     }
 

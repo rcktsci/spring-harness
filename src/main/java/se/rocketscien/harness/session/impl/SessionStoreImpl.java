@@ -13,6 +13,7 @@ import se.rocketscien.harness.common.IdGenerator;
 import se.rocketscien.harness.session.AgentNotFoundException;
 import se.rocketscien.harness.session.AgentRevisionEntity;
 import se.rocketscien.harness.session.AgentRevisionRepository;
+import se.rocketscien.harness.session.InvalidCursorException;
 import se.rocketscien.harness.session.MessageKind;
 import se.rocketscien.harness.session.Session;
 import se.rocketscien.harness.session.SessionEntity;
@@ -28,9 +29,13 @@ import se.rocketscien.harness.session.TurnOutcome;
 import se.rocketscien.harness.session.VisibilityRenderer;
 
 import java.sql.Timestamp;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
+import java.util.Collection;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -217,8 +222,8 @@ public class SessionStoreImpl implements SessionStore {
         List<VisibilityRenderer.Cover> visibleIntervals =
                 VisibilityRenderer.visibleIntervals(compacts, session.getLastSeq());
 
-        if (visibleIntervals.size() == 1 && 
-            visibleIntervals.getFirst().fromSeq() == 1 && 
+        if (visibleIntervals.size() == 1 &&
+            visibleIntervals.getFirst().fromSeq() == 1 &&
             visibleIntervals.getFirst().toSeq() == session.getLastSeq()) {
             return sessionMessageRepository.findAllBySessionId(sessionId);
         }
@@ -226,6 +231,131 @@ public class SessionStoreImpl implements SessionStore {
             return List.of();
         }
         return selectByIntervals(sessionId, visibleIntervals);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public SessionSearchResult searchSessions(SessionSearchCriteria criteria) throws InvalidCursorException {
+        List<String> conditions = new ArrayList<>();
+
+        if (criteria.ownerUserId() != null) {
+            conditions.add("s.ownerUserId = :owner");
+        }
+        if (criteria.kind() != null) {
+            conditions.add("s.kind = :kind");
+        }
+        if (criteria.titleContains() != null && !criteria.titleContains().isEmpty()) {
+            conditions.add("s.title LIKE :titleContains ESCAPE '\\'");
+        }
+        if (criteria.cursor() != null) {
+            // JPQL не поддерживает tuple-сравнение — разворачиваем (a, id) < (a0, id0) явно
+            conditions.add("(s.lastActivityAt < :cursorActivity"
+                    + " OR (s.lastActivityAt = :cursorActivity AND s.id < :cursorId))");
+        }
+        String where = conditions.isEmpty() ? "" : " WHERE " + String.join(" AND ", conditions);
+        String jpql = "SELECT s FROM SessionEntity s" + where
+                + " ORDER BY s.lastActivityAt DESC, s.id DESC";
+
+        var query = entityManager.createQuery(jpql, SessionEntity.class);
+        if (criteria.ownerUserId() != null) {
+            query.setParameter("owner", criteria.ownerUserId());
+        }
+        if (criteria.kind() != null) {
+            query.setParameter("kind", criteria.kind());
+        }
+        if (criteria.titleContains() != null && !criteria.titleContains().isEmpty()) {
+            query.setParameter("titleContains", "%" + escapeLike(criteria.titleContains()) + "%");
+        }
+        if (criteria.cursor() != null) {
+            CursorPosition cursor = decodeCursor(criteria.cursor());
+            query.setParameter("cursorActivity", cursor.lastActivityAt());
+            query.setParameter("cursorId", cursor.sessionId());
+        }
+
+        // limit + 1: наличие (limit+1)-й строки — признак следующей страницы
+        List<SessionEntity> rows = query.setMaxResults(criteria.limit() + 1).getResultList();
+
+        boolean hasMore = rows.size() > criteria.limit();
+        List<SessionEntity> page = hasMore ? rows.subList(0, criteria.limit()) : rows;
+        List<Session> items = page.stream().map(SessionStoreImpl::toSession).toList();
+        String nextCursor = hasMore
+                ? encodeCursor(page.getLast().getLastActivityAt(), page.getLast().getId())
+                : null;
+        return new SessionSearchResult(items, nextCursor);
+    }
+
+    @Override
+    public void renameSession(UUID sessionId, String newTitle) {
+        int updated = jdbcTemplate.update("UPDATE session SET title = ? WHERE id = ?", newTitle, sessionId);
+        if (updated == 0) {
+            throw new SessionNotFoundException("Сессия %s не найдена".formatted(sessionId));
+        }
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<AgentRevisionSummary> agentCatalog() {
+        return agentRevisionRepository.findLatestRevisions().stream()
+                .map(SessionStoreImpl::toSummary)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<UUID, AgentRevisionSummary> agentSummaries(Collection<UUID> revisionIds) {
+        if (revisionIds.isEmpty()) {
+            return Map.of();
+        }
+        List<AgentRevisionEntity> revisions = entityManager.createQuery(
+                        "SELECT a FROM AgentRevisionEntity a WHERE a.id IN (:ids)",
+                        AgentRevisionEntity.class)
+                .setParameter("ids", revisionIds)
+                .getResultList();
+        Map<UUID, AgentRevisionSummary> result = new LinkedHashMap<>();
+        for (AgentRevisionEntity revision : revisions) {
+            result.put(revision.getId(), toSummary(revision));
+        }
+        return result;
+    }
+
+    private static AgentRevisionSummary toSummary(AgentRevisionEntity revision) {
+        return new AgentRevisionSummary(
+                revision.getId(),
+                revision.getAgentKey(),
+                revision.getRev(),
+                revision.getName(),
+                revision.getDescription()
+        );
+    }
+
+    /** LIKE-маскирование %, _ и escape-символа — пользовательская подстрока, а не паттерн. */
+    private static String escapeLike(String value) {
+        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
+    }
+
+    /**
+     * Непрозрачный курсор страницы: ISO-8601 время последнего элемента (полная точность
+     * Instant — микросекунды Postgres не теряются, E-J-3) + id, Base64-URL.
+     */
+    private static String encodeCursor(Instant lastActivityAt, UUID sessionId) {
+        String raw = lastActivityAt + "|" + sessionId;
+        return Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(raw.getBytes(StandardCharsets.US_ASCII));
+    }
+
+    private static CursorPosition decodeCursor(String cursor) throws InvalidCursorException {
+        try {
+            String raw = new String(Base64.getUrlDecoder().decode(cursor), StandardCharsets.US_ASCII);
+            int separator = raw.indexOf('|');
+            return new CursorPosition(
+                    Instant.parse(raw.substring(0, separator)),
+                    UUID.fromString(raw.substring(separator + 1)));
+        } catch (RuntimeException e) {
+            throw new InvalidCursorException("Некорректный курсор страницы", e);
+        }
+    }
+
+    private record CursorPosition(Instant lastActivityAt, UUID sessionId) {
     }
 
     /**

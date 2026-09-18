@@ -249,6 +249,9 @@ paths:
       responses:
         '202':
           description: Команда принята; COMPACT-событие появится в потоке.
+          content:
+            application/json:
+              schema: {}
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/SessionNotFound' }
         '409': { $ref: '#/components/responses/WrongSessionKind' }
@@ -265,6 +268,9 @@ paths:
       responses:
         '202':
           description: Команда отмены принята.
+          content:
+            application/json:
+              schema: {}
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/SessionNotFound' }
   /sessions/{id}/events:

@@ -34,12 +34,15 @@ harness:
     pull-backoff: 2s
   sse:
     ping-interval: 15s
+    # 0 — без таймаута эмиттера (соединение держится, реконнект — забота клиента)
+    timeout: 0s
   limits:
     body: 1MB
     tool-output: 256KB
     tool-capture-margin: 4KB
     bash-timeout: 30s
     bash-timeout-cap: 5m
+    page: 100
 
 spring:
   main.banner-mode: off

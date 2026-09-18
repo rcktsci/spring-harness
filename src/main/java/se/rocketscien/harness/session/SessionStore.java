@@ -1,5 +1,6 @@
 package se.rocketscien.harness.session;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -91,9 +92,56 @@ public interface SessionStore {
     List<SessionMessageEntity> renderVisible(UUID sessionId);
 
     /**
+     * Поиск сессий для списка (api-contracts §2): сортировка {@code lastActivityAt desc,
+     * id desc}; конверт-пагинация непрозрачным курсором (значение {@code nextCursor}
+     * предыдущей страницы), фильтры по владельцу/роду/подстроке title. Все фильтры,
+     * кроме {@code limit}, опциональны. Ограничение страницы применяется как есть
+     * (верхняя граница — забота вызывающего, конфиг API-слоя).
+     *
+     * @throws InvalidCursorException курсор не декодируется — ошибка клиента (422)
+     */
+    SessionSearchResult searchSessions(SessionSearchCriteria criteria) throws InvalidCursorException;
+
+    /** Переименование (merge-patch title); {@code null} — очистить. Неизвестная сессия → {@link SessionNotFoundException}. */
+    void renameSession(UUID sessionId, String newTitle);
+
+    /** Каталог агентов: последняя ревизия каждого ключа, порядок по ключу (api-contracts §1). */
+    List<AgentRevisionSummary> agentCatalog();
+
+    /** Ключ/ревизия агента для пиннутых ревизий (заполнение SessionDto.agent); отсутствующие не входят. */
+    Map<UUID, AgentRevisionSummary> agentSummaries(Collection<UUID> revisionIds);
+
+    /**
      * Результат дописи: присвоенный {@code seq} и ULID события.
      */
     record AppendedEvent(long seq, String ulid) {
+    }
+
+    /**
+     * Критерии поиска сессий; {@code cursor} — непрозрачный курсор (opaque), интерпретируется
+     * только реализацией. {@code limit} >= 1.
+     */
+    record SessionSearchCriteria(
+            UUID ownerUserId,
+            SessionKind kind,
+            String titleContains,
+            String cursor,
+            int limit
+    ) {
+    }
+
+    /** Страница поиска: {@code nextCursor} — null, когда страниц больше нет. */
+    record SessionSearchResult(List<Session> items, String nextCursor) {
+    }
+
+    /** Выжимка ревизии агента для публичных DTO (SessionDto.agent, GET /agents). */
+    record AgentRevisionSummary(
+            UUID revisionId,
+            String agentKey,
+            int rev,
+            String name,
+            String description
+    ) {
     }
 
     /**

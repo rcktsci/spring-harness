@@ -152,7 +152,7 @@ class WorkspaceContainerManagerDockerTest {
                 Duration.ofMillis(50));
         LimitsProperties limits = new LimitsProperties(
                 DataSize.ofMegabytes(1), DataSize.ofMegabytes(1), DataSize.ofKilobytes(4),
-                Duration.ofSeconds(2), Duration.ofSeconds(5));
+                Duration.ofSeconds(2), Duration.ofSeconds(5), 100);
         return new WorkspaceContainerManager(dockerClient, docker, limits);
     }
 

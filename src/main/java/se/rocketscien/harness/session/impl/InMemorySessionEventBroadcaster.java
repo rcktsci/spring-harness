@@ -8,6 +8,7 @@ import se.rocketscien.harness.session.SessionEventBroadcaster;
 import se.rocketscien.harness.session.SessionEventListener;
 import se.rocketscien.harness.session.SessionRuntimeStatus;
 import se.rocketscien.harness.session.SessionStore;
+import se.rocketscien.harness.session.TurnOutcome;
 
 import java.util.List;
 import java.util.Map;
@@ -39,14 +40,16 @@ public class InMemorySessionEventBroadcaster implements SessionEventBroadcaster,
     private final ConcurrentMap<UUID, SessionState> sessions = new ConcurrentHashMap<>();
 
     @Override
-    public SessionRuntimeStatus runtimeStatus(UUID sessionId) {
+    public StatusSnapshot statusSnapshot(UUID sessionId) {
         SessionState state = sessions.get(sessionId);
-        return state == null ? SessionRuntimeStatus.IDLE : state.runtimeStatus;
+        return state == null
+                ? new StatusSnapshot(SessionRuntimeStatus.IDLE, null)
+                : new StatusSnapshot(state.runtimeStatus, state.lastTurnOutcome);
     }
 
     @Override
-    public void publishStatus(UUID sessionId, SessionRuntimeStatus status) {
-        onEvent(new SessionEvent.StatusChanged(sessionId, status));
+    public void publishStatus(UUID sessionId, SessionRuntimeStatus status, TurnOutcome lastTurnOutcome) {
+        onEvent(new SessionEvent.StatusChanged(sessionId, status, lastTurnOutcome));
     }
 
     @Override
@@ -65,6 +68,7 @@ public class InMemorySessionEventBroadcaster implements SessionEventBroadcaster,
         } else if (event instanceof SessionEvent.StatusChanged status) {
             SessionState state = state(status.sessionId());
             state.runtimeStatus = status.runtimeStatus();
+            state.lastTurnOutcome = status.lastTurnOutcome();
             deliver(state, status);
         }
     }
@@ -107,6 +111,7 @@ public class InMemorySessionEventBroadcaster implements SessionEventBroadcaster,
         private final List<Consumer<SessionEvent>> subscribers = new CopyOnWriteArrayList<>();
         private final Map<Long, SessionEvent.MessageCreated> pending = new TreeMap<>();
         private volatile SessionRuntimeStatus runtimeStatus = SessionRuntimeStatus.IDLE;
+        private volatile TurnOutcome lastTurnOutcome;
         private long lastDeliveredSeq;
     }
 }
