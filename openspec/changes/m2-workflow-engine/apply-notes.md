@@ -249,3 +249,79 @@ TaskEngineTransitionTest 8 (CAS-гонки, stop-vs-transition ×10) + TaskSched
 TaskWakeBusTest 4 + WaitTasksScopeTest 8 + WaitTasksStateExecutorIntegrationTest 11 +
 WaitWebhookStateExecutorIntegrationTest 6, ConfigPropertiesBindingTest +1 (bindsTaskDefaults).
 Итог сюиты: **351 зелёных** (было 295 после пачки H).
+
+## Пачка J — AGENT-состояния + STATE-сессии + metaTools + SSE задач
+
+### Отклонения dev (4)
+
+1. **`StateSessionService` — контракт в корне session-модуля** (`session/StateSessionService`
+   + `session/impl/StateSessionServiceImpl`), а не целиком в `session/impl`: ArchUnit
+   «чужой `.impl` не импортируется» — execution зовёт только контракт. `owner_user_id`
+   STATE-сессии читается собственным SQL из строки `task` (прецедент «данные-не-API» пачки H:
+   TaskRegistryImpl → workflow_revision); session-модуль task-классы не импортирует.
+2. **`instructionSource` резолвится в execution из батча, поднявшего Turn** (виды незапрошенных
+   событий после `last_consumed_seq`: USER → USER; только TOOL_RESULT → TOOL_RESULT; иначе
+   SYSTEM), а не через `Caller`: Turn исполняется на виртуальном потоке вне HTTP-контекста,
+   SecurityContext там недоступен, а api-модуль execution не импортирует. `Caller.instructionSource()`
+   /`sessionOwner()` добавлены по брифу как plumbing API-точек входа (атрибуция K.1; в M2 все
+   входы API — USER).
+3. **`task_event_seq` расходуют не только переходы** (session-api: «сквозной счётчик всех
+   событий, включая не-transition»): `TaskRegistryImpl.addComment` и `cancelByStop` (stop)
+   резервируют seq RETURNING-ом транзакционно с эмиссией. Эмиссия статуса на suspend/resume —
+   K.2 (REST этой пачки); `suspended` накрывается снапшотом при каждом коннекте/реконнекте.
+4. **SSE-backlog in-memory и ограниченный** (`harness.sse.task-backlog`, D-J-5-стиль): после
+   рестарта процесса реконнект добирает только снапшот; durable-бэкфилл потребовал бы таблицу
+   журнала событий задачи (новая миграция — вне объёма J, схема заморожена H.1). Курсор
+   `task_event_seq` durable; пара кадров `task.transition`+`task.status` делит один seq
+   (курсор — привязка к событию, не уникальный id кадра; фильтры доставки — строго «меньше»).
+
+### Фиксы ревью пачки J (применены)
+
+- **J-1 (DS, medium)**: `instructionSource` резолвился раз на Turn — USER во время
+  TOOL_RESULT/SYSTEM-хода попадал в доп. раунд с устаревшим source; watermark COMPLETED его
+  потреблял, а EVENT-wake выпадал на занятом локе — USER-намерение терялось.
+  Fix: `AgentTurnEngine.run` возвращает source хода; `TurnManagerImpl` после turn-finish
+  не-USER-хода (строго после unlock) переподнимает Turn (`session-wake`), если в журнале есть
+  непрочитанный USER. Для USER-ходов не применяется (их mid-turn USER идёт в доп. раунд с
+  корректным гейтом). Регресс: `AgentTransitionToolTest.userArrivingDuringToolResultTurnStartsRewokenTurnWithUserGate`
+  (USER во время долгого bash + stop → CANCELLED с непрочитанным USER → re-wake → transition применён).
+- **J-1/R-1 (DS, round 2 — полнота фикса)**: первый фикс не покрывал COMPLETED-кейс:
+  ход от TOOL_RESULT рендерит mid-turn USER доп. раундом, гейт блокирует transition,
+  но финальный ASSISTANT потребляет watermark (`last_consumed_seq == last_seq`) —
+  journal-проверка re-wake не срабатывала. Fix: pending-намерение кодируется в самом
+  watermark — `AgentTurnEngine` (TurnState) отслеживает минимальный seq нового USER'а,
+  отрендеренного не-USER-ходом; при блокировке transition гейтом `last_consumed_seq`
+  на turn-finish замораживается на `userIntentSeq - 1` (все три исхода: COMPLETED/FAILED/
+  CANCELLED). USER остаётся в батче → post-finish re-wake поднимает ход с source=USER.
+  Терминальность цепочки: re-woken ход — USER-source, для него re-wake не применяется.
+  Регресс: `AgentTransitionToolTest.completedToolResultTurnKeepsUserIntentPendingAndRewakes`
+  (COMPLETED-ход, bash-окно для USER, cap `last_consumed == userSeq-1`, re-wake, transition
+  применён, в истории одна запись).
+- **J-3**: `TransitionMetaTool.declaration()` — полноценный `FunctionToolCallback` по стилю
+  M1 (`NativeAgentTools`); опциональность полей — `@ToolParam(required=false)` (taskId —
+  «optional; resolved from the current state session», kind — optional), попадает в JSON-Schema
+  провайдера; тело callback возвращает маркер (внутреннее исполнение Spring AI отключено —
+  write-ahead/исполнение на Turn'е).
+- **J-4**: `TaskWakeBroadcaster.streams` — eviction: поток удаляется из карты при уходе
+  последнего подписчика; при переполнении backlog выброшенные кадры сигналятся живым
+  подписчикам служебным кадром `TaskEvent.BacklogOverflow` → SSE `notify-dropped-events`
+  (клиент ресинхронизируется снапшотом). `harness.sse.task-backlog` — только конфиг
+  (fallback-дефолты 512/15000 из кода убраны, включая таймаут/ping контроллера).
+- **J-5**: `rule=reason-required` — только для пустого `reason`; пустой `toState` →
+  `rule=to-state-required`.
+- **J-6**: Javadoc `TaskEvent.Status`/`TaskEventsController`: парный кадр `task.status` НЕ
+  расходует собственный seq — делит `task_event_seq` перехода; счётчик нумерует события,
+  а не кадры (продублировано в этом разделе, п.4 отклонений).
+- **GLM nit**: числовые fallback-дефолты в коде → конфиг: `harness.sse.task-backlog` (yml),
+  `harness.sse.ping-interval`/`timeout` читаются напрямую; закреплено `ConfigPropertiesBindingTest.bindsSseDefaults`.
+
+### Тесты пачки J
+
+StateSessionServiceTest 4 (атомарное создание+seed, резюм без дубля seed, разные state-code,
+гонка 8 потоков — одна сессия/один seed) + AgentTransitionToolTest 6 (USER-ход применяет
+переход транзакционно; TOOL_RESULT-ход блокирован гейтом; пустой reason; max-per-turn=1;
+J-1 re-wake CANCELLED; J-1/R-1 pending-intent COMPLETED) + AgentStateBootstrapperTest 2
+(bootstrap без сессии → Turn; повторный — резюм) + TaskEventsSseTest 5 (снапшот+живые кадры,
+реконнект по Last-Event-ID, subtask.terminal на потоке родителя, task.comment с username
+автора, 404) + ConfigPropertiesBindingTest +1 (assert task-backlog). Итог сюиты: **368 зелёных**
+(было 351 после пачки I).

@@ -4,6 +4,12 @@ import se.rocketscien.harness.api.gen.model.AgentRef;
 import se.rocketscien.harness.api.gen.model.MessageDto;
 import se.rocketscien.harness.api.gen.model.SessionDto;
 import se.rocketscien.harness.api.gen.model.SessionStatusEvent;
+import se.rocketscien.harness.api.gen.model.SubtaskTerminalEvent;
+import se.rocketscien.harness.api.gen.model.TaskCommentEvent;
+import se.rocketscien.harness.api.gen.model.TaskStatusEvent;
+import se.rocketscien.harness.api.gen.model.TaskStatusProjection;
+import se.rocketscien.harness.api.gen.model.TaskTransitionEvent;
+import se.rocketscien.harness.api.gen.model.TransitionKind;
 import se.rocketscien.harness.api.gen.model.WorkspaceBinding;
 import se.rocketscien.harness.execution.TurnPayloads;
 import se.rocketscien.harness.session.MessageKind;
@@ -13,6 +19,8 @@ import se.rocketscien.harness.session.SessionMessageEntity;
 import se.rocketscien.harness.session.SessionRuntimeStatus;
 import se.rocketscien.harness.session.SessionStore;
 import se.rocketscien.harness.session.TurnOutcome;
+import se.rocketscien.harness.task.TaskEvent;
+import se.rocketscien.harness.task.TaskStatus;
 
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -118,5 +126,36 @@ final class ApiMappers {
 
     private static OffsetDateTime utc(Instant instant) {
         return instant.atOffset(ZoneOffset.UTC);
+    }
+
+    /** Кадр {@code task.status} (снапшот при коннекте/реконнекте — тот же payload). */
+    static TaskStatusEvent toStatusEvent(UUID taskId, String currentState, TaskStatus projection,
+                                         boolean suspended, long taskEventSeq) {
+        return new TaskStatusEvent(taskId, currentState, genProjection(projection), suspended, taskEventSeq);
+    }
+
+    static TaskTransitionEvent toEvent(TaskEvent.Transition event) {
+        return new TaskTransitionEvent(event.id(), event.taskId(), event.fromState(), event.toState(),
+                TransitionKind.valueOf(event.kind().name()), event.reason(), utc(event.createdAt()));
+    }
+
+    static TaskStatusEvent toEvent(TaskEvent.Status event) {
+        return toStatusEvent(event.taskId(), event.currentState(), event.statusProjection(),
+                event.suspended(), event.seq());
+    }
+
+    static SubtaskTerminalEvent toEvent(TaskEvent.SubtaskTerminal event) {
+        return new SubtaskTerminalEvent(event.taskId(), event.terminalTaskId(),
+                genProjection(event.terminalStatus()));
+    }
+
+    /** {@code author} — username; null для системных комментариев (разрешение — контроллер). */
+    static TaskCommentEvent toEvent(TaskEvent.Comment event, String authorUsername) {
+        return new TaskCommentEvent(event.id(), event.taskId(), event.body(), authorUsername,
+                utc(event.createdAt()));
+    }
+
+    private static TaskStatusProjection genProjection(TaskStatus status) {
+        return TaskStatusProjection.valueOf(status.name());
     }
 }

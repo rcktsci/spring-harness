@@ -26,8 +26,8 @@ public record TaskProperties(
     public record Timeout(Duration scanInterval) {
     }
 
-    /** Параметры переходов: дефолтные таймауты по kind (для состояний без явного {@code timeout}). */
-    public record Transition(KindTimeouts kindTimeouts) {
+    /** Параметры переходов: дефолтные таймауты по kind и лимит metaTool {@code transition} на Turn (D-52/D-59). */
+    public record Transition(KindTimeouts kindTimeouts, Integer maxPerTurn) {
     }
 
     /**

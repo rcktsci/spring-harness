@@ -34,6 +34,8 @@ harness:
       # Интервал скана просроченных deadline_at (task-timeout-scanner).
       scan-interval: 30s
     transition:
+      # Лимит срабатываний metaTool transition за один Turn (D-52/D-59).
+      max-per-turn: 1
       kind-timeouts:
         # Дефолтные дедлайны по kind: применяются, когда у состояния нет явного `timeout`.
         bash: 10m
@@ -68,6 +70,8 @@ harness:
     ping-interval: 15s
     # 0 — без таймаута эмиттера (соединение держится, реконнект — забота клиента)
     timeout: 0s
+    # Размер backlog событий задачи на SSE-поток (задача J.4; бэкфилл реконнекта за курсором).
+    task-backlog: 512
   limits:
     body: 1MB
     tool-output: 256KB

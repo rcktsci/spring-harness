@@ -101,6 +101,8 @@ class ConfigPropertiesBindingTest {
             SseProperties properties = context.getBean(SseProperties.class);
             assertThat(properties.pingInterval()).isEqualTo(Duration.ofSeconds(15));
             assertThat(properties.timeout()).isEqualTo(Duration.ZERO);
+            // J-4: backlog SSE-потока задачи — только конфиг (fallback-дефолты в коде запрещены)
+            assertThat(properties.taskBacklog()).isEqualTo(512);
         });
     }
 

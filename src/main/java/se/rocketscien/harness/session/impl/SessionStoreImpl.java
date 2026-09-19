@@ -212,6 +212,14 @@ public class SessionStoreImpl implements SessionStore {
 
     @Override
     @Transactional(readOnly = true)
+    public List<MessageKind> findPendingKinds(UUID sessionId, long afterSeq) {
+        return jdbcTemplate.queryForList(
+                "SELECT DISTINCT kind FROM session_message WHERE session_id = ? AND seq > ?",
+                MessageKind.class, sessionId, afterSeq);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public List<SessionMessageEntity> renderVisible(UUID sessionId) {
         SessionEntity session = entityManager.find(SessionEntity.class, sessionId);
         if (session == null) {

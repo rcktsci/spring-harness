@@ -36,8 +36,8 @@ import java.util.concurrent.Executors;
  *   <li>WAIT_TASKS (и любые события: терминал подзадачи, resume, blocked/tags changed) —
  *       переоценка всех активных WAIT_TASKS-барьеров (выборка по partial-индексу; переоценка
  *       идемпотентна — CAS; MVP-масштаб допускает полный проход вместо адресной сверки scope).</li>
- *   <li>AGENT — bootstrap STATE-сессии появится в пачке J.3 (AgentStateBootstrapper);
- *       здесь событие фиксируется журналом, POLL подстрахует.</li>
+ *   <li>AGENT — bootstrap STATE-сессии ({@link AgentStateBootstrapper}, пачка J.3):
+ *       findOrCreate + wake сессии; POLL ({@code task-scheduler}) страхует повторным wake.</li>
  *   <li>WAIT_WEBHOOK — пассивен (только таймаут-скан), событий не требует.</li>
  * </ul>
  */
@@ -51,6 +51,7 @@ public class TaskWakeDispatcher implements TaskWakeHandler {
     private final TaskEngine taskEngine;
     private final BashStateExecutor bashExecutor;
     private final WaitTasksStateExecutor waitTasksExecutor;
+    private final AgentStateBootstrapper agentBootstrapper;
     private final InProcessTaskWakeBus wakeBus;
     private final JdbcTemplate jdbcTemplate;
     private final TaskProperties properties;
@@ -82,8 +83,14 @@ public class TaskWakeDispatcher implements TaskWakeHandler {
                     && properties.bashDispatch().enabled()) {
                 dispatchBash(task);
             } else if (task.currentStateKind() == TaskStateKind.AGENT) {
-                // bootstrap STATE-сессии — пачка J.3 (AgentStateBootstrapper); POLL подстрахует.
-                log.debug("Wake AGENT-задачи {}: bootstrap появится в пачке J", taskId);
+                // J.3: bootstrap STATE-сессии (findOrCreate + wake) — идемпотентен;
+                // сбой не рушит переоценку барьеров ниже, POLL подстрахует.
+                try {
+                    agentBootstrapper.bootstrap(task.id(), task.currentState());
+                } catch (Exception e) {
+                    log.warn("Bootstrap AGENT-задачи {} не удался (POLL подстрахует): {}",
+                            task.id(), e.getMessage());
+                }
             }
             // Любой wake может закрывать чужие барьеры: терминал подзадачи, созданной сразу
             // терминальной (старт в TERMINAL), изменение тегов (TAGGED-скоп), stop ('$CANCELLED'

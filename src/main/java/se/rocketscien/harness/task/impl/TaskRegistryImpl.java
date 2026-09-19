@@ -21,6 +21,8 @@ import se.rocketscien.harness.task.TaskAlreadyTerminalException;
 import se.rocketscien.harness.task.TaskCommentEntity;
 import se.rocketscien.harness.task.TaskDependencyEntity;
 import se.rocketscien.harness.task.TaskEntity;
+import se.rocketscien.harness.task.TaskEvent;
+import se.rocketscien.harness.task.TaskEventListener;
 import se.rocketscien.harness.task.TaskNotFoundException;
 import se.rocketscien.harness.task.TaskRegistry;
 import se.rocketscien.harness.task.TaskStateKind;
@@ -81,6 +83,7 @@ public class TaskRegistryImpl implements TaskRegistry {
     private final IdGenerator idGenerator;
     private final JdbcTemplate jdbcTemplate;
     private final List<TaskWakeListener> wakeListeners;
+    private final List<TaskEventListener> eventListeners;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -267,51 +270,69 @@ public class TaskRegistryImpl implements TaskRegistry {
         requireTask(taskId);
         List<UUID> subtree = subtreeIds(taskId, null);
         UUID root = subtree.getFirst();
-        if (!cancelByStop(root)) {
+        List<TaskEvent> events = new ArrayList<>();
+        if (!cancelByStop(root, events)) {
             throw new TaskAlreadyTerminalException(
                     "Задача %s уже терминальна, stop недопустим".formatted(taskId));
         }
         for (UUID id : subtree.subList(1, subtree.size())) {
-            cancelByStop(id);
+            cancelByStop(id, events);
         }
         // D-49: EVENT-wake из update — '$CANCELLED' терминален для WAIT_TASKS-наблюдателей
         // (ALL_TERMINAL), их переоценка срабатывает сразу.
         publishWakeAfterCommit(taskId);
+        publishEventsAfterCommit(events);
         log.info("Задача {} остановлена ('$CANCELLED'), поддерево: {} узлов", taskId, subtree.size());
     }
 
     /**
      * CAS в {@code '$CANCELLED'} одного узла: SELECT ... FOR UPDATE фиксирует old-состояние без
      * гонки, UPDATE с гвардом «не терминальная» (без гварда suspended — data-model §7.2)
-     * выигрывает у переходов; запись истории — в той же транзакции. false — узел уже терминален.
+     * выигрывает у переходов; запись истории и инкремент {@code task_event_seq} — в той же
+     * транзакции. SSE-события (переход CANCEL + статус, терминал родителю) накапливаются
+     * в {@code events} — публикация после коммита. false — узел уже терминален.
      */
-    private boolean cancelByStop(UUID id) {
+    private boolean cancelByStop(UUID id, List<TaskEvent> events) {
         PreviousState previous = jdbcTemplate.queryForObject(
-                "SELECT current_state, status_projection FROM task WHERE id = ? FOR UPDATE",
+                "SELECT current_state, status_projection, parent_task_id FROM task WHERE id = ? FOR UPDATE",
                 (rs, rowNum) -> new PreviousState(
                         rs.getString("current_state"),
-                        TaskStatus.valueOf(rs.getString("status_projection"))),
+                        TaskStatus.valueOf(rs.getString("status_projection")),
+                        rs.getObject("parent_task_id", UUID.class)),
                 id
         );
         if (previous.statusProjection().isTerminal()) {
             return false;
         }
-        int updated = jdbcTemplate.update("""
+        UUID transitionId = idGenerator.newUuidV7();
+        List<Long> reserved = jdbcTemplate.query("""
                 UPDATE task
                 SET suspended = true,
                     current_state = ?,
                     current_state_kind = 'TERMINAL',
                     status_projection = 'CANCELLED',
                     deadline_at = NULL,
+                    task_event_seq = task_event_seq + 1,
                     updated_at = now()
                 WHERE id = ? AND status_projection IN ('RUNNING', 'WAITING')
-                """, CANCELLED_STATE, id);
-        if (updated == 0) {
+                RETURNING task_event_seq
+                """, (rs, rowNum) -> rs.getLong("task_event_seq"), CANCELLED_STATE, id);
+        if (reserved.isEmpty()) {
             return false;
         }
+        long eventSeq = reserved.getFirst();
+        Instant now = dbNow();
+        Map<String, Object> reason = Map.of("kind", "stop", "actor", "user");
         entityManager.persist(new TaskTransitionHistoryEntity(
-                idGenerator.newUuidV7(), id, previous.currentState(), CANCELLED_STATE,
-                TransitionKind.CANCEL, Map.of("kind", "stop", "actor", "user"), dbNow()));
+                transitionId, id, previous.currentState(), CANCELLED_STATE,
+                TransitionKind.CANCEL, reason, now));
+        events.add(new TaskEvent.Transition(eventSeq, id, transitionId, previous.currentState(),
+                CANCELLED_STATE, TransitionKind.CANCEL, reason, now));
+        events.add(new TaskEvent.Status(eventSeq, id, CANCELLED_STATE, TaskStatus.CANCELLED, true));
+        if (previous.parentTaskId() != null) {
+            events.add(new TaskEvent.SubtaskTerminal(incrementEventSeq(previous.parentTaskId()),
+                    previous.parentTaskId(), id, TaskStatus.CANCELLED));
+        }
         return true;
     }
 
@@ -321,11 +342,17 @@ public class TaskRegistryImpl implements TaskRegistry {
             throw new IllegalArgumentException("Текст комментария обязателен");
         }
         requireTask(taskId);
+        // seq комментария резервируется транзакционно с дописью (спека session-api: курсор
+        // task_event_seq нумерует все события задачи, включая не-transition)
+        long eventSeq = incrementEventSeq(taskId);
         TaskCommentEntity entity = new TaskCommentEntity(
                 idGenerator.newUuidV7(), taskId, authorUserId, body, dbNow());
         entityManager.persist(entity);
-        return new Comment(entity.getId(), entity.getTaskId(), entity.getAuthorUserId(),
+        Comment comment = new Comment(entity.getId(), entity.getTaskId(), entity.getAuthorUserId(),
                 entity.getBody(), entity.getCreatedAt());
+        publishEventsAfterCommit(List.of(new TaskEvent.Comment(eventSeq, comment.taskId(),
+                comment.id(), comment.authorUserId(), comment.body(), comment.createdAt())));
+        return comment;
     }
 
     @Override
@@ -592,7 +619,7 @@ public class TaskRegistryImpl implements TaskRegistry {
                 """, UUID.class, taskId, depth, depth);
     }
 
-    private record PreviousState(String currentState, TaskStatus statusProjection) {
+    private record PreviousState(String currentState, TaskStatus statusProjection, UUID parentTaskId) {
     }
 
     private record LockedStatus(TaskStatus statusProjection, boolean suspended) {
@@ -723,6 +750,46 @@ public class TaskRegistryImpl implements TaskRegistry {
                         listener.getClass().getSimpleName(), taskId, e.getMessage());
             }
         }
+    }
+
+    /** SSE-события — строго после коммита транзакции, зарезервировавшей seq (пачка J.4). */
+    private void publishEventsAfterCommit(List<TaskEvent> events) {
+        if (events.isEmpty()) {
+            return;
+        }
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    publishEvents(events);
+                }
+            });
+        } else {
+            publishEvents(events);
+        }
+    }
+
+    private void publishEvents(List<TaskEvent> events) {
+        for (TaskEventListener listener : eventListeners) {
+            try {
+                for (TaskEvent event : events) {
+                    listener.onTaskEvent(event);
+                }
+            } catch (Exception e) {
+                log.warn("TaskEvent-слушатель {} упал: {}", listener.getClass().getSimpleName(), e.getMessage());
+            }
+        }
+    }
+
+    /** Резерв монотонного {@code task_event_seq} (курсор SSE) транзакционно с эмиссией. */
+    private long incrementEventSeq(UUID taskId) {
+        Long reserved = jdbcTemplate.queryForObject(
+                "UPDATE task SET task_event_seq = task_event_seq + 1 WHERE id = ? RETURNING task_event_seq",
+                Long.class, taskId);
+        if (reserved == null) {
+            throw new TaskNotFoundException("Задача %s не найдена".formatted(taskId));
+        }
+        return reserved;
     }
 
     private Instant dbNow() {

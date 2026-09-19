@@ -15,8 +15,8 @@ import java.util.UUID;
  * POLL-страховка задачного слоя (D-33, спека task-engine «Задачный POLL-страховка»):
  * ShedLock-джоба {@code task-scheduler} (TTL — {@code harness.task.scheduler.ttl}) раз в
  * {@code harness.task.poll-interval} подбирает:
- * (1) AGENT-задачи {@code RUNNING} без STATE-сессии (EVENT-wake потерян — bootstrap; сама
- * процедура bootstrap — пачка J.3, здесь повторный EVENT-wake как переходный механизм);
+ * (1) AGENT-задачи {@code RUNNING} без STATE-сессии (EVENT-wake потерян — повторный wake;
+ * сам bootstrap — {@link AgentStateBootstrapper}, диспетчер исполняет его на любом AGENT-wake);
  * (2) {@code WAIT_TASKS}-барьеры — переоценка (идемпотентна). {@code WAIT_WEBHOOK} в выборку
  * не входит — состояние пассивно, его страхует только {@code task-timeout-scanner}.
  */
@@ -38,7 +38,7 @@ public class TaskSchedulerJob {
         reevaluateWaitTasks();
     }
 
-    /** AGENT + RUNNING + нет STATE-сессии → EVENT-wake (bootstrap — пачка J.3). */
+    /** AGENT + RUNNING + нет STATE-сессии → EVENT-wake (bootstrap исполняет диспетчер — J.3). */
     private void bootstrapAgentWithoutSession() {
         int batchSize = batchSize();
         List<UUID> ids = jdbcTemplate.queryForList("""

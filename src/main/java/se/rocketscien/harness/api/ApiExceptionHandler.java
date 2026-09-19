@@ -17,6 +17,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import se.rocketscien.harness.session.AgentNotFoundException;
 import se.rocketscien.harness.session.SessionNotFoundException;
 import se.rocketscien.harness.session.WrongSessionKindException;
+import se.rocketscien.harness.task.TaskNotFoundException;
 
 import java.io.IOException;
 import java.util.List;
@@ -56,6 +57,12 @@ public class ApiExceptionHandler {
     @ExceptionHandler(AgentNotFoundException.class)
     public void agentNotFound(AgentNotFoundException exception, HttpServletResponse response) throws IOException {
         problemWriter.write(response, HttpStatus.NOT_FOUND, ProblemCodes.AGENT_NOT_FOUND,
+                exception.getMessage(), null);
+    }
+
+    @ExceptionHandler(TaskNotFoundException.class)
+    public void taskNotFound(TaskNotFoundException exception, HttpServletResponse response) throws IOException {
+        problemWriter.write(response, HttpStatus.NOT_FOUND, ProblemCodes.TASK_NOT_FOUND,
                 exception.getMessage(), null);
     }
 

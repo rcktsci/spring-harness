@@ -83,6 +83,13 @@ public interface SessionStore {
     List<SessionMessageEntity> findPendingToolCalls(UUID sessionId);
 
     /**
+     * Виды событий незапрошенного батча {@code (afterSeq, …]} — источник инструкции текущего
+     * Turn'а (D-59): содержит USER → Turn поднят пользовательским сообщением; только
+     * TOOL_RESULT → продолжение после инструмента; иначе — системное событие (seed и пр.).
+     */
+    List<MessageKind> findPendingKinds(UUID sessionId, long afterSeq);
+
+    /**
      * Видимые события = журнал минус {@code COMPACT.covers} позднейших COMPACT-событий:
      * COMPACT сам виден, если не покрыт более поздним COMPACT. Payload COMPACT —
      * {@code {"covers": [{"from": <seq>, "to": <seq>}, ...], "summary": "..."}} —

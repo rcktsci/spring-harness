@@ -20,6 +20,7 @@ final class ProblemCodes {
     static final String UNSUPPORTED_MEDIA_TYPE = ProblemCode.UNSUPPORTED_MEDIA_TYPE.getValue();
     static final String SIGNATURE_INVALID = ProblemCode.SIGNATURE_INVALID.getValue();
     static final String NOT_IMPLEMENTED = ProblemCode.NOT_IMPLEMENTED.getValue();
+    static final String TASK_NOT_FOUND = ProblemCode.TASK_NOT_FOUND.getValue();
 
     private ProblemCodes() {
     }
