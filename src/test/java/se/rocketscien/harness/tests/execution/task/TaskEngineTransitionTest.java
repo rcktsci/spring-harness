@@ -125,7 +125,9 @@ class TaskEngineTransitionTest extends BaseApplicationTest {
         assertThat(applied).isNull();
         Task after = taskRegistry.get(task.id());
         assertThat(after.currentState()).isEqualTo("plan");
-        assertThat(after.taskEventSeq()).isEqualTo(task.taskEventSeq());
+        // suspend эмитирует кадр task.status с собственным seq (K.2); отклонённый CAS-переход
+        // seq не расходует — инвариант теста
+        assertThat(after.taskEventSeq()).isEqualTo(task.taskEventSeq() + 1);
         assertThat(historyOf(task.id())).isEmpty();
     }
 

@@ -30,6 +30,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -163,6 +164,21 @@ public class WorkflowRegistryImpl implements WorkflowRegistry {
                 .orElseThrow(() -> new WorkflowNotFoundException(
                         "Ревизия %d workflow '%s' не найдена".formatted(rev, workflowKey)));
         return toRevision(revision);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<UUID, RevisionSummary> revisionSummaries(Collection<UUID> revisionIds) {
+        if (revisionIds == null || revisionIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, RevisionSummary> result = new HashMap<>();
+        for (Object[] row : revisionRepository.findRevisionSummaries(revisionIds)) {
+            RevisionSummary summary = new RevisionSummary(
+                    (UUID) row[0], (String) row[1], ((Number) row[2]).intValue());
+            result.put(summary.revisionId(), summary);
+        }
+        return result;
     }
 
     @Override

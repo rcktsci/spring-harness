@@ -68,12 +68,17 @@
 
 ### Requirement: Stop (принудительная отмена)
 
-`POST /api/v1/tasks/{id}/stop → 202` SHALL: (1) установить `suspended=true`; (2) отменить активные Turn'ы сессий состояния задачи **и всех подзадач — stop всегда каскадный (параметр `cascade` в API stop отсутствует)**; (3) атомарным CAS записать `current_state = '$CANCELLED'` и добавить запись в `task_transition_history` с `kind=CANCEL`, `to_state='$CANCELLED'`, `reason_jsonb={ kind: 'stop', actor: 'user' }`; (4) обновить `status_projection = CANCELLED`. `'$CANCELLED'` — зарезервированный псевдо-код вне `codes` ревизии; CANCEL-рёбра в графе не требуются. Resume `'$CANCELLED'`-задачи → `409 task-already-terminal`.
+`POST /api/v1/tasks/{id}/stop → 202` SHALL выполняться в две фазы (K-2):
+
+- **sync** (в транзакции запроса, `TaskRegistry.stop`): (1) установить `suspended=true`; (3) атомарным CAS записать `current_state = '$CANCELLED'` и добавить запись в `task_transition_history` с `kind=CANCEL`, `to_state='$CANCELLED'`, `reason_jsonb={ kind: 'stop', actor: 'user' }`; (4) обновить `status_projection = CANCELLED`; (5) эмиссия кадра `task.status` с собственным значением монотонного durable-счётчика `task_event_seq` (инкремент транзакционно с переходом). Ответ `202` возвращается сразу после коммита.
+- **async** (после коммита): EVENT-wake → `TaskWakeDispatcher.handleStop` SHALL отменить активные Turn'ы STATE-сессий задачи **и всех подзадач — stop всегда каскадный (параметр `cascade` в API stop отсутствует)** — через `TurnManager.requestStop` (`cancel_requested` + прерывание in-flight Turn'а; идемпотентно, сессия без Turn'а — no-op).
+
+Отмена Turn'ов SHALL быть отказоустойчива к рестарту процесса: `'$CANCELLED'` уже терминален и переживает рестарт как факт, отдельная POLL-страховка не требуется. `'$CANCELLED'` — зарезервированный псевдо-код вне `codes` ревизии; CANCEL-рёбра в графе не требуются. Resume `'$CANCELLED'`-задачи → `409 task-already-terminal`.
 
 #### Scenario: stop задачи с активным AGENT-состоянием
 
 - **WHEN** клиент stop'ит задачу, у которой активная STATE-сессия
-- **THEN** Turn отменяется, контейнеры освобождаются, `current_state='$CANCELLED'`, `status_projection=CANCELLED`, в истории — запись `kind=CANCEL`
+- **THEN** `202` и `current_state='$CANCELLED'`, `status_projection=CANCELLED` сразу; Turn отменяется async-фазой (wake → dispatcher), контейнеры освобождаются, в истории — запись `kind=CANCEL`
 
 #### Scenario: stop уже терминальной задачи
 

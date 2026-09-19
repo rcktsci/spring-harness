@@ -1,15 +1,21 @@
 package se.rocketscien.harness.api;
 
 import se.rocketscien.harness.api.gen.model.AgentRef;
+import se.rocketscien.harness.api.gen.model.CommentDto;
 import se.rocketscien.harness.api.gen.model.MessageDto;
 import se.rocketscien.harness.api.gen.model.SessionDto;
 import se.rocketscien.harness.api.gen.model.SessionStatusEvent;
+import se.rocketscien.harness.api.gen.model.SessionTreeNode;
 import se.rocketscien.harness.api.gen.model.SubtaskTerminalEvent;
 import se.rocketscien.harness.api.gen.model.TaskCommentEvent;
+import se.rocketscien.harness.api.gen.model.TaskDto;
 import se.rocketscien.harness.api.gen.model.TaskStatusEvent;
 import se.rocketscien.harness.api.gen.model.TaskStatusProjection;
 import se.rocketscien.harness.api.gen.model.TaskTransitionEvent;
+import se.rocketscien.harness.api.gen.model.TaskTreeNode;
+import se.rocketscien.harness.api.gen.model.TransitionDto;
 import se.rocketscien.harness.api.gen.model.TransitionKind;
+import se.rocketscien.harness.api.gen.model.WorkflowRef;
 import se.rocketscien.harness.api.gen.model.WorkspaceBinding;
 import se.rocketscien.harness.execution.TurnPayloads;
 import se.rocketscien.harness.session.MessageKind;
@@ -19,9 +25,13 @@ import se.rocketscien.harness.session.SessionMessageEntity;
 import se.rocketscien.harness.session.SessionRuntimeStatus;
 import se.rocketscien.harness.session.SessionStore;
 import se.rocketscien.harness.session.TurnOutcome;
+import se.rocketscien.harness.task.Comment;
+import se.rocketscien.harness.task.Task;
 import se.rocketscien.harness.task.TaskEvent;
 import se.rocketscien.harness.task.TaskStatus;
+import se.rocketscien.harness.task.Transition;
 
+import java.net.URI;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -157,5 +167,93 @@ final class ApiMappers {
 
     private static TaskStatusProjection genProjection(TaskStatus status) {
         return TaskStatusProjection.valueOf(status.name());
+    }
+
+    // ---------------------------------------------------------------- задачи (пачка K.1)
+
+    /**
+     * Задача → TaskDto (api-contracts §4.1). {@code owner}/{@code author} — username (NULL-автор —
+     * агентская запись); {@code webhookUrl} — capability-URL, только в WAIT_WEBHOOK-состоянии
+     * (null в остальных — поле опущено); {@code workspaceBindings} — M4 (CLIENT_EXEC), в M2 пусто.
+     */
+    static TaskDto toDto(Task task, String ownerUsername, String authorUsername, WorkflowRef workflow,
+                         URI webhookUrl) {
+        TaskDto dto = new TaskDto(
+                task.id(),
+                task.title(),
+                task.description(),
+                ownerUsername,
+                authorUsername,
+                workflow,
+                task.currentState(),
+                genProjection(task.statusProjection()),
+                task.suspended(),
+                task.tags(),
+                task.params(),
+                utc(task.createdAt()),
+                utc(task.updatedAt())
+        );
+        if (task.parentTaskId() != null) {
+            dto.setParentTaskId(task.parentTaskId());
+        }
+        if (webhookUrl != null) {
+            dto.setWebhookUrl(webhookUrl);
+        }
+        return dto;
+    }
+
+    /** Комментарий; {@code authorUsername} — null для агентского (NULL + агент-пометка). */
+    static CommentDto toDto(Comment comment, String authorUsername) {
+        CommentDto dto = new CommentDto(comment.id(), comment.taskId(), comment.body(),
+                utc(comment.createdAt()));
+        if (authorUsername != null) {
+            dto.setAuthor(authorUsername);
+        }
+        return dto;
+    }
+
+    /** Переход истории; reason — свободная структура, пробрасывается как есть. */
+    static TransitionDto toDto(Transition transition) {
+        return new TransitionDto(
+                transition.id(),
+                transition.fromState(),
+                transition.toState(),
+                TransitionKind.valueOf(transition.kind().name()),
+                transition.reason(),
+                utc(transition.createdAt())
+        );
+    }
+
+    /** Узел поддерева задач (BFS-структура реестра) — рекурсивно в сгенерированный TaskTreeNode. */
+    static TaskTreeNode toNode(se.rocketscien.harness.task.TaskTreeNode node) {
+        TaskTreeNode dto = new TaskTreeNode(
+                node.task().id(),
+                node.task().title(),
+                node.task().currentState(),
+                genProjection(node.task().statusProjection()),
+                node.task().suspended()
+        );
+        for (se.rocketscien.harness.task.TaskTreeNode child : node.children()) {
+            dto.addChildrenItem(toNode(child));
+        }
+        return dto;
+    }
+
+    /** Узел дерева сессий: STATE-узел дополнительно несёт taskId/stateCode (M2). */
+    static SessionTreeNode toNode(Session session, AgentRef agent, SessionRuntimeStatus runtimeStatus) {
+        SessionTreeNode node = new SessionTreeNode(
+                session.id(),
+                session.parentSessionId(),
+                se.rocketscien.harness.api.gen.model.SessionKind.valueOf(session.kind().name()),
+                agent,
+                toGenRuntimeStatus(runtimeStatus),
+                session.lastSeq(),
+                utc(session.lastActivityAt())
+        );
+        if (session.kind() == se.rocketscien.harness.session.SessionKind.STATE) {
+            node.setTaskId(session.taskId());
+            node.setStateCode(session.stateCode());
+        }
+        return node;
     }
 }

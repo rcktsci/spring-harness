@@ -45,6 +45,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -174,38 +176,78 @@ public class TaskRegistryImpl implements TaskRegistry {
 
     @Override
     public void addDependency(UUID blockerTaskId, UUID blockedTaskId) {
-        if (blockerTaskId == null || blockedTaskId == null) {
-            throw new IllegalArgumentException("blockerTaskId и blockedTaskId обязательны");
+        addDependencies(blockedTaskId, List.of(blockerTaskId));
+    }
+
+    @Override
+    public void addDependencies(UUID blockedTaskId, Collection<UUID> blockerTaskIds) {
+        if (blockedTaskId == null || blockerTaskIds == null || blockerTaskIds.isEmpty()) {
+            throw new IllegalArgumentException("blockedTaskId и blockerTaskIds обязательны");
         }
+        List<UUID> blockers = blockerTaskIds.stream().distinct().toList();
+
+        // self-loop проверяем до лока — дешёвый отказ без обращения к БД
         List<JsonSchemaError> errors = new ArrayList<>();
-        if (blockerTaskId.equals(blockedTaskId)) {
+        if (blockers.contains(blockedTaskId)) {
             errors.add(new JsonSchemaError("/blockedBy", "self-loop",
                     "Задача не может блокировать сама себя: %s".formatted(blockedTaskId)));
             throw new DependencyInvalidException(errors);
         }
-        // H-6: лок обеих задач (детерминированный порядок по id — без deadlock) сериализует
-        // конкурентные addDependency по тем же задачам; проверка цикла и вставка — под локом
-        jdbcTemplate.queryForList(
-                "SELECT id FROM task WHERE id IN (?, ?) ORDER BY id FOR UPDATE",
-                UUID.class, blockerTaskId, blockedTaskId);
-        requireTask(blockerTaskId);
-        requireTask(blockedTaskId);
 
-        if (dependencyExists(blockerTaskId, blockedTaskId)) {
-            return;
+        // K-1: лок всех затронутых задач (blockers + blocked) одним запросом в детерминированном
+        // порядке по id (H-6, расширение на пачку) — конкурентные пакеты сериализуются без deadlock
+        List<UUID> allIds = new ArrayList<>(blockers);
+        allIds.add(blockedTaskId);
+        String inClause = String.join(", ", Collections.nCopies(allIds.size(), "?"));
+        List<UUID> locked = jdbcTemplate.queryForList(
+                "SELECT id FROM task WHERE id IN (" + inClause + ") ORDER BY id FOR UPDATE",
+                UUID.class, allIds.toArray());
+        Set<UUID> found = new HashSet<>(locked);
+
+        if (!found.contains(blockedTaskId)) {
+            throw new TaskNotFoundException(
+                    "Задача %s не найдена".formatted(blockedTaskId));
         }
-
-        if (reaches(blockedTaskId, blockerTaskId, loadGatesGraph(), new HashSet<>())) {
-            errors.add(new JsonSchemaError("/blockedBy", "cycle",
-                    "Ребро %s → %s замыкает цикл зависимостей".formatted(blockerTaskId, blockedTaskId)));
+        for (UUID blocker : blockers) {
+            if (!found.contains(blocker)) {
+                // Спека §4.1: несуществующий taskId в blockedBy → 422 dependency-invalid
+                errors.add(new JsonSchemaError("/blockedBy", "unknown-task",
+                        "Блокирующая задача %s не найдена".formatted(blocker)));
+            }
+        }
+        if (!errors.isEmpty()) {
             throw new DependencyInvalidException(errors);
         }
 
-        entityManager.persist(new TaskDependencyEntity(blockerTaskId, blockedTaskId));
-        // Триггер переоценки WAIT_TASKS (спека task-engine): изменение blocked_by блокируемой
-        // задачи — EVENT-wake после коммита; диспетчер движка переоценивает её барьер.
-        publishWakeAfterCommit(blockedTaskId);
-        log.info("Добавлена зависимость: {} блокирует {}", blockerTaskId, blockedTaskId);
+        // DFS-проверка циклов с учётом рёбер самой пачки: локальная копия графа пополняется
+        // каждым принимаемым ребром, чтобы [a→b, b→a] в одном пакете не проскочил мимо валидации
+        Map<UUID, List<UUID>> gates = loadGatesGraph();
+        List<UUID> newEdges = new ArrayList<>();
+        for (UUID blocker : blockers) {
+            if (dependencyExists(blocker, blockedTaskId)) {
+                continue;
+            }
+            if (reaches(blockedTaskId, blocker, gates, new HashSet<>())) {
+                errors.add(new JsonSchemaError("/blockedBy", "cycle",
+                        "Ребро %s → %s замыкает цикл зависимостей".formatted(blocker, blockedTaskId)));
+                continue;
+            }
+            gates.computeIfAbsent(blocker, key -> new ArrayList<>()).add(blockedTaskId);
+            newEdges.add(blocker);
+        }
+        if (!errors.isEmpty()) {
+            throw new DependencyInvalidException(errors);
+        }
+
+        for (UUID blocker : newEdges) {
+            entityManager.persist(new TaskDependencyEntity(blocker, blockedTaskId));
+        }
+        if (!newEdges.isEmpty()) {
+            // Триггер переоценки WAIT_TASKS (спека task-engine): blocked-changed после коммита
+            publishWakeAfterCommit(blockedTaskId);
+            log.info("Добавлены зависимости: {} → {} (новых рёбер: {})",
+                    blockers, blockedTaskId, newEdges.size());
+        }
     }
 
     @Override
@@ -221,20 +263,53 @@ public class TaskRegistryImpl implements TaskRegistry {
     @Override
     public void suspend(UUID taskId, boolean cascade) {
         requireTask(taskId);
-        if (!cascade) {
-            jdbcTemplate.update("UPDATE task SET suspended = true, updated_at = now() WHERE id = ?", taskId);
-            return;
-        }
-        jdbcTemplate.update("""
-                WITH RECURSIVE subtree AS (
-                    SELECT id FROM task WHERE id = ?
-                    UNION ALL
-                    SELECT t.id FROM task t JOIN subtree s ON t.parent_task_id = s.id
-                )
-                UPDATE task SET suspended = true, updated_at = now()
-                WHERE id IN (SELECT id FROM subtree)
-                """, taskId);
-        log.info("Задача {} приостановлена (cascade={})", taskId, cascade);
+        List<TaskEvent> events = cascade
+                ? suspendSubtree(taskId)
+                : suspendOne(taskId);
+        // К.2: смена suspended — событие задачи (кадр task.status с собственным seq,
+        // спека session-api: «изменения suspended должны попадать в SSE-поток задачи»).
+        publishEventsAfterCommit(events);
+        log.info("Задача {} приостановлена (cascade={}, узлов: {})", taskId, cascade, events.size());
+    }
+
+    /** Приостановка одной задачи с резервом seq и кадрами {@code task.status}. */
+    private List<TaskEvent> suspendOne(UUID taskId) {
+        return jdbcTemplate.query("""
+                        UPDATE task
+                        SET suspended = true, task_event_seq = task_event_seq + 1, updated_at = now()
+                        WHERE id = ?
+                        RETURNING id, task_event_seq, current_state, status_projection
+                        """,
+                (rs, rowNum) -> new TaskEvent.Status(
+                        rs.getLong("task_event_seq"),
+                        rs.getObject("id", UUID.class),
+                        rs.getString("current_state"),
+                        TaskStatus.valueOf(rs.getString("status_projection")),
+                        true),
+                taskId);
+    }
+
+    /** Приостановка поддерева: один UPDATE по CTE, seq и кадры — для каждого узла. */
+    private List<TaskEvent> suspendSubtree(UUID taskId) {
+        return jdbcTemplate.query("""
+                        WITH RECURSIVE subtree AS (
+                            SELECT id FROM task WHERE id = ?
+                            UNION ALL
+                            SELECT t.id FROM task t JOIN subtree s ON t.parent_task_id = s.id
+                        )
+                        UPDATE task t
+                        SET suspended = true, task_event_seq = task_event_seq + 1, updated_at = now()
+                        FROM subtree s
+                        WHERE t.id = s.id
+                        RETURNING t.id, t.task_event_seq, t.current_state, t.status_projection
+                        """,
+                (rs, rowNum) -> new TaskEvent.Status(
+                        rs.getLong("task_event_seq"),
+                        rs.getObject("id", UUID.class),
+                        rs.getString("current_state"),
+                        TaskStatus.valueOf(rs.getString("status_projection")),
+                        true),
+                taskId);
     }
 
     @Override
@@ -257,8 +332,20 @@ public class TaskRegistryImpl implements TaskRegistry {
                             .formatted(taskId, locked.getFirst().statusProjection()));
         }
         if (locked.getFirst().suspended()) {
-            jdbcTemplate.update(
-                    "UPDATE task SET suspended = false, updated_at = now() WHERE id = ?", taskId);
+            List<TaskEvent> events = jdbcTemplate.query("""
+                    UPDATE task
+                    SET suspended = false, task_event_seq = task_event_seq + 1, updated_at = now()
+                    WHERE id = ?
+                    RETURNING id, task_event_seq, current_state, status_projection
+                    """,
+                    (rs, rowNum) -> new TaskEvent.Status(
+                            rs.getLong("task_event_seq"),
+                            rs.getObject("id", UUID.class),
+                            rs.getString("current_state"),
+                            TaskStatus.valueOf(rs.getString("status_projection")),
+                            false),
+                    taskId);
+            publishEventsAfterCommit(events);
         }
         // не была suspended — флаг не трогаем; wake публикуется всегда
         // (переоценка/bootstrap идемпотентны)
@@ -353,6 +440,49 @@ public class TaskRegistryImpl implements TaskRegistry {
         publishEventsAfterCommit(List.of(new TaskEvent.Comment(eventSeq, comment.taskId(),
                 comment.id(), comment.authorUserId(), comment.body(), comment.createdAt())));
         return comment;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public CommentPage listComments(UUID taskId, String cursor, Integer limit) throws InvalidCursorException {
+        requireTask(taskId);
+        StringBuilder where = new StringBuilder(" WHERE c.task_id = ?");
+        List<Object> params = new ArrayList<>(List.of(taskId));
+        if (cursor != null) {
+            // tuple-сравнение (created_at, id) > (c0, id0) — стабильная пагинация при равных created_at
+            where.append(" AND (c.created_at > ? OR (c.created_at = ? AND c.id > ?))");
+            CursorPosition position = decodeCursor(cursor);
+            Timestamp moment = Timestamp.from(position.moment());
+            params.add(moment);
+            params.add(moment);
+            params.add(position.id());
+        }
+        String sql = """
+                SELECT c.id, c.task_id, c.author_user_id, c.body, c.created_at
+                FROM task_comment c%s
+                ORDER BY c.created_at ASC, c.id ASC
+                """.formatted(where);
+        if (limit != null) {
+            sql += " LIMIT ?";
+            params.add(limit + 1);
+        }
+
+        List<Comment> rows = jdbcTemplate.query(sql, (rs, rowNum) -> new Comment(
+                rs.getObject("id", UUID.class),
+                rs.getObject("task_id", UUID.class),
+                rs.getObject("author_user_id", UUID.class),
+                rs.getString("body"),
+                rs.getTimestamp("created_at").toInstant()
+        ), params.toArray());
+        if (limit == null) {
+            return new CommentPage(rows, null);
+        }
+        boolean hasMore = rows.size() > limit;
+        List<Comment> page = hasMore ? rows.subList(0, limit) : rows;
+        String nextCursor = hasMore
+                ? encodeCursor(page.getLast().createdAt(), page.getLast().id())
+                : null;
+        return new CommentPage(page, nextCursor);
     }
 
     @Override

@@ -325,3 +325,94 @@ J-1 re-wake CANCELLED; J-1/R-1 pending-intent COMPLETED) + AgentStateBootstrappe
 реконнект по Last-Event-ID, subtask.terminal на потоке родителя, task.comment с username
 автора, 404) + ConfigPropertiesBindingTest +1 (assert task-backlog). Итог сюиты: **368 зелёных**
 (было 351 после пачки I).
+
+## Пачка K — REST задач + suspend/resume/stop + зависимости
+
+### Отклонения dev (5)
+
+1. **`owner` подзадачи = пользователь JWT (только в M2; K-6)**: замороженная спека даёт
+   ветки «наследование от родителя (инициатор — агент сессии состояния)» / «из JWT
+   (инициатор — пользователь)». В M2 все входы API — пользовательские (D-59), агентские
+   инструменты появятся в M3 — тогда заработает ветка наследования от owner родителя.
+2. **merge-patch `title:null`/`description:null` → 422 rule=required**: колонки NOT NULL
+   (миграция 012) — «удаление члена» по RFC 7396 невозможно; `tags:null` → очистка
+   (пустой массив). `params` в патче (любое присутствие) → 422 rule=immutable (§4.1).
+3. **Неизвестный blocker в `blockedBy` → 422 dependency-invalid (rule=unknown-task)**, а не
+   404: по тексту замороженной спеки §4.1 («self-loop/цикл/несуществующий taskId → 422»);
+   404 task-not-found — только для блокируемой задачи `{id}` пути.
+4. **`TaskEngineTransitionTest.suspendedTaskRejectsTransitionByCasGuard`: инвариант
+   обновлён** — suspend теперь резервирует один `task_event_seq` (кадр task.status, см.
+   ниже); отклонённый CAS-переход seq не расходует (это и есть проверяемый инвариант).
+5. **`harness.webhook.base-url` — новый обязательный конфиг**: `TaskDto.webhookUrl`
+   (WAIT_WEBHOOK) — абсолютный capability-URL `base + /api/webhooks/tasks/{id}/{HMAC}`;
+   env `HARNESS_WEBHOOK_BASE_URL`, dev-дефолт в application.yml. Переиспользуется L.1
+   (URL триггеров).
+
+### Дополнительно (решения реализации)
+
+- **Suspend/resume попадают в SSE-поток** (решение пачки J-3, отложено на K.2):
+  `TaskRegistryImpl.suspend/resume` резервируют `task_event_seq` (UPDATE … RETURNING;
+  каскадный suspend — один CTE-UPDATE на всё поддерево) и эмитируют кадры `task.status`
+  строго после коммита.
+- **Stop = sync + async (K-2)**: sync (HTTP-транзакция) — CAS `'$CANCELLED'` + история +
+  task.status; async (после коммита) — EVENT-wake → `TaskWakeDispatcher.handleStop`
+  отменяет Turn'ы STATE-сессий поддерева (`TurnManager.requestStop`, идемпотентно).
+  Отдельный `StopTaskFacade` не выделялся (design.md D-54, proposal.md, specs/task-engine
+  §Stop — синхронизированы).
+- **`GET /sessions/{id}/tree` — плоский список**: сгенерированный `SessionTreeNode` не имеет
+  `children` — родство несёт `parentSessionId` каждого узла; дерево задач, наоборот,
+  вложенное (`TaskTreeNode.children`). Поддерево сессий — рекурсивный CTE
+  `SessionStore.findSubtree(sessionId, depth)`, 404 на отсутствующем корне.
+- **`webhookUrl` в списке задач** вычисляется на лету (HMAC stateless, без БД) — цена
+  одного HMAC на WAIT_WEBHOOK-задачу.
+
+### Фиксы ревью пачки K
+
+- **K-1 (DS, medium)**: `POST /tasks/{id}/dependencies` с `[b, unknown]` коммитил первое
+  ребро и только потом падал (частичный коммит — N отдельных транзакций). Fix: новая
+  атомарная операция `TaskRegistry.addDependencies(blockedTaskId, blockerTaskIds[])` —
+  лок всех затронутых задач одним SELECT … IN (…) ORDER BY id FOR UPDATE (расширение H-6
+  на пачку), exists/DFS (с учётом рёбер самой пачки)/insert в одной транзакции; wake
+  «blocked-changed» после коммита. Одиночный `addDependency` оставлен (делегирует в
+  пачку); REST вызывает batch. *Именование: направление параметров следует
+  REST-контракту ({id} = блокируемая, список = блокирующие), а не формулировке
+  `addDependencies(blockerId, blockedIds[])` из ревью — иначе batch не выражается одним
+  вызовом.* Тест: `TasksApiTest.dependencyBatchIsAtomicNoPartialCommit` (422 + 0 рёбер).
+- **K-2 (DS, medium)**: async-отмена Turn'ов задокументирована: design.md D-49 (упоминание
+  StopTaskFacade заменено) + D-54 (раздел «StopTaskFacade → sync + async»), proposal.md
+  §What Changes («Stop = sync + async»), specs/task-engine/spec.md §Stop (двухфазный
+  requirement + сценарий).
+- **K-4 (GLM M-1, minor)**: N+1 в `listTasks` устранён: `TasksController.enricherOf(...)`
+  резолвит usernames (owner+author всех задач страницы) ОДНИМ запросом через
+  `AppUserDirectory.usernames` (WHERE id IN) и выжимки пиннутых ревизий одним
+  `WorkflowRegistry.revisionSummaries`; DTO собираются без обращений к БД. Отдельный
+  класс `BatchUsernameResolver` не заводился — `AppUserDirectory.usernames` уже является
+  батч-резолвером (WHERE id IN), обёртка = дублирование (правило «без энтерпрайза»).
+  Аналогично: `listTaskComments` (один батч по author'ам), `addTaskComment` (один запрос).
+  Тест: `TasksApiTest.listTasksResolvesUsernamesWithSingleBatchQuery` — logback
+  ListAppender на `org.springframework.jdbc.core.JdbcTemplate` → ровно 1 SQL с
+  `username FROM app_user` (важно: `appender.start()` — без него logback молча
+  роняет события).
+- **K-5 (minor)**: не-массивный `tags` в патче (`tags: "foo"`) → 422 validation-failed
+  rule=array-required (pointer /tags). Binding выполняется в `MergePatchHttpMessageConverter`
+  ДО контроллера — поэтому shape-проверка «top-level член не массив при коллекционном
+  свойстве DTO» реализована там (`shapeViolationOf`, reflection по бин-свойствам, без
+  Jackson-introspection); прочие сбои связывания — прежний generic parse-отказ.
+  Тест: `TasksApiTest.patchWithNonArrayTagsReturns422ArrayRequired`.
+- **GLM nit**: `POST /tasks/{id}/suspend` — `cascade` required по спеке: отсутствующее
+  тело/поле → 422 validation-failed rule=required (pointer /cascade), а не тихий default
+  false. Тест: `TaskCommandsApiTest.suspendWithoutCascadeReturns422Required` (Accept:
+  application/problem+json — эндпоинт produces только problem+json, иначе 406).
+- **K-3/K-6**: настоящая секция + отклонение №1 (owner подзадачи).
+
+### Итоги пачки K
+
+TasksApiTest 17 (создание/пин/404/422 params-schema, merge-patch, список+фильтры+курсор,
+подзадачи, дерево, история-курсор, комментарии, зависимости+циклы+атомарность пачки,
+array-required, 1-SQL usernames, 404-матрица) + TaskCommandsApiTest 11 (suspend
+идемпотентно/каскад/frame task.status, resume+wake, 409 на терминале, stop каскад+CANCEL,
+409, 404, cascade-required, отмена Turn'ов STATE-сессии) + SessionsApiTest +2 (дерево:
+STATE-поля taskId/stateCode, depth, 404) + TaskWakeDispatcherStopTest 2 (stop отменяет
+Turn'ы поддерева; patch-wake не трогает cancel_requested) + TaskEngineTransitionTest
+инвариант обновлён + ConfigPropertiesBindingTest +1 (bindsWebhookDefaults).
+**Всего: 401 тест зелёный** (было 368 после пачки J).

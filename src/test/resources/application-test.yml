@@ -1,7 +1,10 @@
 harness:
   webhook:
-    # Фиксированный секрет capability-токенов для тестов (WebhooksRoutingTest считает HMAC по нему же).
+    # Секрет переопределён (WebhooksRoutingTest проверяет HMAC под контролем тестов).
     secret: test-webhook-secret
+    # База capability-URL (TaskDto.webhookUrl): абсолютный URL на живой сервер тестов не нужен —
+    # достаточно стабильной базы для сверки формы.
+    base-url: http://webhook-test
     payload-summary:
       # Малый лимит: test-payloadSummaryTruncation гоняет усечение без гигантских payload'ов.
       byte-size-limit: 64

@@ -41,6 +41,15 @@ public interface SessionStore {
     Optional<Session> findSession(UUID sessionId);
 
     /**
+     * Поддерево сессий по {@code parent_session_id} (api-contracts §2 «дерево сессий»):
+     * корень + все потомки в порядке BFS ({@code depth, createdAt, id}); {@code depth} —
+     * максимальное расстояние от корня ({@code null} — всё поддерево).
+     *
+     * @throws SessionNotFoundException корень не найден
+     */
+    List<Session> findSubtree(UUID sessionId, Integer depth);
+
+    /**
      * Eligible-скан POLL (execution-model §1): {@code last_seq > last_consumed_seq}, index-only
      * по partial index; занятость лока проверяется самим tryStart, не этим методом.
      */

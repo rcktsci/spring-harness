@@ -14,10 +14,16 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import se.rocketscien.harness.common.jsonschema.JsonSchemaError;
 import se.rocketscien.harness.session.AgentNotFoundException;
 import se.rocketscien.harness.session.SessionNotFoundException;
 import se.rocketscien.harness.session.WrongSessionKindException;
+import se.rocketscien.harness.task.DependencyInvalidException;
+import se.rocketscien.harness.task.ParamsSchemaInvalidException;
+import se.rocketscien.harness.task.TaskAlreadyTerminalException;
 import se.rocketscien.harness.task.TaskNotFoundException;
+import se.rocketscien.harness.task.WorkflowRevisionNotFoundException;
+import se.rocketscien.harness.workflow.WorkflowNotFoundException;
 
 import java.io.IOException;
 import java.util.List;
@@ -64,6 +70,37 @@ public class ApiExceptionHandler {
     public void taskNotFound(TaskNotFoundException exception, HttpServletResponse response) throws IOException {
         problemWriter.write(response, HttpStatus.NOT_FOUND, ProblemCodes.TASK_NOT_FOUND,
                 exception.getMessage(), null);
+    }
+
+    /** Ключ/ревизия workflow не найдены (создание задачи, api-contracts §6: workflow-not-found). */
+    @ExceptionHandler({WorkflowNotFoundException.class, WorkflowRevisionNotFoundException.class})
+    public void workflowNotFound(RuntimeException exception, HttpServletResponse response) throws IOException {
+        problemWriter.write(response, HttpStatus.NOT_FOUND, ProblemCodes.WORKFLOW_NOT_FOUND,
+                exception.getMessage(), null);
+    }
+
+    /** Задача в терминале (SUCCEEDED|FAILED|'$CANCELLED') — resume/stop неприменимы (§6). */
+    @ExceptionHandler(TaskAlreadyTerminalException.class)
+    public void taskAlreadyTerminal(TaskAlreadyTerminalException exception,
+                                    HttpServletResponse response) throws IOException {
+        problemWriter.write(response, HttpStatus.CONFLICT, ProblemCodes.TASK_ALREADY_TERMINAL,
+                exception.getMessage(), null);
+    }
+
+    /** Self-loop/цикл/неизвестный blocker (§6: 422 dependency-invalid, errors[]). */
+    @ExceptionHandler(DependencyInvalidException.class)
+    public void dependencyInvalid(DependencyInvalidException exception,
+                                  HttpServletResponse response) throws IOException {
+        problemWriter.write(response, HttpStatus.UNPROCESSABLE_ENTITY, ProblemCodes.DEPENDENCY_INVALID,
+                exception.getMessage(), errorsOfSchema(exception.getErrors()));
+    }
+
+    /** params против paramsSchema ревизии (§6: 422 params-schema, errors[]). */
+    @ExceptionHandler(ParamsSchemaInvalidException.class)
+    public void paramsSchemaInvalid(ParamsSchemaInvalidException exception,
+                                    HttpServletResponse response) throws IOException {
+        problemWriter.write(response, HttpStatus.UNPROCESSABLE_ENTITY, ProblemCodes.PARAMS_SCHEMA,
+                exception.getMessage(), errorsOfSchema(exception.getErrors()));
     }
 
     @ExceptionHandler(WrongSessionKindException.class)
@@ -140,6 +177,13 @@ public class ApiExceptionHandler {
         log.error("Неожиданная ошибка обработки запроса", exception);
         problemWriter.write(response, HttpStatus.INTERNAL_SERVER_ERROR, null,
                 "Внутренняя ошибка сервера", null);
+    }
+
+    private List<ApiValidationException.ValidationError> errorsOfSchema(List<JsonSchemaError> errors) {
+        return errors.stream()
+                .map(error -> new ApiValidationException.ValidationError(
+                        error.pointer(), error.rule(), error.message()))
+                .toList();
     }
 
     private List<ApiValidationException.ValidationError> errorsOf(Exception exception) {

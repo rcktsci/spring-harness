@@ -4,8 +4,10 @@ harness:
     revision-insert-retries: 3
   webhook:
     # Секрет HMAC capability-токенов вебхуков (token = HMAC-SHA256(secret, kind:entityId),
-    # api-contracts §4.4); в рантайме VM — через env HARNESS_WEBHOOK_SECRET.
+    # api-contracts §4.4); на целевой VM — через env HARNESS_WEBHOOK_SECRET.
     secret: ${HARNESS_WEBHOOK_SECRET:dev-webhook-secret-not-for-prod}
+    # База capability-URL вебхуков (TaskDto.webhookUrl, триггеры L.1): url = base + /api/webhooks/....
+    base-url: ${HARNESS_WEBHOOK_BASE_URL:http://localhost:8080}
     payload-summary:
       # Компактность payloadSummary в reason_jsonb (D-29): payload больше лимита — сводка
       # ужимается до {byteSize, truncated} без перечня топ-ключей.

@@ -10,6 +10,8 @@ import se.rocketscien.harness.config.TaskProperties;
 import se.rocketscien.harness.execution.impl.TaskGraphReader.GraphEdge;
 import se.rocketscien.harness.execution.impl.TaskGraphReader.GraphState;
 import se.rocketscien.harness.execution.impl.TaskGraphReader.RevisionGraph;
+import se.rocketscien.harness.execution.TurnManager;
+import se.rocketscien.harness.session.StateSessionService;
 import se.rocketscien.harness.task.Task;
 import se.rocketscien.harness.task.TaskRegistry;
 import se.rocketscien.harness.task.TaskStateKind;
@@ -53,6 +55,8 @@ public class TaskWakeDispatcher implements TaskWakeHandler {
     private final WaitTasksStateExecutor waitTasksExecutor;
     private final AgentStateBootstrapper agentBootstrapper;
     private final InProcessTaskWakeBus wakeBus;
+    private final StateSessionService stateSessions;
+    private final TurnManager turnManager;
     private final JdbcTemplate jdbcTemplate;
     private final TaskProperties properties;
 
@@ -76,6 +80,13 @@ public class TaskWakeDispatcher implements TaskWakeHandler {
     private void dispatch(UUID taskId) {
         try {
             Task task = taskRegistry.get(taskId);
+            if (TaskRegistry.CANCELLED_STATE.equals(task.currentState())) {
+                // K.2: stop → отмена Turn'ов STATE-сессий задачи и подзадач ('$CANCELLED'
+                // каскаден); терминальная задача дальше движка не идёт.
+                handleStop(taskId);
+                reevaluateBarriers();
+                return;
+            }
             if (task.currentStateKind() == TaskStateKind.BASH_SCRIPT
                     && task.statusProjection() == TaskStatus.RUNNING
                     && !task.suspended()
@@ -98,6 +109,35 @@ public class TaskWakeDispatcher implements TaskWakeHandler {
             reevaluateBarriers();
         } catch (Exception e) {
             log.warn("Wake {}: задача недоступна ({})", taskId, e.getMessage());
+        }
+    }
+
+    /**
+     * Остановка (K.2): остановленное поддерево уже в {@code '$CANCELLED'} (CAS —
+     * {@code TaskRegistryImpl}); здесь — отмена активных Turn'ов STATE-сессий всех узлов
+     * поддерева ({@link TurnManager#requestStop} — {@code cancel_requested} + прерывание
+     * in-flight Turn'а; идемпотентно, сессии без Turn'а — no-op).
+     */
+    private void handleStop(UUID taskId) {
+        List<UUID> subtree = jdbcTemplate.queryForList("""
+                WITH RECURSIVE subtree AS (
+                    SELECT id FROM task WHERE id = ?
+                    UNION ALL
+                    SELECT t.id FROM task t JOIN subtree s ON t.parent_task_id = s.id
+                )
+                SELECT id FROM subtree
+                """, UUID.class, taskId);
+        List<UUID> sessionIds = stateSessions.findSessionIdsByTaskIds(subtree);
+        for (UUID sessionId : sessionIds) {
+            try {
+                turnManager.requestStop(sessionId);
+            } catch (Exception e) {
+                log.warn("Отмена Turn'а STATE-сессии {} при stop задачи {} не удалась: {}",
+                        sessionId, taskId, e.getMessage());
+            }
+        }
+        if (!sessionIds.isEmpty()) {
+            log.info("Stop задачи {}: отменены Turn'ы {} STATE-сессий", taskId, sessionIds.size());
         }
     }
 

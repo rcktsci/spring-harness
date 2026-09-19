@@ -21,6 +21,10 @@ final class ProblemCodes {
     static final String SIGNATURE_INVALID = ProblemCode.SIGNATURE_INVALID.getValue();
     static final String NOT_IMPLEMENTED = ProblemCode.NOT_IMPLEMENTED.getValue();
     static final String TASK_NOT_FOUND = ProblemCode.TASK_NOT_FOUND.getValue();
+    static final String WORKFLOW_NOT_FOUND = ProblemCode.WORKFLOW_NOT_FOUND.getValue();
+    static final String TASK_ALREADY_TERMINAL = ProblemCode.TASK_ALREADY_TERMINAL.getValue();
+    static final String DEPENDENCY_INVALID = ProblemCode.DEPENDENCY_INVALID.getValue();
+    static final String PARAMS_SCHEMA = ProblemCode.PARAMS_SCHEMA.getValue();
 
     private ProblemCodes() {
     }

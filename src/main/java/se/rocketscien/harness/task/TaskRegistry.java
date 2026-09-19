@@ -68,6 +68,17 @@ public interface TaskRegistry {
      */
     void addDependency(UUID blockerTaskId, UUID blockedTaskId);
 
+    /**
+     * Атомарная пачка рёбер «каждый blocker → blocked» (REST `POST /tasks/{id}/dependencies`,
+     * K-1): лок всех затронутых задач в детерминированном порядке по id, проверки и вставки —
+     * в одной транзакции; частичный коммит невозможен. Дубликаты рёбер — no-op; после вставки
+     * хотя бы одного нового ребра — wake «blocked-changed» блокируемой задачи после коммита.
+     *
+     * @throws DependencyInvalidException self-loop / цикл (с учётом рёбер пачки) / неизвестный blocker
+     * @throws TaskNotFoundException      блокируемая задача не найдена
+     */
+    void addDependencies(UUID blockedTaskId, Collection<UUID> blockerTaskIds);
+
     /** Снятие ребра; идемпотентно (отсутствующее ребро — no-op, отклонение dev D-пачки №4). */
     void removeDependency(UUID blockerTaskId, UUID blockedTaskId);
 
@@ -107,6 +118,16 @@ public interface TaskRegistry {
      * @throws TaskNotFoundException не найдена
      */
     Comment addComment(UUID taskId, UUID authorUserId, String body);
+
+    /**
+     * Комментарии задачи в порядке {@code created_at asc, id asc} (api-contracts §4.1);
+     * {@code cursor} — непрозрачная пара (created_at, id), {@code limit == null} — все записи.
+     *
+     * @throws TaskNotFoundException     не найдена
+     * @throws InvalidCursorException    курсор не декодируется
+     */
+    CommentPage listComments(UUID taskId, String cursor, Integer limit)
+            throws InvalidCursorException;
 
     /**
      * Список задач: фильтры parent/status/mine(владелец)/tags(содержит все)/q(подстрока
@@ -153,5 +174,9 @@ public interface TaskRegistry {
 
     /** Страница истории: {@code nextCursor} — null, когда записей больше нет. */
     record HistoryPage(List<Transition> items, String nextCursor) {
+    }
+
+    /** Страница комментариев: {@code nextCursor} — null, когда страниц больше нет. */
+    record CommentPage(List<Comment> items, String nextCursor) {
     }
 }

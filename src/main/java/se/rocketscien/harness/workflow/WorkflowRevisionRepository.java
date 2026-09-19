@@ -3,6 +3,7 @@ package se.rocketscien.harness.workflow;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -25,4 +26,13 @@ public interface WorkflowRevisionRepository extends Repository<WorkflowRevisionE
             GROUP BY r.workflowId
             """)
     List<Object[]> findLatestRevs(List<UUID> workflowIds);
+
+    /** Выжимки пиннутых ревизий (key + rev) для TaskDto.workflow одним запросом (без N+1). */
+    @Query(value = """
+            SELECT r.id, w.key, r.rev
+            FROM workflow_revision r
+            JOIN workflow w ON w.id = r.workflow_id
+            WHERE r.id IN (?1)
+            """, nativeQuery = true)
+    List<Object[]> findRevisionSummaries(Collection<UUID> revisionIds);
 }

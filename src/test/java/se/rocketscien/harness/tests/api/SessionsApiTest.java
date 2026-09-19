@@ -43,6 +43,7 @@ class SessionsApiTest extends BaseApplicationTest {
     private String aliceToken;
     private ApiClient aliceClient;
     private String agentKey;
+    private UUID agentRevisionId;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -55,7 +56,9 @@ class SessionsApiTest extends BaseApplicationTest {
     void setUpClients() {
         aliceToken = keycloakToken(http, "alice", "alice-password");
         aliceClient = apiClient(localServerUrl(), aliceToken);
-        agentKey = insertAgentChain(jdbcTemplate, idGenerator, environment).agentKey();
+        ApiFixtures.AgentSeed seed = insertAgentChain(jdbcTemplate, idGenerator, environment);
+        agentKey = seed.agentKey();
+        agentRevisionId = seed.revisionId();
     }
 
     @Test
@@ -307,6 +310,67 @@ class SessionsApiTest extends BaseApplicationTest {
         ApiException exception = assertThrows(ApiException.class,
                 () -> new SessionsApi(aliceClient).patchSession(UUID.randomUUID(), new UpdateSessionRequest()));
         assertThat(exception.getCode()).isEqualTo(404);
+    }
+
+    @Test
+    void sessionTreeReturnsFlatSubtreeWithStateFields() throws Exception {
+        SessionsApi sessionsApi = new SessionsApi(aliceClient);
+        SessionDto root = sessionsApi.createSession(
+                new CreateSessionRequest().title("корень").agentKey(agentKey));
+        UUID stateSessionId = insertStateSessionWithParent(jdbcTemplate, root.getId(),
+                agentRevisionId);
+
+        var tree = sessionsApi.getSessionTree(root.getId(), null).getItems();
+
+        assertThat(tree).hasSize(2);
+        var rootNode = tree.get(0);
+        assertThat(rootNode.getId()).isEqualTo(root.getId());
+        assertThat(rootNode.getParentSessionId()).isNull();
+        assertThat(rootNode.getKind().getValue()).isEqualTo("FREE");
+        assertThat(rootNode.getAgent().getKey()).isEqualTo(agentKey);
+        assertThat(rootNode.getRuntimeStatus().getValue()).isEqualTo("IDLE");
+        assertThat(rootNode.getLastSeq()).isZero();
+        assertThat(rootNode.getTaskId()).isNull();
+        assertThat(rootNode.getStateCode()).isNull();
+
+        var stateNode = tree.get(1);
+        assertThat(stateNode.getId()).isEqualTo(stateSessionId);
+        assertThat(stateNode.getParentSessionId()).isEqualTo(root.getId());
+        assertThat(stateNode.getKind().getValue()).isEqualTo("STATE");
+        assertThat(stateNode.getTaskId()).isNotNull();
+        assertThat(stateNode.getStateCode()).isEqualTo("REVIEW");
+    }
+
+    @Test
+    void sessionTreeDepthLimitsAnd404() throws Exception {
+        SessionsApi sessionsApi = new SessionsApi(aliceClient);
+        SessionDto root = sessionsApi.createSession(
+                new CreateSessionRequest().title("корень").agentKey(agentKey));
+        insertStateSessionWithParent(jdbcTemplate, root.getId(), agentRevisionId);
+
+        assertThat(sessionsApi.getSessionTree(root.getId(), 0).getItems()).hasSize(1);
+        assertThat(sessionsApi.getSessionTree(root.getId(), 5).getItems()).hasSize(2);
+
+        ApiException absent = assertThrows(ApiException.class,
+                () -> sessionsApi.getSessionTree(UUID.randomUUID(), null));
+        assertThat(absent.getCode()).isEqualTo(404);
+    }
+
+    /** STATE-сессия-потомок: parent_session_id указывает на корень дерева (дерево сессий §2). */
+    private static UUID insertStateSessionWithParent(JdbcTemplate jdbcTemplate, UUID parentSessionId,
+                                                     UUID agentRevisionId) {
+        UUID ownerUserId = jdbcTemplate.queryForObject(
+                "SELECT owner_user_id FROM session WHERE id = ?", UUID.class, parentSessionId);
+        UUID sessionId = UUID.randomUUID();
+        jdbcTemplate.update(
+                """
+                INSERT INTO session (id, title, owner_user_id, kind, task_id, state_code,
+                                     agent_revision_id, parent_session_id, cancel_requested,
+                                     last_seq, last_consumed_seq, last_activity_at, created_at)
+                VALUES (?, 'STATE-потомок', ?, 'STATE', ?, 'REVIEW', ?, ?, false, 0, 0, now(), now())
+                """,
+                sessionId, ownerUserId, UUID.randomUUID(), agentRevisionId, parentSessionId);
+        return sessionId;
     }
 
     /** PATCH сырым клиентом — точное тело (клиент генерации не умеет явный null/absent различать). */

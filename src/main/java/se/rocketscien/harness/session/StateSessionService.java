@@ -1,5 +1,7 @@
 package se.rocketscien.harness.session;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -25,4 +27,10 @@ public interface StateSessionService {
      * @return созданная или резюмированная сессия ({@code kind=STATE})
      */
     Session findOrCreate(UUID taskId, String stateCode, UUID agentRevisionId);
+
+    /**
+     * STATE-сессии перечисленных задач (для каскадной остановки Turn'ов — stop поддерева
+     * задач, execution-model §7.2). Пустой вход — пустой результат.
+     */
+    List<UUID> findSessionIdsByTaskIds(Collection<UUID> taskIds);
 }

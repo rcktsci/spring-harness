@@ -4,10 +4,12 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RestController;
 import se.rocketscien.harness.api.gen.SessionsApi;
+import se.rocketscien.harness.api.gen.model.AgentRef;
 import se.rocketscien.harness.api.gen.model.CreateSessionRequest;
 import se.rocketscien.harness.api.gen.model.SessionDto;
 import se.rocketscien.harness.api.gen.model.SessionKind;
 import se.rocketscien.harness.api.gen.model.SessionPage;
+import se.rocketscien.harness.api.gen.model.SessionTreeNode;
 import se.rocketscien.harness.api.gen.model.SessionTreePage;
 import se.rocketscien.harness.api.gen.model.UpdateSessionRequest;
 import se.rocketscien.harness.config.LimitsProperties;
@@ -20,6 +22,8 @@ import se.rocketscien.harness.session.SessionStore;
 import tools.jackson.databind.JsonNode;
 
 import java.net.URI;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -123,7 +127,21 @@ public class SessionsController implements SessionsApi {
 
     @Override
     public ResponseEntity<SessionTreePage> getSessionTree(UUID id, Integer depth) {
-        throw new ApiNotImplementedException("D.2: stub — реализация в пачках H/I/J/K/L");
+        // K.1: поддерево по parent_session_id — плоский список узлов (родство несёт
+        // parentSessionId каждого узла); STATE-узлы дополнительно несут taskId/stateCode
+        List<Session> subtree = sessionStore.findSubtree(id, depth);
+        Map<UUID, SessionStore.AgentRevisionSummary> agents =
+                sessionStore.agentSummaries(subtree.stream().map(Session::agentRevisionId).toList());
+
+        List<SessionTreeNode> nodes = subtree.stream()
+                .map(session -> {
+                    SessionStore.AgentRevisionSummary agent = agents.get(session.agentRevisionId());
+                    return ApiMappers.toNode(session,
+                            new AgentRef(agent.agentKey(), agent.rev()),
+                            broadcaster.statusSnapshot(session.id()).runtimeStatus());
+                })
+                .toList();
+        return ResponseEntity.ok(new SessionTreePage(nodes));
     }
 
     private SessionDto toDto(Session session, UUID ownerUserId) {

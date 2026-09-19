@@ -43,12 +43,23 @@ public final class TaskTestFixtures {
      */
     public static UUID insertRevision(JdbcTemplate jdbcTemplate, IdGenerator idGenerator,
                                       Map<String, Object> graph, String startState) {
+        return insertRevisionWithKey(jdbcTemplate, idGenerator, graph, startState).revisionId();
+    }
+
+    /** Выжимка сеянного workflow: id ревизии + ключ (пин ревизии через REST — пачка K). */
+    public record WfRevision(UUID revisionId, String workflowKey, int rev) {
+    }
+
+    /** Вставка workflow + ревизии с известным ключом (REST-создание задачи по workflowKey+rev). */
+    public static WfRevision insertRevisionWithKey(JdbcTemplate jdbcTemplate, IdGenerator idGenerator,
+                                                   Map<String, Object> graph, String startState) {
         UUID owner = insertAppUser(jdbcTemplate, idGenerator);
         UUID workflowId = idGenerator.newUuidV7();
+        String workflowKey = "wf-" + workflowId;
         jdbcTemplate.update(
                 "INSERT INTO workflow (id, key, name, owner_user_id, created_at) VALUES (?, ?, ?, ?, now())",
                 workflowId,
-                "wf-" + workflowId,
+                workflowKey,
                 "Workflow " + workflowId,
                 owner
         );
@@ -61,7 +72,7 @@ public final class TaskTestFixtures {
                 JSON.writeValueAsString(graph),
                 startState
         );
-        return revisionId;
+        return new WfRevision(revisionId, workflowKey, 1);
     }
 
     /** WAIT_TASKS-граф (ALL_CHILDREN/ALL_TERMINAL); старт — gather. */

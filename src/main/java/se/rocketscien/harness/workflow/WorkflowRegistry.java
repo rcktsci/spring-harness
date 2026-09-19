@@ -1,6 +1,7 @@
 package se.rocketscien.harness.workflow;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -65,6 +66,17 @@ public interface WorkflowRegistry {
     /** Иммутабельная ревизия с графом ({@code graph_jsonb}) и явным стартовым состоянием (H-1). */
     record WorkflowRevision(UUID id, UUID workflowId, int rev, Map<String, Object> graph,
                             String startState, Instant createdAt) {
+    }
+
+    /**
+     * Выжимки пиннутых ревизий одним запросом (TaskDto.workflow: key + rev по
+     * {@code task.workflow_revision_id}; стиль {@code SessionStore.agentSummaries}).
+     * Отсутствующие ревизии в карту не входят.
+     */
+    Map<UUID, RevisionSummary> revisionSummaries(Collection<UUID> revisionIds);
+
+    /** Выжимка ревизии для публичных DTO (TaskDto.workflow). */
+    record RevisionSummary(UUID revisionId, String workflowKey, int rev) {
     }
 
     /** Критерии списка; {@code cursor} — opaque, {@code limit} >= 1 (верхняя граница — API-слой). */

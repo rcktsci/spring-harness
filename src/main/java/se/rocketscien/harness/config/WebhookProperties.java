@@ -10,12 +10,16 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * вебхука в истории не хранится).
  */
 @ConfigurationProperties(prefix = "harness.webhook")
-public record WebhookProperties(String secret, PayloadSummary payloadSummary) {
+public record WebhookProperties(String secret, String baseUrl, PayloadSummary payloadSummary) {
 
     public WebhookProperties {
         if (secret == null || secret.isBlank()) {
             throw new IllegalArgumentException(
-                    "harness.webhook.secret не задан — capability-URL вебхуков не защищены");
+                    "harness.webhook.secret обязателен — capability-URL вебхуков без него небезопасны");
+        }
+        if (baseUrl == null || baseUrl.isBlank()) {
+            throw new IllegalArgumentException(
+                    "harness.webhook.base-url обязателен — база capability-URL вебхуков (api-contracts §4.4)");
         }
     }
 

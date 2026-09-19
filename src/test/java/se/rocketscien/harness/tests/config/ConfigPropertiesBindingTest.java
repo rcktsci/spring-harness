@@ -10,6 +10,7 @@ import se.rocketscien.harness.config.LockProperties;
 import se.rocketscien.harness.config.TurnProperties;
 import se.rocketscien.harness.config.WorkflowProperties;
 import se.rocketscien.harness.config.TaskProperties;
+import se.rocketscien.harness.config.WebhookProperties;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
@@ -151,6 +152,17 @@ class ConfigPropertiesBindingTest {
     }
 
     @Test
+    void bindsWebhookDefaults() {
+        contextRunner.run(context -> {
+            WebhookProperties properties = context.getBean(WebhookProperties.class);
+            assertThat(properties.secret()).isEqualTo("dev-webhook-secret-not-for-prod");
+            // База capability-URL (TaskDto.webhookUrl, триггеры L.1) — только конфиг
+            assertThat(properties.baseUrl()).isEqualTo("http://localhost:8080");
+            assertThat(properties.payloadSummary().limitOrMax()).isEqualTo(4096);
+        });
+    }
+
+    @Test
     void bindsTaskDefaults() {
         contextRunner.run(context -> {
             TaskProperties properties = context.getBean(TaskProperties.class);
@@ -177,7 +189,8 @@ class ConfigPropertiesBindingTest {
             SseProperties.class,
             LimitsProperties.class,
             WorkflowProperties.class,
-            TaskProperties.class
+            TaskProperties.class,
+            WebhookProperties.class
     })
     static class PropertiesRegistrar {
     }

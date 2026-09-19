@@ -112,6 +112,47 @@ public class SessionStoreImpl implements SessionStore {
 
     @Override
     @Transactional(readOnly = true)
+    public List<Session> findSubtree(UUID sessionId, Integer depth) {
+        List<Session> rows = jdbcTemplate.query("""
+                WITH RECURSIVE subtree AS (
+                    SELECT id, 0 AS depth FROM session WHERE id = ?
+                    UNION ALL
+                    SELECT s.id, t.depth + 1 FROM session s JOIN subtree t ON s.parent_session_id = t.id
+                )
+                SELECT s.id, s.title, s.owner_user_id, s.kind, s.task_id, s.state_code,
+                       s.agent_revision_id, s.parent_session_id, s.cancel_requested, s.last_seq,
+                       s.last_consumed_seq, s.last_turn_outcome, s.last_activity_at, s.created_at
+                FROM session s
+                JOIN subtree t ON s.id = t.id
+                WHERE ?::int IS NULL OR t.depth <= ?::int
+                ORDER BY t.depth, s.created_at, s.id
+                """,
+                (rs, rowNum) -> new Session(
+                        rs.getObject("id", UUID.class),
+                        SessionKind.valueOf(rs.getString("kind")),
+                        rs.getString("title"),
+                        rs.getObject("owner_user_id", UUID.class),
+                        rs.getObject("task_id", UUID.class),
+                        rs.getString("state_code"),
+                        rs.getObject("agent_revision_id", UUID.class),
+                        rs.getObject("parent_session_id", UUID.class),
+                        rs.getBoolean("cancel_requested"),
+                        rs.getLong("last_seq"),
+                        rs.getLong("last_consumed_seq"),
+                        rs.getString("last_turn_outcome") == null
+                                ? null : TurnOutcome.valueOf(rs.getString("last_turn_outcome")),
+                        rs.getTimestamp("last_activity_at").toInstant(),
+                        rs.getTimestamp("created_at").toInstant()
+                ),
+                sessionId, depth, depth);
+        if (rows.isEmpty()) {
+            throw new SessionNotFoundException("Сессия %s не найдена".formatted(sessionId));
+        }
+        return rows;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public List<UUID> findEligibleSessionIds() {
         return jdbcTemplate.queryForList(
                 "SELECT id FROM session WHERE last_seq > last_consumed_seq", UUID.class);
