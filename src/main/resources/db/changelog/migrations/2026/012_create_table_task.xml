@@ -1,0 +1,199 @@
+<?xml version="1.1" encoding="UTF-8" standalone="no"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                                       https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="18"
+               author="rocket-science">
+
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="task"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="task"
+                     remarks="инстанс workflow — задача (data-model §4)">
+            <column name="id"
+                    type="UUID"
+                    remarks="идентификатор задачи (uuid v7)">
+                <constraints nullable="false"
+                             primaryKey="true"
+                             primaryKeyName="pk_task"/>
+            </column>
+
+            <column name="title"
+                    type="TEXT"
+                    remarks="название задачи">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="description"
+                    type="TEXT"
+                    remarks="описание задачи">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="author_user_id"
+                    type="UUID"
+                    remarks="автор-пользователь; NULL — автор агент (авторство агента — через историю)">
+                <constraints foreignKeyName="fk_task__author_user_id__app_user_id"
+                             referencedTableName="app_user"
+                             referencedColumnNames="id"
+                             deleteCascade="true"/>
+            </column>
+
+            <column name="owner_user_id"
+                    type="UUID"
+                    remarks="владелец; агентом наследуется от породившей сессии">
+                <constraints nullable="false"
+                             foreignKeyName="fk_task__owner_user_id__app_user_id"
+                             referencedTableName="app_user"
+                             referencedColumnNames="id"
+                             deleteCascade="true"/>
+            </column>
+
+            <column name="workflow_revision_id"
+                    type="UUID"
+                    remarks="пин к ревизии workflow при создании">
+                <constraints nullable="false"
+                             foreignKeyName="fk_task__workflow_revision_id__workflow_revision_id"
+                             referencedTableName="workflow_revision"
+                             referencedColumnNames="id"
+                             deleteCascade="true"/>
+            </column>
+
+            <column name="current_state"
+                    type="TEXT"
+                    remarks="code текущего состояния из ревизии или '$CANCELLED' (data-model §7.2)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="current_state_kind"
+                    type="VARCHAR(16)"
+                    remarks="денормализация kind текущего состояния для задачных сканов">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="state_attempt"
+                    type="INT"
+                    defaultValueNumeric="0"
+                    remarks="счётчик входов в текущее системное состояние (идемпотентность bash)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="task_event_seq"
+                    type="BIGINT"
+                    defaultValueNumeric="0"
+                    remarks="монотонный durable-счётчик событий задачи — курсор SSE tasks/{id}/events">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="deadline_at"
+                    type="TIMESTAMP WITH TIME ZONE"
+                    remarks="дедлайн таймаута состояния; таймаут-скан по индексу"/>
+
+            <column name="status_projection"
+                    type="VARCHAR(16)"
+                    remarks="денормализация статуса текущего состояния">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="params_jsonb"
+                    type="JSONB"
+                    defaultValueComputed="('{}'::jsonb)"
+                    remarks="параметр-мапа инстанса (${task.params.*}); иммутабельны после создания"/>
+
+            <column name="parent_task_id"
+                    type="UUID"
+                    remarks="родительская задача (подзадачи)">
+                <constraints foreignKeyName="fk_task__parent_task_id__task_id"
+                             referencedTableName="task"
+                             referencedColumnNames="id"
+                             deleteCascade="true"/>
+            </column>
+
+            <column name="tags"
+                    type="TEXT[]"
+                    defaultValue="{}"
+                    remarks="теги для группировки (WAIT_TASKS/TAGGED(x))">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="suspended"
+                    type="BOOLEAN"
+                    defaultValueBoolean="false"
+                    remarks="аварийный стоп; планировщик пропускает">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="created_at"
+                    type="TIMESTAMP WITH TIME ZONE"
+                    remarks="время создания">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="updated_at"
+                    type="TIMESTAMP WITH TIME ZONE"
+                    remarks="время последнего изменения">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="19"
+               author="rocket-science">
+
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">
+                SELECT COUNT(*)
+                FROM pg_indexes
+                WHERE indexname = 'idx_task__parent_status_projection'
+            </sqlCheck>
+        </preConditions>
+
+        <sql>
+            CREATE INDEX idx_task__parent_status_projection
+                ON task (parent_task_id, status_projection);
+
+            CREATE INDEX idx_task__tags_gin
+                ON task USING gin (tags);
+
+            CREATE INDEX idx_task__wait_tasks
+                ON task (current_state_kind)
+                WHERE current_state_kind = 'WAIT_TASKS';
+
+            CREATE INDEX idx_task__agent_running
+                ON task (current_state_kind)
+                WHERE current_state_kind = 'AGENT' AND status_projection = 'RUNNING';
+
+            CREATE INDEX idx_task__deadline
+                ON task (deadline_at)
+                WHERE deadline_at IS NOT NULL;
+        </sql>
+    </changeSet>
+
+    <changeSet id="20"
+               author="rocket-science">
+
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">
+                SELECT COUNT(*)
+                FROM pg_constraint
+                WHERE conname = 'ck_task__current_state_kind'
+            </sqlCheck>
+        </preConditions>
+
+        <sql>
+            ALTER TABLE task
+                ADD CONSTRAINT ck_task__current_state_kind CHECK (current_state_kind IN
+                    ('AGENT', 'BASH_SCRIPT', 'WAIT_WEBHOOK', 'WAIT_TASKS', 'TERMINAL'));
+
+            ALTER TABLE task
+                ADD CONSTRAINT ck_task__status_projection CHECK (status_projection IN
+                    ('RUNNING', 'WAITING', 'SUCCEEDED', 'FAILED', 'CANCELLED'));
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

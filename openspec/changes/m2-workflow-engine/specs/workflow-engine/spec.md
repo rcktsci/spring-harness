@@ -77,6 +77,20 @@
 - **WHEN** `WAIT_WEBHOOK`-state имеет только TIMEOUT-переход, без ERROR
 - **THEN** `422 graph-invalid` с error `rule=wait-error-required`
 
+### Requirement: WorkflowRevision хранит start_state
+
+Ревизия workflow SHALL хранить `start_state` — code начального состояния задачи. `start_state` объявляется явно при создании workflow/ревизии (эвристики определения по графу запрещены — ломаются на циклах). Задача, создаваемая по ревизии, SHALL получать `current_state := start_state`. `start_state` SHALL входить в `states[].code` ревизии; нарушение → `422 graph-invalid`.
+
+#### Scenario: start_state невалиден
+
+- **WHEN** клиент создаёт workflow/ревизию с `startState`, не входящим в `states[].code`
+- **THEN** `422` с кодом `graph-invalid` и error `rule=unknown-state`, `pointer=/start_state`
+
+#### Scenario: задача стартует в start_state
+
+- **WHEN** создаётся задача по ревизии с `start_state=plan`
+- **THEN** `task.current_state = plan`, проекции kind/status — по этому состоянию
+
 ### Requirement: Контракт графа (graph_jsonb, JSON-Schema)
 
 `graph_jsonb` SHALL соответствовать JSON-Schema (см. `docs/design/workflow-domain.md` §2): `states[]: { code, type: AGENT|BASH_SCRIPT|WAIT_WEBHOOK|WAIT_TASKS|TERMINAL, workspace?, agent_key?, script?, scope?, condition?, payloadSchema?, paramsSchema?, timeout?, outcome? }`; `transitions[]: { from, to, kind: NEXT|ERROR|TIMEOUT|CANCEL }`. Семантика полей — по `workflow-domain.md` §2–§3. Схемы `paramsSchema`/`payloadSchema` в M2 — **ограниченный профиль JSON-Schema** (`required`, `type`, `enum`, `items`, `properties` первого уровня), валидация — ручным обходом; полная JSON-Schema — точка эволюции.

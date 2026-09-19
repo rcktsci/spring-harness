@@ -1,0 +1,89 @@
+<?xml version="1.1" encoding="UTF-8" standalone="no"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                                       https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="24"
+               author="rocket-science">
+
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="task_transition_history"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="task_transition_history"
+                     remarks="история переходов задачи — append-only (data-model §4, §7.1)">
+            <column name="id"
+                    type="UUID"
+                    remarks="идентификатор записи (uuid v7)">
+                <constraints nullable="false"
+                             primaryKey="true"
+                             primaryKeyName="pk_task_transition_history"/>
+            </column>
+
+            <column name="task_id"
+                    type="UUID"
+                    remarks="задача перехода">
+                <constraints nullable="false"
+                             foreignKeyName="fk_task_transition_history__task_id__task_id"
+                             referencedTableName="task"
+                             referencedColumnNames="id"
+                             deleteCascade="true"/>
+            </column>
+
+            <column name="from_state"
+                    type="TEXT"
+                    remarks="code исходного состояния">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="to_state"
+                    type="TEXT"
+                    remarks="code целевого состояния ('$CANCELLED' — принудительная отмена)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="kind"
+                    type="VARCHAR(16)"
+                    remarks="вид перехода">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="reason_jsonb"
+                    type="JSONB"
+                    remarks="обоснование перехода: bash — stdout/stderr+exit; агент — текст; вебхук — источник+сводка; WAIT_TASKS — закрывшие задачи; stop — actor">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="created_at"
+                    type="TIMESTAMP WITH TIME ZONE"
+                    remarks="время перехода">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="25"
+               author="rocket-science">
+
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">
+                SELECT COUNT(*)
+                FROM pg_indexes
+                WHERE indexname = 'idx_task_transition_history__task_cursor'
+            </sqlCheck>
+        </preConditions>
+
+        <sql>
+            CREATE INDEX idx_task_transition_history__task_cursor
+                ON task_transition_history (task_id, created_at, id);
+
+            ALTER TABLE task_transition_history
+                ADD CONSTRAINT ck_task_transition_history__kind
+                    CHECK (kind IN ('NEXT', 'ERROR', 'TIMEOUT', 'CANCEL'));
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

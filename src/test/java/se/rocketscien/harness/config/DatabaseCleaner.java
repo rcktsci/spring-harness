@@ -24,6 +24,14 @@ public class DatabaseCleaner {
 
         jdbcTemplate.update("DELETE FROM session_message");
         jdbcTemplate.update("DELETE FROM session");
+        // task-семейство (M2): комментарии/история/зависимости → task → trigger → ревизии → workflow
+        jdbcTemplate.update("DELETE FROM task_comment");
+        jdbcTemplate.update("DELETE FROM task_transition_history");
+        jdbcTemplate.update("DELETE FROM task_dependency");
+        jdbcTemplate.update("DELETE FROM task");
+        jdbcTemplate.update("DELETE FROM trigger");
+        jdbcTemplate.update("DELETE FROM workflow_revision");
+        jdbcTemplate.update("DELETE FROM workflow");
         jdbcTemplate.update("DELETE FROM agent");
         jdbcTemplate.update("DELETE FROM llm_model");
         jdbcTemplate.update("DELETE FROM llm_credentials");

@@ -117,3 +117,82 @@
   required: явность каскада при suspend осознанная; замечание ссылалось на
   J-22 (убран cascade из stop API — stop всегда каскадный), к suspend не
   относится.
+
+## Пачка H — миграции + WorkflowRegistry/TaskRegistry (CRUD без движка)
+
+### Зафиксированные решения пачки (отклонения dev)
+
+1. **createWorkflow(ownerUserId, ...)** — сигнатура контракта принимает владельца явно:
+   workflow.owner_user_id NOT NULL (data-model §3), а JWT-контекст доступен только api-слою
+   (модуль workflow не зависит от api). Резолв владельца — забота контроллера (пачка K).
+2. **paramsSchema валидируется по стартовому состоянию ревизии** (уточнено ревью H-1/H-8):
+   поле контракта — per-state, но для создания задачи однозначной точкой привязки является
+   явный start_state ревизии. Эвристика «единственный source» удалена (ломалась на
+   циклических графах); fallback «первый в JSON» удалён.
+3. **deadline_at при создании** — из state.timeout стартового состояния (кроме TERMINAL):
+   иначе задача, вставшая в WAIT-состояние сразу при создании, никогда не попадёт в
+   таймаут-скан (deadline_at IS NULL не индексируется частичным индексом).
+4. **Чтение graph_jsonb в task — собственный SQL по id ревизии**: модуль task не зависит от
+   Java-классов workflow (ArchUnit: 	ask → identity); граф — данные ревизии, а не её API.
+5. **Ограниченный профиль D-58 живёт в common/jsonschema** (LimitedJsonSchemaValidator,
+   JsonSchemaError): переиспользуется валидатором графа (workflow) и реестром задач (task);
+   неизвестные ключевые слова схем игнорируются (профиль — подмножество, description легален).
+6. **TaskWakeListener (task) — контракт wake после коммита** (аналог SessionEventListener):
+   реализация InProcessTaskWakeBus — пачка I.5 (execution); модуль task не зависит от
+   execution. В тестах — RecordingTaskWakeListener (test-classpath @Component, попадает
+   в общий контекст через component-scan, как DatabaseCleaner; FailFast-гвард не тронут).
+7. **WorkflowProperties/TaskProperties не созданы** — в пачке H нет новых числовых
+   параметров (правило владельца: сущность обязана иметь сценарий). Появятся в пачке I
+   (kind-timeouts, poll-interval, scheduler.ttl).
+8. **getHistory(limit=null) — все записи** (сценарий спеки: «без since — все»); default-limit —
+   забота API-слоя (limits.page), как в M1 searchSessions.
+9. **Идемпотентность зависимостей**: emoveDependency — no-op на отсутствующем ребре
+   (отклонение dev D-пачки №4); ddDependency на существующее ребро — no-op (PK-пара как
+   backstop); SELECT FOR UPDATE на обеих задачах (детерминированный порядок по id) — H-6.
+
+### Ревью-цикл H (GLM-Flash + DeepSeek-Flash + Mercury) — применённые фиксы
+
+- **V-1 (GLM, major)**: достижимость TERMINAL — обратный BFS от всех терминалов по встречным
+  рёбрам вместо прямого DFS с memo (отравление кэша на циклах отвергало валидные графы
+  «review → возврат в plan»). Регресс-тесты: цикл «review → plan (ERROR) → merge» и полный
+  сценарий «plan → bash → reviewer-1 → plan → reviewer-2 → merge».
+- **H-1 (DS, medium)**: явный workflow_revision.start_state (миграция 011, NOT NULL,
+  start_state ∈ states[].code — правило валидатора); 	ask.current_state := start_state;
+  эвристика источника удалена. Регресс-тест: два source'а, старт ≠ первый в JSON.
+- **H-4 (DS, medium)**: esume — SELECT FOR UPDATE до проверки терминальности; проверка и
+  снятие suspended атомарны под локом (гонка с stop закрыта).
+- **H-3 (DS, minor)**: 
+ewRevision — SELECT rev ... ORDER BY rev DESC LIMIT 1 FOR UPDATE
+  (сериализация конкурентных ревизий; UNIQUE (workflow_id, rev) — последний рубеж).
+- **H-5 (DS, minor)**: graph_jsonb jsonb NOT NULL (миграция 011).
+- **H-6 (DS, minor)**: ddDependency — SELECT FOR UPDATE обеих задач до проверки цикла
+  и вставки (детерминированный порядок по id — без deadlock).
+- **H-7 (DS, nit)**: LimitedJsonSchemaValidator — целостность числа (integer) определяется
+  по типу значения (Integer/Long/BigInteger/целый Double|Float), не сравнением через double
+  (потеря точности > 2^53); enum-сравнение целых — по longValue.
+- **H-8 (DS, minor)**: однозначная привязка paramsSchema к start_state (см. №2).
+- **ArchUnit api→{task, workflow}** — расширен в пачке H (не отложен в M.1/K.1).
+
+### Тесты пачки H
+
+WorkflowGraphSchemaValidatorTest 24 (unit) + WorkflowRegistryImplTest 13 + TaskRegistryCreateTest 10
++ TaskRegistryDependencyTest 7 + TaskRegistryLifecycleTest 15 + TaskRegistryListTreeHistoryTest 8,
+ArchUnit 8→10 (foreignImpl по 6 модулям). Итог сюиты после фиксов ревью: 295 зелёных (было 289 до пачки H: 209).
+### Ревью-цикл H, round 2 — применённые фиксы
+
+- **R-1 (DS, major)**: start_state введён в замороженную спеку: (a) openapi.yaml —
+  CreateWorkflowRequest.startState (required), CreateWorkflowRevisionRequest.startState
+  (required), WorkflowRevisionDto.startState; регенерация из обновлённой спеки;
+  (b) workflow-domain.md §2 — абзац про workflow_revision.start_state (current_state :=
+  start_state; валидация ∈ codes); (c) дельта workflow-engine — требование «WorkflowRevision
+  хранит start_state» + сценарии (невалидный start_state → 422 graph-invalid rule=unknown-state;
+  задача стартует в start_state).
+- **R-2 (DS, minor)**: фантом READ COMMITTED при вставке ревизии — 
+ewRevision переводит
+  вставку в TransactionTemplate (REQUIRES_NEW, попытка = независимая транзакция: после
+  UNIQUE-violation текущая транзакция Postgres прервана, retry внутри неё невозможен);
+  основной барьер — лок строки-родителя (SELECT ... FROM workflow WHERE id = ? FOR UPDATE)
+  + лок строки max(rev); entityManager.flush() — конфликт ловится внутри попытки;
+  retry — backstop, число попыток — конфиг harness.workflow.revision-insert-retries
+  (новый WorkflowProperties; числа — только конфиг). Тест: конкурентный newRevision —
+  обе ревизии с разными rev, latestRev=3.

@@ -1,0 +1,61 @@
+<?xml version="1.1" encoding="UTF-8" standalone="no"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                                       https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="21"
+               author="rocket-science">
+
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="task_dependency"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="task_dependency"
+                     remarks="ребро blocked_by: blocker должен прийти в нужный терминал, пока blocked ждёт (data-model §4); циклы запрещены валидацией на уровне приложения">
+            <column name="blocker_task_id"
+                    type="UUID"
+                    remarks="блокирующая задача">
+                <constraints nullable="false"
+                             foreignKeyName="fk_task_dependency__blocker_task_id__task_id"
+                             referencedTableName="task"
+                             referencedColumnNames="id"
+                             deleteCascade="true"/>
+            </column>
+
+            <column name="blocked_task_id"
+                    type="UUID"
+                    remarks="блокированная задача">
+                <constraints nullable="false"
+                             foreignKeyName="fk_task_dependency__blocked_task_id__task_id"
+                             referencedTableName="task"
+                             referencedColumnNames="id"
+                             deleteCascade="true"/>
+            </column>
+        </createTable>
+
+        <addPrimaryKey tableName="task_dependency"
+                       columnNames="blocker_task_id, blocked_task_id"
+                       constraintName="pk_task_dependency"/>
+    </changeSet>
+
+    <changeSet id="22"
+               author="rocket-science">
+
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">
+                SELECT COUNT(*)
+                FROM pg_indexes
+                WHERE indexname = 'idx_task_dependency__blocked_task_id'
+            </sqlCheck>
+        </preConditions>
+
+        <sql>
+            CREATE INDEX idx_task_dependency__blocked_task_id
+                ON task_dependency (blocked_task_id);
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

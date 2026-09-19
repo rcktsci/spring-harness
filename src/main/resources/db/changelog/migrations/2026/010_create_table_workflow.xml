@@ -1,0 +1,71 @@
+<?xml version="1.1" encoding="UTF-8" standalone="no"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                                       https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="14"
+               author="rocket-science">
+
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="workflow"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="workflow"
+                     remarks="шаблон workflow (data-model §3)">
+            <column name="id"
+                    type="UUID"
+                    remarks="идентификатор workflow (uuid v7)">
+                <constraints nullable="false"
+                             primaryKey="true"
+                             primaryKeyName="pk_workflow"/>
+            </column>
+
+            <column name="key"
+                    type="TEXT"
+                    remarks="логическое имя workflow (kebab-case)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="name"
+                    type="TEXT"
+                    remarks="человекочитаемое имя">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="owner_user_id"
+                    type="UUID"
+                    remarks="ссылка на пользователя-владельца">
+                <constraints nullable="false"
+                             foreignKeyName="fk_workflow__owner_user_id__app_user_id"
+                             referencedTableName="app_user"
+                             referencedColumnNames="id"
+                             deleteCascade="true"/>
+            </column>
+
+            <column name="created_at"
+                    type="TIMESTAMP WITH TIME ZONE"
+                    remarks="время создания">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="15"
+               author="rocket-science">
+
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists tableName="workflow"
+                             indexName="uidx_workflow__key"/>
+            </not>
+        </preConditions>
+
+        <addUniqueConstraint tableName="workflow"
+                             columnNames="key"
+                             constraintName="uidx_workflow__key"/>
+    </changeSet>
+
+</databaseChangeLog>

@@ -62,15 +62,15 @@ class ArchitectureRulesTest {
             .layer("session").definedBy(SESSION)
             .layer("identity").definedBy(IDENTITY)
             .layer("intelligence").definedBy(INTELLIGENCE)
-            .whereLayer("api").mayOnlyAccessLayers("execution", "intelligence", "session", "identity")
+            .whereLayer("api").mayOnlyAccessLayers("execution", "intelligence", "session", "identity", "task", "workflow")
             .whereLayer("execution").mayOnlyAccessLayers("session", "identity", "task", "workflow", "intelligence")
             .whereLayer("task").mayOnlyAccessLayers("identity")
             .whereLayer("workflow").mayOnlyAccessLayers("identity")
             .whereLayer("session").mayOnlyAccessLayers("identity")
             .whereLayer("identity").mayNotAccessAnyLayer()
             .whereLayer("api").mayNotBeAccessedByAnyLayer()
-            .as("Слои модулей: api → {execution, intelligence, session, identity}; "
-                    + "execution → {session, identity, task(M2), workflow(M2), intelligence}; "
+            .as("Слои модулей: api → {execution, intelligence, session, identity, task(M2), workflow(M2)}; "
+                    + "execution → {session, identity, task, workflow, intelligence}; "
                     + "session → identity; identity изолирована; от api никто не зависит");
 
     @Test
@@ -99,7 +99,7 @@ class ArchitectureRulesTest {
     }
 
     @ParameterizedTest(name = "чужой .impl не импортируется: {0}")
-    @ValueSource(strings = {"session", "execution", "intelligence", "identity"})
+    @ValueSource(strings = {"session", "execution", "intelligence", "identity", "task", "workflow"})
     void foreignImplPackageIsHiddenBehindContract(String module) {
         List<String> importers = new ArrayList<>(List.of(
                 API, EXECUTION, TASK, WORKFLOW, SESSION, IDENTITY, INTELLIGENCE));

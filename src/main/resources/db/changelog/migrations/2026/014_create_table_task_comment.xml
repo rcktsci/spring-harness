@@ -1,0 +1,59 @@
+<?xml version="1.1" encoding="UTF-8" standalone="no"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                                       https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="23"
+               author="rocket-science">
+
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="task_comment"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="task_comment"
+                     remarks="комментарий задачи — append-only, иммутабелен (data-model §4, §7.1)">
+            <column name="id"
+                    type="UUID"
+                    remarks="идентификатор комментария (uuid v7)">
+                <constraints nullable="false"
+                             primaryKey="true"
+                             primaryKeyName="pk_task_comment"/>
+            </column>
+
+            <column name="task_id"
+                    type="UUID"
+                    remarks="задача комментария">
+                <constraints nullable="false"
+                             foreignKeyName="fk_task_comment__task_id__task_id"
+                             referencedTableName="task"
+                             referencedColumnNames="id"
+                             deleteCascade="true"/>
+            </column>
+
+            <column name="author_user_id"
+                    type="UUID"
+                    remarks="автор-пользователь; NULL + агент-пометка — агентский комментарий">
+                <constraints foreignKeyName="fk_task_comment__author_user_id__app_user_id"
+                             referencedTableName="app_user"
+                             referencedColumnNames="id"
+                             deleteCascade="true"/>
+            </column>
+
+            <column name="body"
+                    type="TEXT"
+                    remarks="текст комментария">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="created_at"
+                    type="TIMESTAMP WITH TIME ZONE"
+                    remarks="время создания">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+</databaseChangeLog>

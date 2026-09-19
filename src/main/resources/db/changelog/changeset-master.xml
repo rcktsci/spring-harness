@@ -5,7 +5,9 @@
                                        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
 
     <!-- Порядок включений = порядок создания: FK-зависимости (llm_model → llm_credentials,
-         agent → llm_model, session → app_user/agent/session, session_message → session/app_user).
+         agent → llm_model, session → app_user/agent/session, session_message → session/app_user,
+         workflow_revision → workflow, task → app_user/workflow_revision/task,
+         task_dependency/task_comment/task_transition_history → task, trigger → app_user).
          Индексы и констрейнты каждой таблицы — внутри её собственного файла. -->
     <include file="migrations/2026/001_create_table_app_user.xml"
              relativeToChangelogFile="true"/>
@@ -20,6 +22,20 @@
     <include file="migrations/2026/006_create_table_session_message.xml"
              relativeToChangelogFile="true"/>
     <include file="migrations/2026/007_create_table_shedlock.xml"
+             relativeToChangelogFile="true"/>
+    <include file="migrations/2026/010_create_table_workflow.xml"
+             relativeToChangelogFile="true"/>
+    <include file="migrations/2026/011_create_table_workflow_revision.xml"
+             relativeToChangelogFile="true"/>
+    <include file="migrations/2026/012_create_table_task.xml"
+             relativeToChangelogFile="true"/>
+    <include file="migrations/2026/013_create_table_task_dependency.xml"
+             relativeToChangelogFile="true"/>
+    <include file="migrations/2026/014_create_table_task_comment.xml"
+             relativeToChangelogFile="true"/>
+    <include file="migrations/2026/015_create_table_task_transition_history.xml"
+             relativeToChangelogFile="true"/>
+    <include file="migrations/2026/016_create_table_trigger.xml"
              relativeToChangelogFile="true"/>
 
 </databaseChangeLog>

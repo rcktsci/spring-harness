@@ -2203,8 +2203,8 @@ components:
           format: date-time
     WorkflowRevisionDto:
       type: object
-      description: Ревизия workflow с графом (иммутабельна; задачи пинятся на неё).
-      required: [workflowKey, rev, graph, createdAt]
+      description: Ревизия workflow с графом (иммутабельная; правка = новая строка).
+      required: [workflowKey, rev, graph, startState, createdAt]
       properties:
         workflowKey:
           type: string
@@ -2214,6 +2214,9 @@ components:
           minimum: 1
         graph:
           $ref: '#/components/schemas/WorkflowGraph'
+        startState:
+          type: string
+          description: Стартовое состояние ревизии (code ∈ states[].code; задачи стартуют в нём).
         createdAt:
           type: string
           format: date-time
@@ -2320,10 +2323,11 @@ components:
             ревизии (D-54); CANCEL-рёбра в графе не объявляются.
     CreateWorkflowRequest:
       type: object
-      required: [key, name, graph]
+      required: [key, name, graph, startState]
       example:
         key: feature-delivery
-        name: Поставка фичи
+        name: Доставка фич
+        startState: plan
         graph:
           states:
             - code: plan
@@ -2342,18 +2346,29 @@ components:
           type: string
           minLength: 1
           pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
-          description: Kebab-case, уникален среди workflow (дубликат — 422 validation-failed, rule=key-unique).
+          description: Kebab-case, уникален среди workflow (дубль - 422 validation-failed, rule=key-unique).
         name:
           type: string
           minLength: 1
         graph:
           $ref: '#/components/schemas/WorkflowGraph'
+        startState:
+          type: string
+          minLength: 1
+          description: >-
+            Стартовое состояние ревизии (workflow-domain §2): code из states[].code;
+            задача при создании получает current_state := startState.
+            Не входит в states[].code - 422 graph-invalid (rule=unknown-state).
     CreateWorkflowRevisionRequest:
       type: object
-      required: [graph]
+      required: [graph, startState]
       properties:
         graph:
           $ref: '#/components/schemas/WorkflowGraph'
+        startState:
+          type: string
+          minLength: 1
+          description: Стартовое состояние новой ревизии (см. CreateWorkflowRequest.startState).
     WorkflowPage:
       type: object
       description: Конверт-страница workflow (сортировка createdAt desc).

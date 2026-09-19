@@ -1,0 +1,77 @@
+<?xml version="1.1" encoding="UTF-8" standalone="no"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                                       https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="26"
+               author="rocket-science">
+
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="trigger"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="trigger"
+                     remarks="входящий триггер: вебхук → задача по workflow (data-model §6)">
+            <column name="id"
+                    type="UUID"
+                    remarks="идентификатор триггера (uuid v7)">
+                <constraints nullable="false"
+                             primaryKey="true"
+                             primaryKeyName="pk_trigger"/>
+            </column>
+
+            <column name="name"
+                    type="TEXT"
+                    remarks="человекочитаемое имя">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="workflow_key"
+                    type="TEXT"
+                    remarks="ключ workflow создаваемых задач">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="rev"
+                    type="INT"
+                    remarks="пин ревизии при создании триггера (D-57)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="params_jsonb"
+                    type="JSONB"
+                    remarks="параметры создаваемых задач"/>
+
+            <column name="tags"
+                    type="TEXT[]"
+                    defaultValue="{}"
+                    remarks="теги создаваемых задач">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="owner_user_id"
+                    type="UUID"
+                    remarks="владелец триггера">
+                <constraints nullable="false"
+                             foreignKeyName="fk_trigger__owner_user_id__app_user_id"
+                             referencedTableName="app_user"
+                             referencedColumnNames="id"
+                             deleteCascade="true"/>
+            </column>
+
+            <column name="revoked_at"
+                    type="TIMESTAMP WITH TIME ZONE"
+                    remarks="время отзыва; DELETE API = revoke, URL умирает мгновенно"/>
+
+            <column name="created_at"
+                    type="TIMESTAMP WITH TIME ZONE"
+                    remarks="время создания">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+</databaseChangeLog>

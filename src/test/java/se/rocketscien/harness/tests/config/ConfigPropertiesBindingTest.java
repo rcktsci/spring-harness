@@ -8,6 +8,7 @@ import se.rocketscien.harness.config.SseProperties;
 import se.rocketscien.harness.config.LlmProperties;
 import se.rocketscien.harness.config.LockProperties;
 import se.rocketscien.harness.config.TurnProperties;
+import se.rocketscien.harness.config.WorkflowProperties;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
@@ -138,6 +139,14 @@ class ConfigPropertiesBindingTest {
                 });
     }
 
+    @Test
+    void bindsWorkflowDefaults() {
+        contextRunner.run(context -> {
+            WorkflowProperties properties = context.getBean(WorkflowProperties.class);
+            assertThat(properties.revisionInsertRetries()).isEqualTo(3);
+        });
+    }
+
     @Configuration
     @EnableConfigurationProperties({
             SecurityProperties.class,
@@ -147,7 +156,8 @@ class ConfigPropertiesBindingTest {
             CompactProperties.class,
             DockerProperties.class,
             SseProperties.class,
-            LimitsProperties.class
+            LimitsProperties.class,
+            WorkflowProperties.class
     })
     static class PropertiesRegistrar {
     }

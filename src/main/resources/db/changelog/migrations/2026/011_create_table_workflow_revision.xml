@@ -1,0 +1,76 @@
+<?xml version="1.1" encoding="UTF-8" standalone="no"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                                       https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="16"
+               author="rocket-science">
+
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="workflow_revision"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="workflow_revision"
+                     remarks="иммутабельная ревизия workflow (data-model §3); UPDATE запрещён">
+            <column name="id"
+                    type="UUID"
+                    remarks="идентификатор ревизии (uuid v7); на него пинится задача">
+                <constraints nullable="false"
+                             primaryKey="true"
+                             primaryKeyName="pk_workflow_revision"/>
+            </column>
+
+            <column name="workflow_id"
+                    type="UUID"
+                    remarks="ссылка на workflow">
+                <constraints nullable="false"
+                             foreignKeyName="fk_workflow_revision__workflow_id__workflow_id"
+                             referencedTableName="workflow"
+                             referencedColumnNames="id"
+                             deleteCascade="true"/>
+            </column>
+
+            <column name="rev"
+                    type="INT"
+                    remarks="номер ревизии">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="graph_jsonb"
+                    type="JSONB"
+                    remarks="граф состояний и переходов (workflow-domain §2)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="start_state"
+                    type="TEXT"
+                    remarks="стартовое состояние ревизии (H-1): ∈ codes графа; задачи создаются в нём">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at"
+                    type="TIMESTAMP WITH TIME ZONE"
+                    remarks="время создания ревизии">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="17"
+               author="rocket-science">
+
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists tableName="workflow_revision"
+                             indexName="uidx_workflow_revision__workflow_id_rev"/>
+            </not>
+        </preConditions>
+
+        <addUniqueConstraint tableName="workflow_revision"
+                             columnNames="workflow_id, rev"
+                             constraintName="uidx_workflow_revision__workflow_id_rev"/>
+    </changeSet>
+
+</databaseChangeLog>
