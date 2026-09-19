@@ -33,4 +33,18 @@ public interface WorkspaceTools {
                             TurnCancellation cancellation) {
         return bash(sessionId, command, timeout, cwd);
     }
+
+    /**
+     * bash workflow-состояния BASH_SCRIPT (D-50, specs/workspace-tools «Task-контейнер»):
+     * исполняется в <b>отдельном</b> task-контейнере {@code harness-task-<taskId>} — изолированно
+     * от контейнеров сессий {@code harness-<sessionId>}; workspace монтируется из
+     * {@code workspaceRoot/task-<taskId>}. stdout и stderr объединены; non-zero exit — не ошибка
+     * инструмента (exitCode в результате); при превышении {@code timeout} процесс убивается,
+     * {@code timedOut=true}.
+     *
+     * <p><b>Инвариант идемпотентности (D-36/R3)</b>: скрипт состояния может быть выполнен
+     * повторно (крах процесса между входом в состояние и переходом) — side-effect способен
+     * сработать дважды; скрипты состояний должны быть идемпотентны (клоны/пуллы — таковы).</p>
+     */
+    ToolResult executeBash(UUID taskId, String script, Duration timeout, String cwd);
 }

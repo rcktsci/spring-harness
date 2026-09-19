@@ -31,9 +31,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Lifecycle per-session контейнера {@code harness-<sessionId>} (D-M1-7, specs/workspace-tools):
- * ленивое создание при первом вызове инструмента, bind-mount хостового каталога
- * {@code workspaceRoot/{sessionId}} в {@code /workspace}, лимиты cpu/mem из конфига, сеть off.
+ * Lifecycle контейнеров workspace (D-M1-7, specs/workspace-tools): сессии — {@code harness-<sessionId>}
+ * (namespace ""), задачи (BASH-состояния, D-50) — {@code harness-task-<taskId>} (namespace {@code task-}).
+ * Ленивое создание при первом вызове, bind-mount хостового каталога
+ * {@code workspaceRoot/[task-]{id}} в {@code /workspace}, лимиты cpu/mem из конфига, сеть off.
  * Pull-политика: локальный образ приоритетен; pull — только backoff-обновление при отсутствии
  * локального; недоступность registry не фейлит вызов (пока образ есть локально).
  */
@@ -44,18 +45,30 @@ public class WorkspaceContainerManager {
 
     private static final String WORKSPACE_MOUNT = "/workspace";
     private static final String CONTAINER_PREFIX = "harness-";
+    /** Namespace task-контейнеров (BASH-состояния): {@code harness-task-<taskId>} (D-50). */
+    public static final String TASK_NAMESPACE = "task-";
 
     private final DockerClient dockerClient;
     private final DockerProperties properties;
     private final LimitsProperties limits;
-    private final ConcurrentMap<UUID, String> containers = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, String> containers = new ConcurrentHashMap<>();
 
     public String containerName(UUID sessionId) {
-        return CONTAINER_PREFIX + sessionId;
+        return containerName("", sessionId);
+    }
+
+    /** Имя контейнера с namespace: {@code harness-<namespace><id>}. */
+    public String containerName(String namespace, UUID id) {
+        return CONTAINER_PREFIX + namespace + id;
     }
 
     public Path workspaceDir(UUID sessionId) {
-        return Paths.get(properties.workspaceRoot(), sessionId.toString());
+        return workspaceDir("", sessionId);
+    }
+
+    /** Хостовый каталог workspace с namespace: {@code workspaceRoot/<namespace><id>}. */
+    public Path workspaceDir(String namespace, UUID id) {
+        return Paths.get(properties.workspaceRoot(), namespace + id);
     }
 
     /**
@@ -64,39 +77,53 @@ public class WorkspaceContainerManager {
      * в вечный LOST; контейнер, упавший между create и start, удаляется в {@link #createAndStart}.
      */
     public synchronized String ensureContainer(UUID sessionId) {
-        String cached = containers.get(sessionId);
+        return ensureContainer("", sessionId);
+    }
+
+    /** Ленивое создание контейнера с namespace (сессии — "", задачи — {@link #TASK_NAMESPACE}). */
+    public synchronized String ensureContainer(String namespace, UUID id) {
+        String key = namespace + id;
+        String cached = containers.get(key);
         if (cached != null && isContainerRunning(cached)) {
             return cached;
         }
-        containers.remove(sessionId);
+        containers.remove(key);
 
-        String name = containerName(sessionId);
+        String name = containerName(namespace, id);
         String existing = findContainerId(name);
         if (existing != null) {
             if (isContainerRunning(existing)) {
                 log.debug("Reusing existing running container {}", name);
-                containers.put(sessionId, existing);
+                containers.put(key, existing);
                 return existing;
             }
             log.warn("Removing stopped workspace container {} and recreating", name);
             removeContainerId(existing);
         }
-        String created = createAndStart(name, sessionId);
-        containers.put(sessionId, created);
+        String created = createAndStart(name, workspaceDir(namespace, id));
+        containers.put(key, created);
         return created;
     }
 
     public boolean isRunning(UUID sessionId) {
-        String containerId = containers.get(sessionId);
+        return isRunning("", sessionId);
+    }
+
+    public boolean isRunning(String namespace, UUID id) {
+        String containerId = containers.get(namespace + id);
         if (containerId == null) {
-            containerId = findContainerId(containerName(sessionId));
+            containerId = findContainerId(containerName(namespace, id));
         }
         return containerId != null && isContainerRunning(containerId);
     }
 
     public void removeContainer(UUID sessionId) {
-        containers.remove(sessionId);
-        String containerId = findContainerId(containerName(sessionId));
+        removeContainer("", sessionId);
+    }
+
+    public void removeContainer(String namespace, UUID id) {
+        containers.remove(namespace + id);
+        String containerId = findContainerId(containerName(namespace, id));
         if (containerId == null) {
             return;
         }
@@ -127,10 +154,16 @@ public class WorkspaceContainerManager {
      */
     public ContainerExecResult exec(UUID sessionId, List<String> command, byte[] stdin, Duration timeout,
                                     TurnCancellation cancellation) {
-        String containerId = ensureContainer(sessionId);
+        return exec("", sessionId, command, stdin, timeout, cancellation);
+    }
+
+    /** exec в контейнере с namespace (сессии — "", задачи — {@link #TASK_NAMESPACE}). */
+    public ContainerExecResult exec(String namespace, UUID id, List<String> command, byte[] stdin,
+                                    Duration timeout, TurnCancellation cancellation) {
+        String containerId = ensureContainer(namespace, id);
         if (!isContainerRunning(containerId)) {
             throw new WorkspaceContainerException(
-                    "Workspace container is not running: " + containerName(sessionId), true, null);
+                    "Workspace container is not running: " + containerName(namespace, id), true, null);
         }
 
         String execId;
@@ -144,7 +177,7 @@ public class WorkspaceContainerManager {
                     .getId();
         } catch (Exception e) {
             throw new WorkspaceContainerException(
-                    "Failed to create exec in " + containerName(sessionId) + ": " + e.getMessage(), true, e);
+                    "Failed to create exec in " + containerName(namespace, id) + ": " + e.getMessage(), true, e);
         }
 
         long captureLimit = limits.toolOutput().toBytes() + limits.toolCaptureMargin().toBytes();
@@ -194,7 +227,7 @@ public class WorkspaceContainerManager {
         } catch (Exception e) {
             if (!isContainerRunning(containerId)) {
                 throw new WorkspaceContainerException(
-                        "Workspace container died during execution: " + containerName(sessionId), true, e);
+                        "Workspace container died during execution: " + containerName(namespace, id), true, e);
             }
             throw new WorkspaceContainerException("Exec failed: " + e.getMessage(), true, e);
         }
@@ -202,7 +235,7 @@ public class WorkspaceContainerManager {
         if (streamFailure != null) {
             if (!isContainerRunning(containerId)) {
                 throw new WorkspaceContainerException(
-                        "Workspace container died during execution: " + containerName(sessionId), true, streamFailure);
+                        "Workspace container died during execution: " + containerName(namespace, id), true, streamFailure);
             }
             throw new WorkspaceContainerException("Exec failed: " + streamFailure.getMessage(), true, streamFailure);
         }
@@ -216,7 +249,7 @@ public class WorkspaceContainerManager {
 
         if (!isContainerRunning(containerId)) {
             throw new WorkspaceContainerException(
-                    "Workspace container died during execution: " + containerName(sessionId), true, null);
+                    "Workspace container died during execution: " + containerName(namespace, id), true, null);
         }
         // Сигнальная смерть команды (exit >= 128): демон может отдавать состояние с задержкой —
         // короткое окно containerStopConfirm отличает смерть контейнера от self-kill команды,
@@ -225,7 +258,7 @@ public class WorkspaceContainerManager {
         if (exitCode != null && exitCode >= 128
                 && (cancellation != null && cancellation.isCancelled() || containerStoppedWithin(containerId))) {
             throw new WorkspaceContainerException(
-                    "Workspace container died during execution: " + containerName(sessionId), true, null);
+                    "Workspace container died during execution: " + containerName(namespace, id), true, null);
         }
 
         String text = output.asString();
@@ -270,8 +303,8 @@ public class WorkspaceContainerManager {
         return removed;
     }
 
-    private String createAndStart(String name, UUID sessionId) {
-        Path hostDir = workspaceDir(sessionId).toAbsolutePath().normalize();
+    private String createAndStart(String name, Path workspaceDir) {
+        Path hostDir = workspaceDir.toAbsolutePath().normalize();
         if (Files.exists(hostDir) && !Files.isDirectory(hostDir)) {
             throw new WorkspaceContainerException(
                     "Workspace path is not a directory: " + hostDir, false, null);

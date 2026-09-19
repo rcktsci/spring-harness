@@ -2,6 +2,9 @@ harness:
   webhook:
     # Фиксированный секрет capability-токенов для тестов (WebhooksRoutingTest считает HMAC по нему же).
     secret: test-webhook-secret
+    payload-summary:
+      # Малый лимит: test-payloadSummaryTruncation гоняет усечение без гигантских payload'ов.
+      byte-size-limit: 64
   security:
     # Живой Keycloak тестового контекста (позитивный путь и groups-гейт — через реальный Keycloak)
     issuer-uri: ${containers.keycloak.url}/realms/harness
@@ -25,6 +28,14 @@ harness:
     poll-interval: 1h
     llm-retries: 2
     backoff-base: 100ms
+  task:
+    # Задачные джобы в тестах не тикают сами (Act вызывает методы напрямую);
+    # BASH-раскачка по wake выключена — executor тесты зовут напрямую (детерминизм).
+    poll-interval: 1h
+    timeout:
+      scan-interval: 1h
+    bash-dispatch:
+      enabled: false
   docker:
     # Образ собирается DockerTestSupport'ом из docker/Dockerfile до первого docker-теста.
     helper-image: harness-helper:test

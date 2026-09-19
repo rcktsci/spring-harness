@@ -172,6 +172,28 @@ public class ContainerWorkspaceTools implements WorkspaceTools {
     @Override
     public ToolResult bash(UUID sessionId, String command, Duration timeout, String cwd,
                            TurnCancellation cancellation) {
+        return bashInContainer("", sessionId, command, timeout, cwd, cancellation);
+    }
+
+    /**
+     * Bash-состояние задачи (D-50): исполнение в отдельном task-контейнере
+     * {@code harness-task-<taskId>} с workspace из {@code workspaceRoot/task-<taskId>} —
+     * контейнеры и workspaces сессий не затрагиваются. Скрипт состояния обязан быть
+     * идемпотентным (повторный прогон после crash — новая попытка, side-effect возможен дважды).
+     */
+    @Override
+    public ToolResult executeBash(UUID taskId, String script, Duration timeout, String cwd) {
+        return bashInContainer(WorkspaceContainerManager.TASK_NAMESPACE, taskId, script, timeout, cwd, null);
+    }
+
+    /**
+     * Общий контур bash (сессии — namespace "", задачи — {@code task-}): команда исполняется
+     * в своей сессии процесса ({@code setsid}) с PID-файлом; {@code timeout -s TERM} режет
+     * превышение (exit 124 → {@code timedOut}); область отмены регистрирует прерыватель —
+     * убийство группы процессов в контейнере (execution-model §6).
+     */
+    private ToolResult bashInContainer(String namespace, UUID id, String command, Duration timeout,
+                                       String cwd, TurnCancellation cancellation) {
         String tool = "bash";
         if (cancellation != null && cancellation.isCancelled()) {
             return ToolResult.cancelled(callId(), tool, "отменено пользователем");
@@ -197,10 +219,10 @@ public class ContainerWorkspaceTools implements WorkspaceTools {
             // появится — тогда добивание продолжается поллингом (граница — таймаут вызова).
             AutoCloseable interruptor = cancellation == null
                     ? null
-                    : cancellation.registerInterrupt(() -> killUntilDead(sessionId, pidFile, execDeadline));
+                    : cancellation.registerInterrupt(() -> killUntilDead(namespace, id, pidFile, execDeadline));
             ContainerExecResult result;
             try {
-                result = containers.exec(sessionId, cmd, null, execDeadline, cancellation);
+                result = containers.exec(namespace, id, cmd, null, execDeadline, cancellation);
             } finally {
                 if (interruptor != null) {
                     try {
@@ -231,10 +253,10 @@ public class ContainerWorkspaceTools implements WorkspaceTools {
      * PID. Повторяется с интервалом конфига: PID-файл может появиться позже команды stop;
      * граница повторов — таймаут вызова.
      */
-    private void killUntilDead(UUID sessionId, String pidFile, Duration deadline) {
+    private void killUntilDead(String namespace, UUID id, String pidFile, Duration deadline) {
         long end = System.nanoTime() + deadline.toNanos();
         while (System.nanoTime() < end) {
-            if (tryKillProcessGroup(sessionId, pidFile)) {
+            if (tryKillProcessGroup(namespace, id, pidFile)) {
                 return;
             }
             try {
@@ -244,12 +266,12 @@ public class ContainerWorkspaceTools implements WorkspaceTools {
                 return;
             }
         }
-        log.warn("Прерывание bash-процесса в {} не успело за {}", containerOf(sessionId), deadline);
+        log.warn("Прерывание bash-процесса в {} не успело за {}", containers.containerName(namespace, id), deadline);
     }
 
-    private boolean tryKillProcessGroup(UUID sessionId, String pidFile) {
+    private boolean tryKillProcessGroup(String namespace, UUID id, String pidFile) {
         try {
-            ContainerExecResult result = containers.exec(sessionId,
+            ContainerExecResult result = containers.exec(namespace, id,
                     List.of("sh", "-c",
                             "pid=$(cat \"$1\" 2>/dev/null) || exit 1;"
                                     + " [ -n \"$pid\" ] || exit 1;"
@@ -259,13 +281,9 @@ public class ContainerWorkspaceTools implements WorkspaceTools {
             return result.exitCode() == 0;
         } catch (Exception e) {
             log.debug("Попытка прерывания bash-процесса в {} не удалась: {}",
-                    containerOf(sessionId), e.getMessage());
+                    containers.containerName(namespace, id), e.getMessage());
             return false;
         }
-    }
-
-    private String containerOf(UUID sessionId) {
-        return "harness-" + sessionId;
     }
 
     private ContainerExecResult exec(UUID sessionId, String script, List<String> args) {

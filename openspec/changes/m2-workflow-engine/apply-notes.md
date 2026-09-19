@@ -196,3 +196,56 @@ ewRevision переводит
   retry — backstop, число попыток — конфиг harness.workflow.revision-insert-retries
   (новый WorkflowProperties; числа — только конфиг). Тест: конкурентный newRevision —
   обе ревизии с разными rev, latestRev=3.
+
+## Пачка I — движок состояний (BASH/WAIT_WEBHOOK/WAIT_TASKS) + wake-инфраструктура
+
+### Зафиксированные решения пачки
+
+- **Event-wake из TaskRegistry** (D-49): createTask (стартовое состояние раскачивается
+  сразу — BASH/WAIT_TASKS/AGENT без ожидания POLL), patch с изменением тегов (триггер
+  TAGGED-барьеров), add/removeDependency (blocked-changed), stop ('$CANCELLED' — терминал
+  для ALL_TERMINAL-наблюдателей). Публикация строго afterCommit.
+- **TaskWakeDispatcher — полнопроходная переоценка барьеров на любой wake**: любой wake
+  может закрывать чужие барьеры (ребёнок, созданный сразу терминальным; patch тегов; stop).
+  Переоценка идемпотентна (CAS), масштаб — MVP (выборка по partial-индексу с LIMIT).
+- **Premature-closure барьера — ответственность плана**: переоценка честно закрывает
+  ALL_CHILDREN по текущему состоянию; если дети создаются после входа в барьер, одиночный
+  терминальный ребёнок законно закрывает ALL_CHILDREN. Зафиксировано комментарием в тесте
+  (дети создаются под suspended, resume — детерминированный триггер).
+- **BashStateExecutor**: reason `output` — stdout и stderr, объединённые (контракт
+  workspace-tools; раздельные поля без хака недоступны). `exitCode=null` — валидное
+  содержимое истории (kill без exit-кода). Скрипт-инвариант идемпотентности — Javadoc.
+- **Task-контейнер одноразовый**: BashStateExecutor снимает `harness-task-<taskId>` в
+  finally на любом исходе (NEXT/ERROR/TIMEOUT/отмена); workspace на хосте сохраняется;
+  остатки после рестарта добивает task-timeout-scanner.
+- **payloadSummary без полного тела** (I-5/GLM M-1, D-29): в reason вебхука — только
+  {topKeys, byteSize}; сверх `harness.webhook.payload-summary.byte-size-limit` —
+  {byteSize, truncated} (конфиг: 4096 prod / 64 test). BASH-dispatch под гейтом
+  `harness.task.bash-dispatch.enabled` (в тестах выключен — executor зовут напрямую).
+- **Self-исключение из scope** (I-3): BLOCKED_BY/TAGGED — `id <> self` в SQL, EXPLICIT —
+  фильтр при разборе params (WAITING-задача в собственном барьере висела бы вечно);
+  ALL_CHILDREN сам себя содержать не может.
+- **ORDER BY id во всех LIMIT-выборках джоб** (I-4): детерминизм страниц
+  (dispatcher-барьеры, POLL bootstrap/WAIT_TASKS, таймаут-скан).
+- **uuid[] в JdbcTemplate** — только через `AbstractSqlTypeValue` + `Connection.createArrayOf`
+  (setObject(UUID[]) pgjdbc не поддерживает; varargs-расширение массива — ловушка).
+
+### Фиксы ревью пачки I (применены до ревью-цикла — пачка оркестратора)
+
+- **I-1 (DS, medium)**: NPE `Map.copyOf(reason)` при null-значениях — `TaskEngineImpl`
+  переведён на null-толерантную копию (`Collections.unmodifiableMap(LinkedHashMap)`); в
+  WaitWebhookStateExecutor nullable `source` в reason не попадает. Регресс: webhook без
+  `?source=`, bash-TIMEOUT/kill с `exitCode=null` (unit + интеграция с убийством контейнера).
+- **GLM nit**: null-safe `properties.transition()` в TaskEngineImpl и BashStateExecutor.
+- **GLM M-3**: openapi.yaml TransitionDto.description — bash-reason
+  `{exitCode, output, durationMs, attempt}` вместо раздельных stdout/stderr
+  (description-only, регенерация не требуется; правка замороженной спеки — согласована
+  ревью пачки I).
+
+### Тесты пачки I
+
+BashStateExecutorClassifyTest 6 + BashStateExecutorTaskContainerTest 5 (live-контейнер) +
+TaskEngineTransitionTest 8 (CAS-гонки, stop-vs-transition ×10) + TaskSchedulerJobsTest 5 +
+TaskWakeBusTest 4 + WaitTasksScopeTest 8 + WaitTasksStateExecutorIntegrationTest 11 +
+WaitWebhookStateExecutorIntegrationTest 6, ConfigPropertiesBindingTest +1 (bindsTaskDefaults).
+Итог сюиты: **351 зелёных** (было 295 после пачки H).

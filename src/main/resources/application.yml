@@ -6,6 +6,10 @@ harness:
     # Секрет HMAC capability-токенов вебхуков (token = HMAC-SHA256(secret, kind:entityId),
     # api-contracts §4.4); в рантайме VM — через env HARNESS_WEBHOOK_SECRET.
     secret: ${HARNESS_WEBHOOK_SECRET:dev-webhook-secret-not-for-prod}
+    payload-summary:
+      # Компактность payloadSummary в reason_jsonb (D-29): payload больше лимита — сводка
+      # ужимается до {byteSize, truncated} без перечня топ-ключей.
+      byte-size-limit: 4096
   security:
     allowed-groups: [harness-users]
     issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8080/realms/harness}
@@ -18,6 +22,27 @@ harness:
     poll-interval: 5s
     llm-retries: 3
     backoff-base: 1s
+  task:
+    # Джоба task-scheduler (POLL-страховка задачного слоя: bootstrap AGENT + переоценка WAIT_TASKS).
+    poll-interval: 5s
+    scheduler:
+      # TTL ShedLock-лока task-scheduler/task-timeout-scanner (lockAtMostFor).
+      ttl: 10s
+      # Максимум задач за один проход джобы.
+      batch-size: 50
+    timeout:
+      # Интервал скана просроченных deadline_at (task-timeout-scanner).
+      scan-interval: 30s
+    transition:
+      kind-timeouts:
+        # Дефолтные дедлайны по kind: применяются, когда у состояния нет явного `timeout`.
+        bash: 10m
+        wait-webhook: 1h
+        wait-tasks: 24h
+        agent: 24h
+    bash-dispatch:
+      # Автораскачка BASH-состояний по EVENT-wake (виртуальный поток на исполнение скрипта).
+      enabled: true
   llm:
     timeout: 60s
     encryption-keys:

@@ -9,6 +9,7 @@ import se.rocketscien.harness.config.LlmProperties;
 import se.rocketscien.harness.config.LockProperties;
 import se.rocketscien.harness.config.TurnProperties;
 import se.rocketscien.harness.config.WorkflowProperties;
+import se.rocketscien.harness.config.TaskProperties;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
@@ -147,6 +148,22 @@ class ConfigPropertiesBindingTest {
         });
     }
 
+    @Test
+    void bindsTaskDefaults() {
+        contextRunner.run(context -> {
+            TaskProperties properties = context.getBean(TaskProperties.class);
+            assertThat(properties.pollInterval()).isEqualTo(Duration.ofSeconds(5));
+            assertThat(properties.scheduler().ttl()).isEqualTo(Duration.ofSeconds(10));
+            assertThat(properties.scheduler().batchSize()).isEqualTo(50);
+            assertThat(properties.timeout().scanInterval()).isEqualTo(Duration.ofSeconds(30));
+            assertThat(properties.transition().kindTimeouts().bash()).isEqualTo(Duration.ofMinutes(10));
+            assertThat(properties.transition().kindTimeouts().waitWebhook()).isEqualTo(Duration.ofHours(1));
+            assertThat(properties.transition().kindTimeouts().waitTasks()).isEqualTo(Duration.ofHours(24));
+            assertThat(properties.transition().kindTimeouts().agent()).isEqualTo(Duration.ofHours(24));
+            assertThat(properties.bashDispatch().enabled()).isTrue();
+        });
+    }
+
     @Configuration
     @EnableConfigurationProperties({
             SecurityProperties.class,
@@ -157,7 +174,8 @@ class ConfigPropertiesBindingTest {
             DockerProperties.class,
             SseProperties.class,
             LimitsProperties.class,
-            WorkflowProperties.class
+            WorkflowProperties.class,
+            TaskProperties.class
     })
     static class PropertiesRegistrar {
     }

@@ -1893,9 +1893,12 @@ components:
       type: object
       description: >-
         Запись истории переходов (append-only, task_transition_history). reason —
-        JSONB, форма зависит от источника: bash — {exitCode, stdout, stderr,
-        durationMs, attempt}; агент — {text} (обязательное обоснование); вебхук —
-        {kind:webhook, source, payloadSummary}; WAIT_TASKS — {closedBy:[taskId]} или
+        JSONB, форма зависит от источника: bash — {exitCode, output,
+        durationMs, attempt}, где output — stdout и stderr, объединённые в один
+        поток (контракт workspace-tools), exitCode может отсутствовать (kill без
+        exit-кода); агент — {text} (обязательное обоснование); вебхук —
+        {kind:webhook, source, payloadSummary} (полное тело не хранится — D-29);
+        WAIT_TASKS — {closedBy:[taskId]} или
         {failed:[taskId]}; stop — {kind:stop, actor:user}.
       required: [id, fromState, toState, kind, reason, createdAt]
       properties:

@@ -118,7 +118,7 @@ public class TaskRegistryImpl implements TaskRegistry {
                 command.workflowRevisionId(),
                 initial.code(),
                 initial.kind(),
-                0,
+                initial.kind() == TaskStateKind.BASH_SCRIPT ? 1 : 0,
                 0,
                 initial.deadline(now),
                 initial.statusProjection(),
@@ -130,6 +130,9 @@ public class TaskRegistryImpl implements TaskRegistry {
                 now
         );
         entityManager.persist(entity);
+        // D-49: EVENT-wake из insert — стартовое состояние (BASH/WAIT_TASKS/AGENT) раскачивается
+        // шиной движка сразу, без ожидания POLL.
+        publishWakeAfterCommit(entity.getId());
         log.info("Создана задача {} '{}' в состоянии '{}' ({})", entity.getId(), entity.getTitle(),
                 initial.code(), initial.kind());
         return toTask(entity);
@@ -158,6 +161,9 @@ public class TaskRegistryImpl implements TaskRegistry {
         }
         if (patch.tags() != null) {
             entity.setTags(List.copyOf(patch.tags()));
+            // Триггер переоценки WAIT_TASKS/TAGGED(x) (спека task-engine): изменение тегов
+            // задачи — EVENT-wake после коммита; диспетчер движка переоценивает барьеры.
+            publishWakeAfterCommit(id);
         }
         entity.setUpdatedAt(dbNow());
         return toTask(entity);
@@ -193,14 +199,20 @@ public class TaskRegistryImpl implements TaskRegistry {
         }
 
         entityManager.persist(new TaskDependencyEntity(blockerTaskId, blockedTaskId));
+        // Триггер переоценки WAIT_TASKS (спека task-engine): изменение blocked_by блокируемой
+        // задачи — EVENT-wake после коммита; диспетчер движка переоценивает её барьер.
+        publishWakeAfterCommit(blockedTaskId);
         log.info("Добавлена зависимость: {} блокирует {}", blockerTaskId, blockedTaskId);
     }
 
     @Override
     public void removeDependency(UUID blockerTaskId, UUID blockedTaskId) {
-        jdbcTemplate.update(
+        int removed = jdbcTemplate.update(
                 "DELETE FROM task_dependency WHERE blocker_task_id = ? AND blocked_task_id = ?",
                 blockerTaskId, blockedTaskId);
+        if (removed > 0) {
+            publishWakeAfterCommit(blockedTaskId);
+        }
     }
 
     @Override
@@ -262,6 +274,9 @@ public class TaskRegistryImpl implements TaskRegistry {
         for (UUID id : subtree.subList(1, subtree.size())) {
             cancelByStop(id);
         }
+        // D-49: EVENT-wake из update — '$CANCELLED' терминален для WAIT_TASKS-наблюдателей
+        // (ALL_TERMINAL), их переоценка срабатывает сразу.
+        publishWakeAfterCommit(taskId);
         log.info("Задача {} остановлена ('$CANCELLED'), поддерево: {} узлов", taskId, subtree.size());
     }
 

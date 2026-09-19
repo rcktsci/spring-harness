@@ -15,9 +15,10 @@ import java.util.UUID;
 
 /**
  * Общая фикстура task-тестов: пользователь + workflow-ревизия (мимо реестра, raw SQL),
- * эталонные графы, создание задач с дефолтами.
+ * эталонные графы, создание задач с дефолтами. Публична — используется и тестами
+ * execution/task (движок состояний, пачка I).
  */
-final class TaskTestFixtures {
+public final class TaskTestFixtures {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
