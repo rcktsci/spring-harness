@@ -77,6 +77,23 @@ public class TaskWakeDispatcher implements TaskWakeHandler {
         dispatcherExecutor.submit(this::reevaluateBarriers);
     }
 
+    /**
+     * Ручная раскачка BASH-состояния: та же ветка, что по EVENT-wake (исполнение скрипта в
+     * реальном task-контейнере + переход по исходу), но синхронно на вызывающем потоке и без
+     * конфиг-гейта {@code harness.task.bash-dispatch.enabled} (в тестовом профиле автораскачка
+     * выключена ради детерминизма остальных тестов — executor они зовут напрямую). Точка входа
+     * приёмочного e2e (M.2) и ops-инструментов; прод-путь — EVENT-wake ({@link #onTaskWake}).
+     * Не BASH/не RUNNING/suspended — no-op.
+     */
+    public void runBashStateOnce(UUID taskId) {
+        Task task = taskRegistry.get(taskId);
+        if (task.currentStateKind() == TaskStateKind.BASH_SCRIPT
+                && task.statusProjection() == TaskStatus.RUNNING
+                && !task.suspended()) {
+            dispatchBash(task);
+        }
+    }
+
     private void dispatch(UUID taskId) {
         try {
             Task task = taskRegistry.get(taskId);

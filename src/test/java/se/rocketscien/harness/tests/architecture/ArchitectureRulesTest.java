@@ -6,6 +6,12 @@ import com.tngtech.archunit.lang.ArchRule;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import se.rocketscien.harness.api.ArchUnitForeignImplViolator;
+import se.rocketscien.harness.session.ArchUnitLayerViolator;
+import se.rocketscien.harness.task.TaskRegistry;
+import se.rocketscien.harness.task.impl.TaskRegistryImpl;
+import se.rocketscien.harness.violation.alpha.CycleFixtureA;
+import se.rocketscien.harness.violation.beta.CycleFixtureB;
 
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -14,6 +20,7 @@ import java.util.List;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.library.Architectures.layeredArchitecture;
 import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Задача 10.1: ArchUnit-границы модулей {@code identity/session/execution/intelligence/api}
@@ -32,6 +39,12 @@ import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.sli
  * <p>Проверяются только main-классы ({@code target/classes}, включая сгенерированный
  * {@code api.gen}); тест-классы и сгенерированный test-клиент в границы не входят.
  * Нарушение роняет тест с описанием правила и перечнем зависимостей.</p>
+ *
+ * <p>M.1: правила расширены на {@code task}/{@code workflow} (параметризация, слои,
+ * циклы) и дополнены негативными тестами «намеренное нарушение ловится»: фикстуры-нарушители
+ * ({@code ArchUnitForeignImplViolator}, {@code ArchUnitLayerViolator}, пара
+ * {@code CycleFixtureA/B}) живут только в test-classpath и проверяются отдельными
+ * импортами — позитивные правила на main-классах их не видят.</p>
  */
 class ArchitectureRulesTest {
 
@@ -119,5 +132,48 @@ class ArchitectureRulesTest {
                 .because("циклы между модулями запрещены (architecture.md §2)")
                 .as("Модули свободны от циклов")
                 .check(DOMAIN_CLASSES);
+    }
+
+    // --- M.1: намеренное нарушение ловится (фикстуры-нарушители — test-classpath) ---
+
+    /** Нарушение «чужой .impl» (api → task.impl) роняет правило с перечнем зависимости. */
+    @Test
+    void foreignImplViolationIsCaught() {
+        List<String> importers = new ArrayList<>(List.of(
+                API, EXECUTION, WORKFLOW, SESSION, IDENTITY, INTELLIGENCE));
+        ArchRule rule = noClasses()
+                .that().resideInAnyPackage(importers.toArray(new String[0]))
+                .should().dependOnClassesThat().resideInAPackage(BASE + ".task.impl..")
+                .because("чужой .impl — внутренность модуля")
+                .as("Имплементации модуля task скрыты за контрактом");
+
+        assertThatThrownBy(() -> rule.check(new ClassFileImporter().importClasses(
+                ArchUnitForeignImplViolator.class, TaskRegistryImpl.class)))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("Имплементации модуля task скрыты за контрактом")
+                .hasMessageContaining("ArchUnitForeignImplViolator")
+                .hasMessageContaining("TaskRegistryImpl");
+    }
+
+    /** Нарушение слоёв (session → task) роняет MODULE_LAYERING. */
+    @Test
+    void layerViolationIsCaught() {
+        assertThatThrownBy(() -> MODULE_LAYERING.check(new ClassFileImporter().importClasses(
+                ArchUnitLayerViolator.class, TaskRegistry.class)))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("ArchUnitLayerViolator")
+                .hasMessageContaining("TaskRegistry");
+    }
+
+    /** Цикл между слайсами роняет правило beFreeOfCycles. */
+    @Test
+    void dependencyCycleIsCaught() {
+        assertThatThrownBy(() -> slices().matching(BASE + ".violation.(*)..")
+                .should().beFreeOfCycles()
+                .because("циклы между модулями запрещены")
+                .as("Слайсы violation свободны от циклов")
+                .check(new ClassFileImporter().importClasses(CycleFixtureA.class, CycleFixtureB.class)))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("Cycle detected");
     }
 }

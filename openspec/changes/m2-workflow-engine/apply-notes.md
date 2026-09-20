@@ -521,3 +521,60 @@ rev=1, 422 key-unique, 422 graph-invalid, 404, ревизии rev=2+список
 **Verify фиксов**: `mvn clean verify` — прогон отдельной сессией (директива «сборки не
 запускать» на время ревью; правки рукопроверены: сигнатуры порта обновлены во всех точках
 вызова — handler, executor, 6 мест интеграционного теста).
+
+## Пачка M — приёмка M2 (ArchUnit + e2e + верификация + ADR-перенос)
+
+### Сделано
+
+- **M.1 — ArchUnit**. Параметризация чужих `.impl` по 6 модулям и правила слоёв
+  (`api → {execution, intelligence, session, identity, task, workflow}`;
+  `execution → {session, identity, task, workflow, intelligence}`) были расширены ещё в
+  пачке H.3. В пачке M добавлены негативные тесты «намеренное нарушение ловится»:
+  - `foreignImplViolationIsCaught` — api → `task.impl` на фикстуре-нарушителе роняет
+    правило (в сообщении — нарушитель и `TaskRegistryImpl`);
+  - `layerViolationIsCaught` — session → task роняет `MODULE_LAYERING`;
+  - `dependencyCycleIsCaught` — цикл alpha ↔ beta роняет `beFreeOfCycles` («Cycle detected»).
+  Фикстуры-нарушители живут только в test-classpath: `ArchUnitForeignImplViolator`
+  (пакет api), `ArchUnitLayerViolator` (пакет session), пара `CycleFixtureA`/`CycleFixtureB`
+  (пакеты `violation.alpha`/`violation.beta` — намеренно вне доменных слоёв, чтобы цикл не
+  задевал позитивное правило по домену). Итог: `ArchitectureRulesTest` — 13 зелёных
+  (5 правил + 6 параметризованных + 3 негативных), существующие проверки не сломаны.
+- **M.2 — приёмочный e2e** `AcceptanceTwoPhaseReviewTest.acceptanceTwoPhaseReviewWithReturn`
+  (tests/api): один интеграционный тест на живом приложении (Postgres + живой Keycloak —
+  alice по password grant, WireMock-LLM, реальный helper-образ). Граф
+  `plan(AGENT) → run-checks(BASH, PT5S) → reviewer-1(AGENT) → reviewer-2(AGENT) →
+  merge(BASH, PT5S) → done/failed`, ERROR-рёбра ревьюеров — назад в plan (цикл).
+  Задача создаётся по REST сгенерированным клиентом (владелец alice); AGENT-состояния
+  раскачиваются EVENT-wake → bootstrap STATE-сессии → seed-ход; переходы — мета-инструментом
+  `transition` с reason из USER-ходов (гейт D-52/D-59); BASH — через реальный одноразовый
+  контейнер `harness-task-<id>`. Проверено: 8 переходов истории в точном порядке
+  (включая `reviewer-1 → plan (ERROR)` — цикл возврата и повторное прохождение
+  run-checks/reviewer-1), bash-reasons с `exitCode=0` и реальным выводом скриптов,
+  reason ERROR-перехода — текст агента, STATE-сессия plan резюмируется (та же, D-53),
+  артефакт `review/checks.txt` физически лежит в host-workspace задачи (переживает
+  смену одноразовых контейнеров), терминал `done`/`SUCCEEDED`. Вторая часть теста —
+  bash-таймаут: граф с `timeout: PT5S` и `sleep 30` → TIMEOUT-переход в `failed`,
+  `durationMs ≈ 5.2с` (процесс убит по таймауту состояния).
+- **M.3** — полный `mvn clean verify` зелёный; D-47…D-58 перенесены в
+  `docs/design/decisions.md` (табличный ADR-формат; D-59 не дублировался — уже был
+  в реестре; датированы заморозкой дизайна 2026-09-18); AGENTS.md переведён в состояние
+  «M2 завершён, следующий M3».
+
+### Отклонения / фиксы пачки
+
+- **Extracted helper `TaskWakeDispatcher.runBashStateOnce(taskId)`** (gap-закрытие без
+  спек-правок): e2e нужен детерминированный вызов BASH-ветки, а автораскачка
+  `harness.task.bash-dispatch` выключена в тестовом профиле ради детерминизма остальных
+  тестов (обратное ломало бы executor-тесты, зовущие executor напрямую). Метод — та же
+  ветка, что по EVENT-wake (исполнение + переход по исходу), синхронно на вызывающем
+  потоке, без конфиг-гейта; прод-путь — wake. Следующая BASH-цепочка (bootstrap
+  следующего AGENT-состояния, переоценка WAIT_TASKS) идёт по настоящему EVENT-wake.
+- **Калибровка ассерта TIMEOUT-reason**: exitCode при таймауте = 124 (код обёртки
+  `timeout` в helper-контейнере), не null — null бывает только при LOST (kill контейнера
+  без exit-кода). Ассерт заменён на «exit ≠ 0» + диапазон `durationMs`.
+
+### Тесты пачки M
+
+`ArchitectureRulesTest` 13 (было 10: +3 негативных) + `AcceptanceTwoPhaseReviewTest` 1
+(приёмочный e2e, ~48с). Итог: **439 зелёных** `mvn clean verify` (было 435 после пачки L).
+Критерий M2 (roadmap) — выполнен.
