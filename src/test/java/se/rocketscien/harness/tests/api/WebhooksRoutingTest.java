@@ -25,9 +25,12 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Wiring вебхуков D.2 (api-contracts §4.4): маршрутизация без /v1, отдельная
- * security-цепочка без JWT (чужой Bearer не валидируется), HMAC-гейт токена
- * (401 signature-invalid раньше 501-стаба), basePath тест-клиента /api.
+ * Вебхуки: гейт-порядок и маршрутизация (api-contracts §4.4; ревью L-1). D.2-wiring + L-1:
+ * {@code WebhookTokenFilter} проверяет HMAC ДО диспетчеризации и HttpMessageConverter'ов —
+ * кривой токен даёт 401 signature-invalid при любом теле (битый JSON, отсутствие тела,
+ * чужой Bearer не валидируется как JWT); валидный токен на несуществующей задаче — 409
+ * task-not-waiting-webhook (отклонение dev D-пачки №6); basePath тест-клиента /api;
+ * /api/v1/webhooks/** под JWT-гейтом, неописанные пути — catch-all denyAll.
  */
 class WebhooksRoutingTest extends BaseApplicationTest {
 
@@ -45,6 +48,32 @@ class WebhooksRoutingTest extends BaseApplicationTest {
     }
 
     @Test
+    void badTokenWithGarbageJsonBodyReturns401Not422() throws IOException, InterruptedException {
+        // ревью L-1: HMAC-гейт — фильтр ДО HttpMessageConverter; битый токен + битый JSON
+        // → 401 signature-invalid, а не 422 parse-отказ
+        UUID taskId = UUID.randomUUID();
+        Response response = postBody(taskWebhookPath(taskId, "bad-token"),
+                "application/json", "{\"broken\": ");
+
+        assertThat(response.status()).isEqualTo(401);
+        assertThat(response.body()).contains("\"code\":\"signature-invalid\"");
+    }
+
+    @Test
+    void badTokenWithoutBodyAndContentTypeReturns401Not415() throws IOException, InterruptedException {
+        // ревью L-1: битый токен + отсутствие тела/Content-Type → 401 (не 415 unsupported-media-type)
+        UUID taskId = UUID.randomUUID();
+        HttpResponse<String> response = httpClient.send(
+                HttpRequest.newBuilder(URI.create(taskWebhookPath(taskId, "bad-token")))
+                        .POST(HttpRequest.BodyPublishers.noBody())
+                        .build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        assertThat(response.statusCode()).isEqualTo(401);
+        assertThat(response.body()).contains("\"code\":\"signature-invalid\"");
+    }
+
+    @Test
     void foreignBearerDoesNotTriggerJwtGate() throws IOException, InterruptedException {
         // GLM M-1: вебхук-цепочка без BearerTokenAuthenticationFilter — мусорный Bearer
         // не превращает ответ в 401 unauthenticated; исход решает HMAC
@@ -56,12 +85,14 @@ class WebhooksRoutingTest extends BaseApplicationTest {
     }
 
     @Test
-    void validTokenReachesStub501NotImplemented() throws IOException, InterruptedException {
+    void validTokenOnMissingTaskReturns409TaskNotWaitingWebhook() throws IOException, InterruptedException {
+        // L.3: гейт пройден — несуществующая задача → 409 task-not-waiting-webhook
+        // (без отдельного 404, отклонение dev D-пачки №6)
         UUID taskId = UUID.randomUUID();
         Response response = postWebhook(taskWebhookPath(taskId, hmac("task", taskId)), null);
 
-        assertThat(response.status()).isEqualTo(501);
-        assertThat(response.body()).contains("\"code\":\"not-implemented\"");
+        assertThat(response.status()).isEqualTo(409);
+        assertThat(response.body()).contains("\"code\":\"task-not-waiting-webhook\"");
     }
 
     @Test
@@ -137,6 +168,17 @@ class WebhooksRoutingTest extends BaseApplicationTest {
             builder.header("Authorization", "Bearer " + bearerToken);
         }
         return execute(builder);
+    }
+
+    /** POST произвольного тела с явным Content-Type (матрица гейт-порядка, ревью L-1). */
+    private Response postBody(String url, String contentType, String body)
+            throws IOException, InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
+                .header("Content-Type", contentType)
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        return new Response(response.statusCode(), response.body());
     }
 
     private Response post(String url, String bearerToken) throws IOException, InterruptedException {

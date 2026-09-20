@@ -2,11 +2,11 @@ package se.rocketscien.harness.tests.execution.task;
 
 import se.rocketscien.harness.BaseApplicationTest;
 import se.rocketscien.harness.common.IdGenerator;
+import se.rocketscien.harness.execution.TaskWebhookPort;
 import se.rocketscien.harness.execution.impl.WaitWebhookStateExecutor;
 import se.rocketscien.harness.task.Task;
 import se.rocketscien.harness.task.TaskRegistry;
 import se.rocketscien.harness.task.TaskStatus;
-import se.rocketscien.harness.task.TransitionKind;
 import se.rocketscien.harness.tests.workflow.WorkflowTestFixtures;
 
 import org.junit.jupiter.api.Test;
@@ -42,11 +42,12 @@ class WaitWebhookStateExecutorIntegrationTest extends BaseApplicationTest {
     @Test
     void validPayloadMovesTaskNextWithReason() throws Exception {
         Task task = newWaitTask(WorkflowTestFixtures.waitWebhookGraph());
+        Map<String, Object> payload = Map.of("status", "готово");
 
-        WaitWebhookStateExecutor.WebhookOutcome outcome = webhookExecutor.onWebhookArrived(
-                task.id(), Map.of("status", "готово"), "github");
+        TaskWebhookPort.WebhookOutcome outcome = webhookExecutor.onWebhookArrived(
+                task.id(), payload, "github", jsonSize(payload));
 
-        assertThat(outcome).isEqualTo(WaitWebhookStateExecutor.WebhookOutcome.ACCEPTED_NEXT);
+        assertThat(outcome).isEqualTo(TaskWebhookPort.WebhookOutcome.ACCEPTED_NEXT);
         Task after = taskRegistry.get(task.id());
         assertThat(after.currentState()).isEqualTo("done");
         assertThat(after.statusProjection()).isEqualTo(TaskStatus.SUCCEEDED);
@@ -60,18 +61,19 @@ class WaitWebhookStateExecutorIntegrationTest extends BaseApplicationTest {
         assertThat(reason.get("payloadSummary")).asInstanceOf(
                         org.assertj.core.api.InstanceOfAssertFactories.MAP)
                 .containsEntry("topKeys", List.of("status"))
+                .containsEntry("byteSize", jsonSize(payload))
                 .doesNotContainKey("truncated");
-        assertThat((Integer) ((Map<?, ?>) reason.get("payloadSummary")).get("byteSize")).isPositive();
     }
 
     @Test
     void webhookWithoutSourceIsAcceptedWithoutNpe() throws Exception {
         Task task = newWaitTask(WorkflowTestFixtures.waitWebhookGraph());
+        Map<String, Object> payload = Map.of("status", "готово");
 
-        WaitWebhookStateExecutor.WebhookOutcome outcome = webhookExecutor.onWebhookArrived(
-                task.id(), Map.of("status", "готово"), null);
+        TaskWebhookPort.WebhookOutcome outcome = webhookExecutor.onWebhookArrived(
+                task.id(), payload, null, jsonSize(payload));
 
-        assertThat(outcome).isEqualTo(WaitWebhookStateExecutor.WebhookOutcome.ACCEPTED_NEXT);
+        assertThat(outcome).isEqualTo(TaskWebhookPort.WebhookOutcome.ACCEPTED_NEXT);
         Map<String, Object> reason = taskRegistry.getHistory(task.id(), null, null)
                 .items().getFirst().reason();
         assertThat(reason).containsEntry("kind", "webhook").doesNotContainKey("source");
@@ -81,29 +83,31 @@ class WaitWebhookStateExecutorIntegrationTest extends BaseApplicationTest {
     void payloadSummaryTruncatedBeyondByteSizeLimit() throws Exception {
         Task task = newWaitTask(WorkflowTestFixtures.waitWebhookGraph());
         Map<String, Object> bigPayload = Map.of("status", "ok", "filler", "x".repeat(200));
+        int byteSize = jsonSize(bigPayload);
 
-        WaitWebhookStateExecutor.WebhookOutcome outcome = webhookExecutor.onWebhookArrived(
-                task.id(), bigPayload, "bulk");
+        TaskWebhookPort.WebhookOutcome outcome = webhookExecutor.onWebhookArrived(
+                task.id(), bigPayload, "bulk", byteSize);
 
-        assertThat(outcome).isEqualTo(WaitWebhookStateExecutor.WebhookOutcome.ACCEPTED_NEXT);
+        assertThat(outcome).isEqualTo(TaskWebhookPort.WebhookOutcome.ACCEPTED_NEXT);
         Map<String, Object> reason = taskRegistry.getHistory(task.id(), null, null)
                 .items().getFirst().reason();
         assertThat(reason.get("payloadSummary")).asInstanceOf(
                         org.assertj.core.api.InstanceOfAssertFactories.MAP)
                 .doesNotContainKey("topKeys")
-                .containsEntry("truncated", true);
-        assertThat((Integer) ((Map<?, ?>) reason.get("payloadSummary")).get("byteSize"))
-                .isGreaterThan(64);
+                .containsEntry("truncated", true)
+                .containsEntry("byteSize", byteSize);
+        assertThat(byteSize).isGreaterThan(64);
     }
 
     @Test
     void payloadViolatingSchemaMovesTaskError() throws Exception {
         Task task = newWaitTask(TaskEngineTestFixtures.waitWebhookSchemaGraph());
+        Map<String, Object> payload = Map.of("wrong", true);
 
-        WaitWebhookStateExecutor.WebhookOutcome outcome = webhookExecutor.onWebhookArrived(
-                task.id(), Map.of("wrong", true), "ci-bot");
+        TaskWebhookPort.WebhookOutcome outcome = webhookExecutor.onWebhookArrived(
+                task.id(), payload, "ci-bot", jsonSize(payload));
 
-        assertThat(outcome).isEqualTo(WaitWebhookStateExecutor.WebhookOutcome.ACCEPTED_ERROR);
+        assertThat(outcome).isEqualTo(TaskWebhookPort.WebhookOutcome.ACCEPTED_ERROR);
         Task after = taskRegistry.get(task.id());
         assertThat(after.currentState()).isEqualTo("failed");
         assertThat(after.statusProjection()).isEqualTo(TaskStatus.FAILED);
@@ -120,22 +124,34 @@ class WaitWebhookStateExecutorIntegrationTest extends BaseApplicationTest {
         Task task = TaskEngineTestFixtures.createTask(taskRegistry, jdbcTemplate, idGenerator,
                 WorkflowTestFixtures.twoPhaseGraph(), "plan");
 
-        assertThat(webhookExecutor.onWebhookArrived(task.id(), Map.of("status", "ok"), "github"))
-                .isEqualTo(WaitWebhookStateExecutor.WebhookOutcome.NOT_WAITING);
+        assertThat(webhookExecutor.onWebhookArrived(
+                task.id(), Map.of("status", "ok"), "github", 2))
+                .isEqualTo(TaskWebhookPort.WebhookOutcome.NOT_WAITING);
     }
 
     @Test
     void redeliveryAfterTransitionIsNoop() throws Exception {
         Task task = newWaitTask(WorkflowTestFixtures.waitWebhookGraph());
-        webhookExecutor.onWebhookArrived(task.id(), Map.of("status", "ok"), "github");
+        Map<String, Object> payload = Map.of("status", "ok");
+        int byteSize = jsonSize(payload);
+        webhookExecutor.onWebhookArrived(task.id(), payload, "github", byteSize);
 
         // ретрай после перехода: задача более не в WAIT_WEBHOOK — 409-семантика
-        assertThat(webhookExecutor.onWebhookArrived(task.id(), Map.of("status", "ok"), "github"))
-                .isEqualTo(WaitWebhookStateExecutor.WebhookOutcome.NOT_WAITING);
+        assertThat(webhookExecutor.onWebhookArrived(task.id(), payload, "github", byteSize))
+                .isEqualTo(TaskWebhookPort.WebhookOutcome.NOT_WAITING);
         // история не задвоилась
         List<Map<String, Object>> transitions = jdbcTemplate.queryForList(
                 "SELECT to_state FROM task_transition_history WHERE task_id = ?", task.id());
         assertThat(transitions).hasSize(1);
+    }
+
+    /** Размер сериализованного payload (тестовая сторона ревью L-5; Jackson 2 test-classpath). */
+    private static int jsonSize(Map<String, Object> payload) {
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsBytes(payload).length;
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new IllegalStateException("payload не сериализуется для замера", e);
+        }
     }
 
     private Task newWaitTask(Map<String, Object> graph) {

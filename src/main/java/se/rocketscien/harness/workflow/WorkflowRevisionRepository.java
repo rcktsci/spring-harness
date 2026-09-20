@@ -18,6 +18,9 @@ public interface WorkflowRevisionRepository extends Repository<WorkflowRevisionE
 
     Optional<WorkflowRevisionEntity> findFirstByWorkflowIdOrderByRevDesc(UUID workflowId);
 
+    /** Список ревизий workflow (GET /workflows/{key} — пачка L.4); сортировка rev asc. */
+    List<WorkflowRevisionEntity> findByWorkflowIdOrderByRevAsc(UUID workflowId);
+
     /** latestRev для страницы workflow одним запросом (без N+1). */
     @Query("""
             SELECT r.workflowId, MAX(r.rev)

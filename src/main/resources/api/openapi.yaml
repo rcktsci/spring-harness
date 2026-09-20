@@ -1461,15 +1461,13 @@ components:
         - params-schema
         - trigger-revoked
         - signature-invalid
-        - not-implemented
       description: >-
         Каталог кодов ошибок M1+M2 (api-contracts §6). Точное значение для каждого ответа
         зафиксировано в description соответствующего response-компонента. M2-коды:
         task-not-found, workflow-not-found, trigger-not-found, task-not-waiting-webhook,
         task-already-terminal, wrong-transition (переход не по ребру/пустой reason —
         инструмент агента), graph-invalid, dependency-invalid, params-schema,
-        trigger-revoked, signature-invalid (вебхуки), not-implemented (501 — метод ещё
-        не реализован в текущем apply-проходе; не ошибка контракта).
+        trigger-revoked, signature-invalid (вебхуки).
     AgentRef:
       type: object
       description: Ссылка на пиннутую ревизию агента.

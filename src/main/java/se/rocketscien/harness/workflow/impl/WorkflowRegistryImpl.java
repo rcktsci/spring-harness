@@ -221,6 +221,17 @@ public class WorkflowRegistryImpl implements WorkflowRegistry {
         return new WorkflowSearchResult(items, nextCursor);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public List<RevisionBrief> revisions(String workflowKey) {
+        WorkflowEntity workflow = workflowRepository.findByKey(workflowKey)
+                .orElseThrow(() -> new WorkflowNotFoundException(
+                        "Workflow '%s' не найден".formatted(workflowKey)));
+        return revisionRepository.findByWorkflowIdOrderByRevAsc(workflow.getId()).stream()
+                .map(revision -> new RevisionBrief(revision.getRev(), revision.getCreatedAt()))
+                .toList();
+    }
+
     private int latestRev(UUID workflowId) {
         return revisionRepository.findFirstByWorkflowIdOrderByRevDesc(workflowId)
                 .map(WorkflowRevisionEntity::getRev)

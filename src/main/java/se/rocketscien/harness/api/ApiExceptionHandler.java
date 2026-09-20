@@ -21,8 +21,13 @@ import se.rocketscien.harness.session.WrongSessionKindException;
 import se.rocketscien.harness.task.DependencyInvalidException;
 import se.rocketscien.harness.task.ParamsSchemaInvalidException;
 import se.rocketscien.harness.task.TaskAlreadyTerminalException;
+import se.rocketscien.harness.task.TaskNotWaitingWebhookException;
 import se.rocketscien.harness.task.TaskNotFoundException;
+import se.rocketscien.harness.task.TriggerNotFoundException;
+import se.rocketscien.harness.task.TriggerRevokedException;
 import se.rocketscien.harness.task.WorkflowRevisionNotFoundException;
+import se.rocketscien.harness.workflow.WorkflowGraphInvalidException;
+import se.rocketscien.harness.workflow.WorkflowKeyAlreadyExistsException;
 import se.rocketscien.harness.workflow.WorkflowNotFoundException;
 
 import java.io.IOException;
@@ -166,10 +171,45 @@ public class ApiExceptionHandler {
                 exception.getMessage(), null);
     }
 
-    @ExceptionHandler(ApiNotImplementedException.class)
-    public void notImplemented(ApiNotImplementedException exception, HttpServletResponse response) throws IOException {
-        problemWriter.write(response, HttpStatus.NOT_IMPLEMENTED, ProblemCodes.NOT_IMPLEMENTED,
+    /** Задачи нет либо она вне WAIT_WEBHOOK (§6; повторная доставка вебхука — тоже 409). */
+    @ExceptionHandler(TaskNotWaitingWebhookException.class)
+    public void taskNotWaitingWebhook(TaskNotWaitingWebhookException exception,
+                                      HttpServletResponse response) throws IOException {
+        problemWriter.write(response, HttpStatus.CONFLICT, ProblemCodes.TASK_NOT_WAITING_WEBHOOK,
                 exception.getMessage(), null);
+    }
+
+    /** Триггер не найден (DELETE несуществующего; §6). */
+    @ExceptionHandler(TriggerNotFoundException.class)
+    public void triggerNotFound(TriggerNotFoundException exception,
+                                HttpServletResponse response) throws IOException {
+        problemWriter.write(response, HttpStatus.NOT_FOUND, ProblemCodes.TRIGGER_NOT_FOUND,
+                exception.getMessage(), null);
+    }
+
+    /** Capability-URL триггера мёртв (revoked_at установлен; §6). */
+    @ExceptionHandler(TriggerRevokedException.class)
+    public void triggerRevoked(TriggerRevokedException exception,
+                               HttpServletResponse response) throws IOException {
+        problemWriter.write(response, HttpStatus.GONE, ProblemCodes.TRIGGER_REVOKED,
+                exception.getMessage(), null);
+    }
+
+    /** Граф не прошёл валидатор (создание workflow/ревизии; §6: 422 graph-invalid, errors[]). */
+    @ExceptionHandler(WorkflowGraphInvalidException.class)
+    public void workflowGraphInvalid(WorkflowGraphInvalidException exception,
+                                     HttpServletResponse response) throws IOException {
+        problemWriter.write(response, HttpStatus.UNPROCESSABLE_ENTITY, ProblemCodes.GRAPH_INVALID,
+                exception.getMessage(), errorsOfSchema(exception.getErrors()));
+    }
+
+    /** Дубликат key workflow (§6 не имеет 409-конфликт-кода; отклонение dev D-пачки №5). */
+    @ExceptionHandler(WorkflowKeyAlreadyExistsException.class)
+    public void workflowKeyAlreadyExists(WorkflowKeyAlreadyExistsException exception,
+                                         HttpServletResponse response) throws IOException {
+        problemWriter.write(response, HttpStatus.UNPROCESSABLE_ENTITY, ProblemCodes.VALIDATION_FAILED,
+                exception.getMessage(), List.of(new ApiValidationException.ValidationError(
+                        "/key", "key-unique", "Workflow с таким key уже существует")));
     }
 
     @ExceptionHandler(Exception.class)

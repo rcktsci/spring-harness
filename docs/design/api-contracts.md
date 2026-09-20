@@ -129,7 +129,6 @@ WebSocket `/api/v1/relay` (Bearer; для браузерного клиента 
 | `graph-invalid` / `dependency-invalid` / `params-schema` | 422 | |
 | `payload-too-large` | 413 | тело > лимита |
 | `trigger-revoked` | 410 | |
-| `not-implemented` | 501 | метод ещё не реализован в текущем apply-проходе (stubs); не ошибка контракта |
 
 ## 7. Доступ
 

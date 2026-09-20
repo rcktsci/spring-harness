@@ -19,12 +19,15 @@ final class ProblemCodes {
     static final String NOT_ACCEPTABLE = ProblemCode.NOT_ACCEPTABLE.getValue();
     static final String UNSUPPORTED_MEDIA_TYPE = ProblemCode.UNSUPPORTED_MEDIA_TYPE.getValue();
     static final String SIGNATURE_INVALID = ProblemCode.SIGNATURE_INVALID.getValue();
-    static final String NOT_IMPLEMENTED = ProblemCode.NOT_IMPLEMENTED.getValue();
     static final String TASK_NOT_FOUND = ProblemCode.TASK_NOT_FOUND.getValue();
     static final String WORKFLOW_NOT_FOUND = ProblemCode.WORKFLOW_NOT_FOUND.getValue();
+    static final String TRIGGER_NOT_FOUND = ProblemCode.TRIGGER_NOT_FOUND.getValue();
+    static final String TASK_NOT_WAITING_WEBHOOK = ProblemCode.TASK_NOT_WAITING_WEBHOOK.getValue();
     static final String TASK_ALREADY_TERMINAL = ProblemCode.TASK_ALREADY_TERMINAL.getValue();
     static final String DEPENDENCY_INVALID = ProblemCode.DEPENDENCY_INVALID.getValue();
     static final String PARAMS_SCHEMA = ProblemCode.PARAMS_SCHEMA.getValue();
+    static final String GRAPH_INVALID = ProblemCode.GRAPH_INVALID.getValue();
+    static final String TRIGGER_REVOKED = ProblemCode.TRIGGER_REVOKED.getValue();
 
     private ProblemCodes() {
     }

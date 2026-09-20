@@ -16,8 +16,9 @@ import java.util.UUID;
 /**
  * Фикстуры пачки I (движок состояний): эталонные графы BASH/WAIT_TASKS-скопов/терминалов,
  * raw-вставки задач мимо реестра (для сценариев «EVENT-wake потерян» — POLL-страховка).
+ * Публична — используется и api-тестами вебхуков (пачка L).
  */
-final class TaskEngineTestFixtures {
+public final class TaskEngineTestFixtures {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
 

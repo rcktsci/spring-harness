@@ -79,6 +79,17 @@ public interface WorkflowRegistry {
     record RevisionSummary(UUID revisionId, String workflowKey, int rev) {
     }
 
+    /**
+     * Список ревизий workflow в порядке {@code rev asc} (GET /workflows/{key} —
+     * «метаданные + список ревизий», api-contracts §4.2); неизвестный ключ →
+     * {@link WorkflowNotFoundException}.
+     */
+    List<RevisionBrief> revisions(String workflowKey);
+
+    /** Строка списка ревизий (без графа): rev + время создания. */
+    record RevisionBrief(int rev, Instant createdAt) {
+    }
+
     /** Критерии списка; {@code cursor} — opaque, {@code limit} >= 1 (верхняя граница — API-слой). */
     record WorkflowSearchCriteria(String cursor, int limit) {
     }

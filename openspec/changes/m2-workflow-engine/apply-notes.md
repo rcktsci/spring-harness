@@ -28,10 +28,11 @@
 
 ### Пачка D.2 — план удаления переходного кода
 
-- **`not-implemented` (501)** — код переходного периода: удаляется после **L.4** (последняя
-  пачка реализации M2): из ProblemCode спеки (openapi.yaml), api-contracts §6,
-  `ProblemCodes.java`, `ApiExceptionHandler` и всех стабов (к L.4 реализованных). Напоминание —
-  задача L.5 в tasks.md; verify — main-компиляция без упоминаний not-implemented.
+- **`not-implemented` (501)** — код переходного периода: удалён в пачке **L** (после L.4 —
+  см. секцию «Пачка L» ниже, пункт L.5). Из ProblemCode спеки (openapi.yaml), api-contracts §6,
+  `ProblemCodes.java`, `ApiExceptionHandler` и всех стабов; `ApiNotImplementedException.java`
+  удалён. Verify выполнен: `mvn clean verify` зелёный, упоминаний `not-implemented` в main/test
+  нет (регенерированный `ProblemCode` без `NOT_IMPLEMENTED`).
 
 ### Ревью-цикл D.2 (round 2)
 
@@ -416,3 +417,107 @@ STATE-поля taskId/stateCode, depth, 404) + TaskWakeDispatcherStopTest 2 (sto
 Turn'ы поддерева; patch-wake не трогает cancel_requested) + TaskEngineTransitionTest
 инвариант обновлён + ConfigPropertiesBindingTest +1 (bindsWebhookDefaults).
 **Всего: 401 тест зелёный** (было 368 после пачки J).
+
+## Пачка L — триггеры + вебхуки (+ workflows REST, L.5)
+
+### Зафиксированные решения пачки (отклонения dev)
+
+1. **`TaskWebhookPort` — контракт в корне `execution`** (`execution/TaskWebhookPort`): api не
+   может импортировать `execution.impl.WaitWebhookStateExecutor` (ArchUnit «чужой .impl»),
+   поэтому `onWebhookArrived` выдан портом; enum `WebhookOutcome` (ACCEPTED_NEXT/ACCEPTED_ERROR/
+   NOT_WAITING) переехал из executor'а в порт (обновлён интеграционный тест пачки I).
+2. **`WebhookHandlers` в `api/impl`** — HTTP-логика вебхуков; `WebhooksController`
+   (сгенерированный интерфейс, class-level `@RequestMapping("/api")`) — тонкая делегация.
+   Композиция доменных шагов — по контрактам: `TriggerRegistry.get` +
+   `WorkflowRegistry.getRevision` + `TaskRegistry.createTask`; переход WAIT_WEBHOOK — через
+   `TaskWebhookPort`.
+3. **Задача триггера: `title = trigger.name`, `description = "Создано триггером '<name>' по
+   вебхуку"`** — схема не задаёт (createTask требует оба поля); `author NULL` (спека
+   inbound-triggers), owner/params/tags — из триггера.
+4. **`Location` при POST /triggers = capability-URL** (`TriggerDto.url`, ревью L-4 —
+   перенесено с REST-ресурса `/api/v1/triggers/{id}`: Location должен указывать на рабочий
+   эндпоинт триггера, а не на DELETE-only ресурс).
+5. **Revoke атомарен и необратим** (ревью L-3): `UPDATE … SET revoked_at = now()
+   WHERE id = ? AND revoked_at IS NULL RETURNING id` — один атомарный UPDATE с гардом
+   (SELECT+UPDATE был гонок-небезопасен); отсутствующий **или уже отозванный** триггер →
+   `TriggerNotFoundException` → 404 trigger-not-found (повторный revoke — тоже 404:
+   ревоукить нечего; идемпотентный 204 отменён решением ревью).
+6. **Пин ревизии при создании триггера**: rev omitted → контроллер резолвит latestRev через
+   `WorkflowRegistry.get(key)` (404 workflow-not-found), явный rev — резолвит
+   `TriggerRegistryImpl` собственным SQL (task не зависит от workflow Java-классов —
+   прецедент пачки H).
+7. **`WorkflowRegistry.revisions(key)` — расширение контракта** (+ `RevisionBrief(rev,
+   createdAt)` + `findByWorkflowIdOrderByRevAsc`): GET /workflows/{key} требует
+   «метаданные + список ревизий» (api-contracts §4.2), контракта раньше не было.
+8. **Граф ↔ сгенерированные DTO — ручные мапперы в `ApiMappers`** (`toGraph`/`toGraphMap`),
+   без convertValue-магии: absent-поля и пустые схемы не «воскресают» при round-trip
+   (дефолты `HashMap` в генерации). `agent_key` — snake_case (отклонение D-№2).
+
+### Отступление от плана пачки (для ревью)
+
+- **Workflows REST реализован в пачке L.5** (`WorkflowsController`: 5 эндпоинтов §4.2, +
+  ветки `422 graph-invalid`/`422 key-unique` в `ApiExceptionHandler`): L.5 требует полного
+  удаления `not-implemented`, а стаб `WorkflowsController` был последним потребителем —
+  при этом ни одна задача tasks.md (D…M) не покрывала Workflows REST (пробел плана; спека
+  заморожена и полна — новых дизайн-решений не потребовалось). 5 интеграционных тестов
+  `WorkflowsApiTest` через сгенерированный клиент.
+
+### L.5 — удаление переходного кода (выполнено)
+
+- openapi.yaml: `- not-implemented` и упоминание в description удалены (регенерация в build);
+  api-contracts §6: строка каталога удалена; `ProblemCodes.NOT_IMPLEMENTED` и хендлер удалены;
+  `ApiNotImplementedException.java` удалён; стабы `TriggersController`/`WorkflowsController`/
+  `WebhooksController` заменены реализацией; `WebhooksRoutingTest.validTokenReachesStub501*`
+  переписан (`validTokenOnMissingTaskReturns409TaskNotWaitingWebhook` — отклонение D-№6).
+- Verify: `mvn clean verify` зелёный; grep `not-implemented|NotImplemented|NOT_IMPLEMENTED`
+  по src/main и src/test — пусто.
+
+### Тесты пачки L
+
+WebhookSignatureVerifierTest 7 (unit: HMAC-эталон, битый/урезанный/чужой kind|id/null/смена
+секрета) + TriggerRegistryImplTest 7 (пин latest/явный, 404, params-schema, revoke
+(атомарный; повторный revoke → 404 после L-3), capability-URL, список mine+курсор+битый
+курсор) + TriggersApiTest 6 (201+Location, пин, 404/422, mine+пагинация, revoke 204 →
+повторный 404, 404 trigger-not-found) + WebhooksApiTest 7 (202 NEXT + reason, 202+ERROR
+validationErrors, 409 вне WAIT_WEBHOOK, 409 повторная доставка, триггер → 202+задача+wake,
+410 отзыв, e2e AGENT-старт → bootstrap → Turn на WireMock-LLM) + WorkflowsApiTest 5 (201
+rev=1, 422 key-unique, 422 graph-invalid, 404, ревизии rev=2+список) + WebhooksRoutingTest 9
+(маршрутизация/гейт-порядок: 401 на битом токене при битом JSON и без тела — L-1; валидный
+токен на несуществующей задаче → 409). Итог до фиксов ревью: **433 зелёных** (было 401
+после пачки K); после фиксов L-1…L-5 — ожидается 435 (см. ниже).
+
+### Фиксы ревью пачки L (применены)
+
+- **L-1 (DS, medium)**: HMAC-гейт стоял в контроллере ПОСЛЕ парсинга тела — кривой токен +
+  битый JSON → 415/422 вместо 401 signature-invalid. Fix: `WebhookTokenFilter` (api,
+  `OncePerRequestFilter`, `@Order(HIGHEST_PRECEDENCE)` — раньше 413-лимита `PayloadSizeFilter`)
+  на `/api/webhooks/**`: проверяет HMAC до диспетчеризации и конвертеров, промах → 401
+  problem+json без challenge; нестандартный entityId (не UUID) — тоже 401 (без оракула
+  валидности URL); пути вне формата capability-URL проходят (свои 404/405).
+  *Девиация от буквы фикса*: контроллер оставлен на сгенерированном `WebhooksApi`
+  (`@RequestBody Map`) — сигнатура замороженной спеки/contract-first (директива владельца),
+  сырое чтение тела сломало бы интерфейс; требование «401 раньше парсинга тела» обеспечено
+  фильтром (конвертер работает строго после гейта). Кэш тела — см. L-5.
+  Тесты: `WebhooksRoutingTest.badTokenWithGarbageJsonBodyReturns401Not422`,
+  `badTokenWithoutBodyAndContentTypeReturns401Not415`.
+- **L-2 (DS, minor)**: Workflows REST добавлен в tasks.md как reminder-задача L.6 `[x]`
+  (пробел плана D–M; реализация — пачка L, см. «Отступление от плана»).
+- **L-3 (DS, minor)**: `TriggerRegistryImpl.revoke` — SELECT+UPDATE был неатомарен (гонка
+  с параллельным revoke). Fix: один `UPDATE … WHERE id = ? AND revoked_at IS NULL RETURNING id`;
+  пусто → `TriggerNotFoundException` (404). Контракт `revoke` — `void`; повторный revoke →
+  404 (идемпотентный 204 отменён решением ревью). Тесты:
+  `TriggerRegistryImplTest.revokeIsFinalAndRepeatedRevokeIsNotFound`,
+  `TriggersApiTest.revokeReturns204AndRepeatedRevokeIs404`.
+- **L-4**: `Location` POST /triggers → capability-URL (`TriggerDto.url`), а не
+  `/api/v1/triggers/{id}` (DELETE-only ресурс). Тест: Location == `url` из тела (сырой POST).
+- **L-5**: `byteSize` в `payloadSummary` — размер тела по проводу, без повторной
+  сериализации в executor'е: фильтр L-1 оборачивает запрос в
+  `ContentCachingRequestWrapper`, `WebhookHandlers` берёт
+  `WebUtils.getNativeRequest(...).getContentAsBytes().length` (fallback вне HTTP-контекста —
+  сериализация); `TaskWebhookPort.onWebhookArrived` принял параметр `payloadByteSize`
+  (executor — `execution`-модуль, HTTP-слой недоступен), `summary` сериализацию убрал.
+  Тесты executor'а: точное равенство `byteSize` переданному размеру.
+
+**Verify фиксов**: `mvn clean verify` — прогон отдельной сессией (директива «сборки не
+запускать» на время ревью; правки рукопроверены: сигнатуры порта обновлены во всех точках
+вызова — handler, executor, 6 мест интеграционного теста).

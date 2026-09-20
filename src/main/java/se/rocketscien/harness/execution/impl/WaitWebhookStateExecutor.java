@@ -6,13 +6,13 @@ import org.springframework.stereotype.Component;
 import se.rocketscien.harness.common.jsonschema.JsonSchemaError;
 import se.rocketscien.harness.common.jsonschema.LimitedJsonSchemaValidator;
 import se.rocketscien.harness.config.WebhookProperties;
+import se.rocketscien.harness.execution.TaskWebhookPort;
 import se.rocketscien.harness.execution.impl.TaskGraphReader.GraphState;
 import se.rocketscien.harness.task.Task;
 import se.rocketscien.harness.task.TaskRegistry;
 import se.rocketscien.harness.task.TaskStateKind;
 import se.rocketscien.harness.task.Transition;
 import se.rocketscien.harness.task.TransitionKind;
-import tools.jackson.databind.json.JsonMapper;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -35,9 +35,7 @@ import java.util.UUID;
 @Component
 @RequiredArgsConstructor
 @Slf4j
-public class WaitWebhookStateExecutor {
-
-    private static final JsonMapper JSON = JsonMapper.builder().build();
+public class WaitWebhookStateExecutor implements TaskWebhookPort {
 
     private final TaskRegistry taskRegistry;
     private final TaskGraphReader graphs;
@@ -47,12 +45,16 @@ public class WaitWebhookStateExecutor {
     /**
      * Приём payload'а вебхука задачей.
      *
-     * @param taskId  задача
-     * @param payload распарсенный JSON-тело вебхука
-     * @param source  метка источника (query {@code source=…}); null — без метки
+     * @param taskId          задача
+     * @param payload         распарсенный JSON-тело вебхука
+     * @param source          метка источника (query {@code source=…}); null — без метки
+     * @param payloadByteSize размер тела в байтах как получено по проводу (считает HTTP-слой —
+     *                        ревью L-5: без повторной сериализации; D-29)
      * @return исход обработки (для маппинга HTTP-ответов webhook-handler'ом)
      */
-    public WebhookOutcome onWebhookArrived(UUID taskId, Map<String, Object> payload, String source) {
+    @Override
+    public WebhookOutcome onWebhookArrived(UUID taskId, Map<String, Object> payload, String source,
+                                           int payloadByteSize) {
         Task task = taskRegistry.get(taskId);
         if (task.currentStateKind() != TaskStateKind.WAIT_WEBHOOK
                 || task.statusProjection().isTerminal()) {
@@ -74,7 +76,7 @@ public class WaitWebhookStateExecutor {
         }
 
         Map<String, Object> reason = webhookReason(source);
-        reason.put("payloadSummary", summary(payload));
+        reason.put("payloadSummary", summary(payload, payloadByteSize));
         return apply(task, TransitionKind.NEXT, reason) ? WebhookOutcome.ACCEPTED_NEXT
                 : WebhookOutcome.NOT_WAITING;
     }
@@ -108,31 +110,21 @@ public class WaitWebhookStateExecutor {
     /**
      * Сводка payload (design.md пачки L: дефолт {topKeys, byteSize}); сверх лимита
      * {@code byte-size-limit} — только {byteSize, truncated} (полное тело не хранится, D-29).
+     * {@code byteSize} — размер тела по проводу от HTTP-слоя (ревью L-5), без повторной
+     * сериализации распарсенной мапы.
      */
-    private Map<String, Object> summary(Map<String, Object> payload) {
-        if (payload == null) {
-            return Map.of("topKeys", List.of(), "byteSize", 0);
-        }
-        int byteSize = JSON.writeValueAsString(payload)
-                .getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+    private Map<String, Object> summary(Map<String, Object> payload, int payloadByteSize) {
         int limit = webhookProperties.payloadSummary() == null
                 ? Integer.MAX_VALUE
                 : webhookProperties.payloadSummary().limitOrMax();
         Map<String, Object> summary = new LinkedHashMap<>();
-        if (byteSize <= limit) {
+        if (payload != null && payloadByteSize <= limit) {
             summary.put("topKeys", payload.keySet().stream().toList());
         }
-        summary.put("byteSize", byteSize);
-        if (byteSize > limit) {
+        summary.put("byteSize", payloadByteSize);
+        if (payloadByteSize > limit) {
             summary.put("truncated", true);
         }
         return summary;
-    }
-
-    /** Исход приёма вебхука: HTTP-слой маппит (NEXT → 202, ERROR → 202+ERROR, NOT_WAITING → 409). */
-    public enum WebhookOutcome {
-        ACCEPTED_NEXT,
-        ACCEPTED_ERROR,
-        NOT_WAITING
     }
 }
