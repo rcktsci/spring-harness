@@ -7,6 +7,7 @@ import se.rocketscien.harness.execution.TurnManager;
 import se.rocketscien.harness.session.AgentNotFoundException;
 import se.rocketscien.harness.session.AgentRevisionRepository;
 import se.rocketscien.harness.session.Session;
+import se.rocketscien.harness.session.SessionStore;
 import se.rocketscien.harness.session.StateSessionService;
 import se.rocketscien.harness.task.Task;
 import se.rocketscien.harness.task.TaskRegistry;
@@ -34,6 +35,7 @@ public class AgentStateBootstrapper {
     private final TaskGraphReader graphs;
     private final StateSessionService stateSessions;
     private final AgentRevisionRepository agentRevisions;
+    private final SessionStore sessionStore;
     private final TurnManager turnManager;
 
     /** Найти/создать STATE-сессию и поднять Turn; повторный вызов безопасен. */
@@ -42,6 +44,11 @@ public class AgentStateBootstrapper {
         TaskGraphReader.GraphState state = graphs.state(graphs.loadForTask(task), stateCode);
         UUID revisionId = resolveAgentRevision(state);
         Session session = stateSessions.findOrCreate(taskId, stateCode, revisionId);
+        // Явный resume (O-2): вход в AGENT-состояние / resume задачи снимает персистентный
+        // stop сессии (после TaskRegistry.stop флаг держится до явного старта). Для живой
+        // задачи флаг и так false — сброс без эффекта. Сессия остановленной ('$CANCELLED')
+        // задачи сюда не доходит: диспетчер ведёт её в handleStop.
+        sessionStore.resetCancelRequested(session.id());
         log.info("Bootstrap AGENT-состояния '{}' задачи {} → сессия {}", stateCode, taskId, session.id());
         turnManager.tryStart(session.id());
     }

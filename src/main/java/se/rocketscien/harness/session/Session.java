@@ -6,7 +6,8 @@ import java.util.UUID;
 /**
  * Сессия — метаданные журнала (data-model §5). Сущность-проекция строки {@code session}:
  * ревизия агента пинится при создании и не меняется; {@code lastSeq/lastConsumedSeq} —
- * денормализации дописи; {@code lastActivityAt/createdAt} — для SessionDto (api-contracts §2).
+ * денормализации дописи; {@code depth} — глубина в дереве сессий (root = 0, D-61);
+ * {@code lastActivityAt/createdAt} — для SessionDto (api-contracts §2).
  */
 public record Session(
         UUID id,
@@ -17,6 +18,7 @@ public record Session(
         String stateCode,
         UUID agentRevisionId,
         UUID parentSessionId,
+        int depth,
         boolean cancelRequested,
         long lastSeq,
         long lastConsumedSeq,

@@ -70,8 +70,9 @@ public class SessionPromptBuilder {
                     }
                 }
                 case COMPACT -> {
-                    Message compact = new SystemMessage(
-                            "Предыдущий контекст (компакция): " + TurnPayloads.summary(payload));
+                    // ULID в тексте — адрес для read_compacted (M3 O.4): модель читает скрытое
+                    Message compact = new SystemMessage("Предыдущий контекст (компакция, id="
+                            + event.getUlid() + "): " + TurnPayloads.summary(payload));
                     if (group != null) {
                         heldAfterGroup.add(compact);
                     } else {

@@ -32,6 +32,16 @@ harness:
     window:
       default-ms: 10s
     late-publish-retry: 50ms
+  spawn:
+    # max-depth 1: root спавнит child (depth 1 ≤ 1), child спавнит grandchild → forbidden
+    # (depth-limit) — оба сценария O.1 на одном контексте.
+    max-depth: 1
+    workspace-strategy: inherit
+    timeout-ms: 60s
+    poll-interval: 50ms
+  compact:
+    # threshold унаследован; малый read-max-bytes — усечение read_compacted без гигантских записей.
+    read-max-bytes: 64B
   late-result:
     # Скан в тестах не тикает сам (Act вызывает scan() напрямую); протухание — 200ms.
     timeout-ms: 200ms

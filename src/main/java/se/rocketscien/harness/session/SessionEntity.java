@@ -114,8 +114,16 @@ public class SessionEntity {
         return parentSessionId;
     }
 
+    public void setParentSessionId(UUID parentSessionId) {
+        this.parentSessionId = parentSessionId;
+    }
+
     public int getDepth() {
         return depth;
+    }
+
+    public void setDepth(int depth) {
+        this.depth = depth;
     }
 
     public boolean isCancelRequested() {

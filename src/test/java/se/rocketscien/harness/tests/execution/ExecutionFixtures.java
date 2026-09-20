@@ -24,6 +24,15 @@ final class ExecutionFixtures {
 
     static Session newSession(JdbcTemplate jdbcTemplate, SessionStore sessionStore, IdGenerator idGenerator,
                               Environment environment) {
+        return newSessionWithAgent(jdbcTemplate, sessionStore, idGenerator, environment, null);
+    }
+
+    /**
+     * Сессия на агенте с произвольным {@code permissions_jsonb} (O-пачка: оркестратор с
+     * {@code {"metaTools": true}} получает spawn_subagent в манифесте).
+     */
+    static Session newSessionWithAgent(JdbcTemplate jdbcTemplate, SessionStore sessionStore, IdGenerator idGenerator,
+                                       Environment environment, String permissionsJson) {
         UUID userId = idGenerator.newUuidV7();
         jdbcTemplate.update(
                 "INSERT INTO app_user (id, keycloak_subject, username, display_name, created_at) VALUES (?, ?, ?, ?, now())",
@@ -53,10 +62,10 @@ final class ExecutionFixtures {
         String agentKey = "agent-" + revisionId;
         jdbcTemplate.update(
                 """
-                INSERT INTO agent (id, key, name, rev, role_prompt, llm_model_id, created_at)
-                VALUES (?, ?, ?, 1, ?, ?, now())
+                INSERT INTO agent (id, key, name, rev, role_prompt, llm_model_id, permissions_jsonb, created_at)
+                VALUES (?, ?, ?, 1, ?, ?, ?::jsonb, now())
                 """,
-                revisionId, agentKey, "Агент исполнения", "Ты исполнитель.", modelId);
+                revisionId, agentKey, "Агент исполнения", "Ты исполнитель.", modelId, permissionsJson);
 
         return sessionStore.createFreeSession(userId, agentKey, null, null);
     }

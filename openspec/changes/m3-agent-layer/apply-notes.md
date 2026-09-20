@@ -142,3 +142,135 @@ assert'ит видимость плейсхолдера.
 - Миграции: Liquibase на чистой базе тест-контекста (все e2e поднимают контекст заново) — ок.
 - Апгрейд с M1/M2-базы: отдельного стенда нет; обе миграции аддитивны
   (ADD COLUMN … DEFAULT 0 NOT NULL; DROP+ADD CHECK), риск апгрейда — минимальный.
+
+## Пачка O. Spawn + subagent-lifecycle (2026-09-20, dev-субагент GLM-5.3-Flash)
+
+### Сущностные решения пачки
+
+1. **Пакеты: `execution/impl/`, не `agent/`** (O.1/O.3/O.4). `SubagentSpawner`, `ReadCompactedTool`,
+   `SubtreeCanceller` вызывает `AgentTurnEngine`/`TurnManagerImpl` (execution); в `agent/` они
+   создали бы цикл слайсов ArchUnit (agent → execution уже есть через `AsyncTimeoutWatcher`,
+   N.6). Формализация слоя agent и перенос — S.1. Отступление от буквы задач (`agent/…`) —
+   с сохранением смысла «агентская зона» (N-прецедент: «agent/AsyncToolExecutor
+   (`execution/impl/`)»).
+
+2. **Спавн — блокирующее ожидание на потоке Turn'а родителя** (не CompletableFuture —
+   виртуальный поток и так дешёв): поллинг `findSession(child)` до «исход зафиксирован И
+   батч потреблён» (D-10) с интервалом `harness.spawn.poll-interval` и жёстким таймаутом
+   `harness.spawn.timeout-ms` (дефолт 30 мин). Доставка результата — обычный путь движка
+   (TOOL_RESULT на ходу, где spawn вызван); «родительский Turn завершился до возврата»
+   внутри одного процесса невозможен (поток блокирован в spawn), кросс-рестарт покрывает
+   рестарт-скан (LOST). Отступление от буквы O.2 («CompletableFuture.get()») — семантика
+   та же, код проще.
+
+3. **Условие завершения субагента**: `lastTurnOutcome != null && lastSeq <= lastConsumedSeq`.
+   Узкое место: если субагенту прилетели события после финального хода (USER), спавнер
+   вернёт результат по первому завершённому Turn'у, а субагентская сессия продолжит жить
+   независимо (wake собственным контуром). Для M3 (spawn = один seed-USER) — детерминировано;
+   сценарий «долгоживущий субагент с параллельными сообщениями» — точка эволюции.
+
+4. **Cancel_requested не «липкий»** (M1-семантика, спека agent-turn: сброс флага на старте
+   нового Turn'а): stop поддерева выставляет флаги, прерывает активные Turn'ы (их
+   CANCELLED-результаты пишет движок) и закрывает parked-вызовы; **wake после каскада
+   НЕ выполняется** — первая реализация будила сессии финальным tryStart, что (а) сбрасывало
+   cancel_requested новых ходов (сломало M2-тесты флага stop'а задач) и (б) дало модели
+   немедленно продолжить работу вопреки только что случившейся отмене. Запаркованных
+   поднимут POLL (5s) или поздний результат — модель увидит CANCELLED-результаты в рендере.
+   «Отменённое поддерево» — это событие отмены (CANCELLED-результаты + прерванные Turn'ы),
+   не постоянное состояние. Идемпотентность stop'а — по отсутствию незакрытых вызовов
+   и активных Turn'ов.
+
+5. **Depth в проекции `Session`** — колонка `session.depth` (N.0) поднята в публичную
+   запись (getDepth), SELECT'ы SessionStoreImpl/StateSessionServiceImpl расширены.
+
+6. **`read_compacted` — усечение по содержимому** (D-67 «на одну запись»): лимит
+   `harness.compact.read-max-bytes` применяется к `payload.text` записи; конверт
+   (seq/id/kind/payload) сохраняется целиком, маркер `truncated: true` — в записи.
+   Альтернатива — байтовое усечение всего JSON — отклонена: рвёт структуру, модель
+   теряет seq/kind.
+
+7. **ULID компакта в промпте** (`SessionPromptBuilder`): COMPACT-пересказ рендерится с
+   `id=<ULID>` — иначе модели неоткуда взять `compact_message_id`. Скрытие оригиналов
+   COMPACT'ом не меняется; `read_compacted` возвращает покрытые записи, последний
+   покрывающий компакт; указывать можно и на COMPACT, и на любое покрытое сообщение.
+
+8. **Гейты spawn_subagent**: инструмент регистрируется в манифесте только при
+   `permissions_jsonb.metaTools == true` (временно, до P-пачки — тот же флаг, что
+   P.1/P.2 формализуют); явный вызов без флага → `forbidden (no-metaTools)`. D-59-гейт
+   (instructionSource=USER) на spawn НЕ распространяется — спекой разрешён в любом ходе
+   оркестратора. Depth-гейт — до создания сессии; `workspace-strategy != inherit` →
+   `forbidden (workspace-strategy)` (M3 — только inherit, D-66).
+
+9. **Конфиги**: `harness.spawn.max-depth` (2), `workspace-strategy` (inherit),
+   `timeout-ms` (1800000), `poll-interval` (200ms); `harness.compact.read-max-bytes` (16KB);
+   тест-профиль: max-depth 1 (оба сценария depth на одном контексте), timeout 60s,
+   read-max-bytes 64B.
+
+10. **O-1 (фикс ревью): завершение субагента — полный D-10**. `SubagentSpawner.awaitCompletion`
+    требует НЕ только «исход зафиксирован + батч потреблён», но и `pending_tool_calls == 0`
+    и `runtimeStatus == IDLE`: Turn с превысившим окно async-инструментом завершается
+    COMPLETED при незакрытом вызове (PARKED_ASYNC) — без проверки родитель получил бы
+    частичный результат, а финальный ASSISTANT субагента потерялся. Тест
+    `spawnerWaitsForParkedSubagentToFinish`: воркер в парковке — spawn не закрывается;
+    поздний результат → финал воркера → только тогда TOOL_RESULT родителю.
+
+11. **O-2 (фикс ревью): stop персистентен**. SubtreeCanceller пишет CANCELLED без wake;
+    сессия становится eligible — но `TurnManager.tryStart` при `cancel_requested = true`
+    — no-op: POLL, поздний результат и рестарт-скан не поднимают остановленное поддерево,
+    флаг не сбрасывается (раньше новый Turn сбрасывал его на старте, и модель продолжала
+    работу после stop'а). Явные resume-точки (сбрасывают флаг): **USER-сообщение — сброс
+    в самом `SessionStoreImpl.appendEvent`** (та же транзакция, что и допись; работает и
+    через REST, и через прямой append — M1-семантика «stop по IDLE не гасит новые ходы»
+    сохранена, тест `stopOnIdleSessionIsHarmlessAndNextMessageStillWorks` зелёный) и
+    **вход/resume задачи** (`AgentStateBootstrapper.bootstrap`; для остановленной
+    `'$CANCELLED'`-задачи недостижим: диспетчер ведёт её в handleStop). Тест
+    `stopKeepsSubtreeStoppedUntilExplicitResume`: POLL не будит; сообщение пользователя
+    возобновляет только корень.
+
+12. **Spawn-timeout orphan (GLM nit, задокументировано)**: при превышении
+    `harness.spawn.timeout-ms` (дефолт 30 мин) без финала субагента родитель получает
+    `TOOL_RESULT ERROR «spawn-timeout»`, а субагентская сессия продолжает жить
+    самостоятельно (свой wake-контур, POLL); принудительная отмена child по таймауту —
+    сознательно не делается (инвазивное действие; при необходимости — stop поддерева
+    или future-механика отдельным решением). Незакрытые вызовы такого child'а страхуют
+    рестарт-скан и AsyncTimeoutWatcher.
+
+13. **R-2 (фикс ревью, round 2): мгновенный выход спавнера при stop поддерева.**
+    `SubagentSpawner.awaitCompletion` возвращает `SpawnWait {COMPLETED, CANCELLED, TIMEOUT}`;
+    ветка (b): `child.cancelRequested == true` → немедленный
+    `ToolResult.cancelled «субагент отменён (subtree-cancelled)»` — без ветки родитель
+    висел бы до `harness.spawn.timeout-ms` (CANCELLED-результаты от SubtreeCanceller дают
+    вечное `lastSeq > lastConsumed`). Микро-отступление от буквы «ERROR „subtree-cancelled"»:
+    статус CANCELLED, а не ERROR — консистентно с маппингом исхода субагента
+    (CANCELLED → CANCELLED) и классификацией BashStateExecutor (ERROR = сбой инструмента);
+    причина «subtree-cancelled» — в output. Тест `stopDuringSpawnCancelsParentPromptly`:
+    TOOL_RESULT CANCELLED в журнале родителя в пределах 2 с после stop.
+
+14. **R-1 (фикс ревью, round 2): mini-amendment спеки agent-turn** — MODIFIED-абзац
+    «С флагом cancel_requested в M3»: персистентный stop supersede M1-требование
+    «сбрасывается при завершении Turn'а (любой исход) и на старте нового Turn'а»; сброс
+    только явным resume (USER-сообщение атомарно с дописью / вход-resume задачи);
+    tryStart при флаге — no-op. Два сценария (возобновление сообщением; stop против
+    фоновых wake). Внутри change — без внешнего ревью-цикла.
+
+### Файлы пачки
+
+- Конфиг: `SpawnProperties` (новый), `CompactProperties` (+readMaxBytes), `application.yml`,
+  `application-test.yml`.
+- Сессии: `Session` (+depth), `SessionEntity` (+сеттеры parent/depth), `SessionStore`/
+  `SessionStoreImpl` (+createChildSession, findLastAssistantText, findMessageRef,
+  findCompactedOriginals, MessageRef), `StateSessionServiceImpl` (depth в SELECT/маппере).
+- Исполнение: `execution/impl/SubagentSpawner` (новый), `execution/impl/ReadCompactedTool`
+  (новый), `execution/impl/SubtreeCanceller` (новый), `AgentTurnEngine` (манифест + диспетчер
+  + гейт no-metaTools), `impl/TurnManagerImpl` (requestStop → каскад), `SessionPromptBuilder`
+  (ULID компакта в рендере).
+- Тесты: `SubagentSpawnTest` (3: happy path, depth-limit, no-metaTools), `ReadCompactedToolTest`
+  (3: оригиналы, усечение, not-found/чужой id), `SubtreeCancelApiTest` (2: активная ветка
+  каскада, parked-ветка canceller'а + идемпотентность), `ExecutionFixtures` (+агент с
+  permissions_jsonb), `ConfigPropertiesBindingTest` (+spawn, +compact.readMaxBytes),
+  `AsyncToolExecutorTest` (стаб SessionStore под новые методы контракта).
+
+### Verify пачки O
+
+- Точечные прогоны: SubagentSpawnTest 3/3, ReadCompactedToolTest 3/3, SubtreeCancelApiTest 2/2.
+- Финальный `mvn clean verify` — см. отчёт пачки.

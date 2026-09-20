@@ -79,6 +79,73 @@ public class SessionStoreImpl implements SessionStore {
     }
 
     @Override
+    public Session createChildSession(UUID parentSessionId, String agentKey, String title) {
+        SessionEntity parent = entityManager.find(SessionEntity.class, parentSessionId);
+        if (parent == null) {
+            throw new SessionNotFoundException("Сессия %s не найдена".formatted(parentSessionId));
+        }
+        UUID revisionId = resolveRevision(agentKey, null);
+
+        Instant now = dbNow();
+        SessionEntity child = new SessionEntity(
+                idGenerator.newUuidV7(),
+                title,
+                parent.getOwnerUserId(),
+                SessionKind.FREE,
+                revisionId,
+                now,
+                now
+        );
+        child.setParentSessionId(parent.getId());
+        child.setDepth(parent.getDepth() + 1);
+        entityManager.persist(child);
+
+        return toSession(child);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public String findLastAssistantText(UUID sessionId) {
+        List<String> texts = jdbcTemplate.queryForList(
+                "SELECT payload_jsonb ->> 'text' AS text FROM session_message"
+                        + " WHERE session_id = ? AND kind = 'ASSISTANT' ORDER BY seq DESC LIMIT 1",
+                String.class, sessionId);
+        return texts.isEmpty() ? null : texts.getFirst();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<MessageRef> findMessageRef(String messageId) {
+        List<MessageRef> refs = jdbcTemplate.query(
+                "SELECT session_id, seq, kind FROM session_message WHERE id = ?",
+                (rs, rowNum) -> new MessageRef(
+                        rs.getObject("session_id", UUID.class),
+                        rs.getLong("seq"),
+                        MessageKind.valueOf(rs.getString("kind"))),
+                messageId);
+        return refs.stream().findFirst();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<SessionMessageEntity> findCompactedOriginals(UUID sessionId, long seq) {
+        List<VisibilityRenderer.IndexedCovers> compacts = compactCovers(sessionId);
+        VisibilityRenderer.IndexedCovers target = null;
+        for (VisibilityRenderer.IndexedCovers compact : compacts) {
+            boolean coversTarget = compact.compactSeq() == seq
+                    || compact.covers().stream().anyMatch(cover ->
+                            seq >= cover.fromSeq() && seq <= cover.toSeq());
+            if (coversTarget) {
+                target = compact;
+            }
+        }
+        if (target == null || target.covers().isEmpty()) {
+            return List.of();
+        }
+        return selectByIntervals(sessionId, target.covers());
+    }
+
+    @Override
     public AppendedEvent appendEvent(UUID sessionId, MessageKind kind, UUID authorUserId, Map<String, Object> payload) {
         return appendEvent(sessionId, kind, authorUserId, payload, null);
     }
@@ -99,6 +166,14 @@ public class SessionStoreImpl implements SessionStore {
                 reserved.now()
         );
         entityManager.persist(message);
+        if (kind == MessageKind.USER) {
+            // Явный resume (O-2): USER-сообщение снимает персистентный stop
+            // (cancel_requested от requestStop держится до явного старта — гейт
+            // TurnManager.tryStart), иначе остановленная сессия не ожила бы никогда.
+            // Тот же инструмент неявно резюмирует сессию и в M1-семантике (спека agent-turn:
+            // «stop по IDLE не гасит новые ходы»).
+            jdbcTemplate.update("UPDATE session SET cancel_requested = false WHERE id = ?", sessionId);
+        }
         notifyListenersAfterCommit(message);
 
         return new AppendedEvent(reserved.seq(), ulid);
@@ -161,7 +236,7 @@ public class SessionStoreImpl implements SessionStore {
                     SELECT s.id, t.depth + 1 FROM session s JOIN subtree t ON s.parent_session_id = t.id
                 )
                 SELECT s.id, s.title, s.owner_user_id, s.kind, s.task_id, s.state_code,
-                       s.agent_revision_id, s.parent_session_id, s.cancel_requested, s.last_seq,
+                       s.agent_revision_id, s.parent_session_id, s.depth, s.cancel_requested, s.last_seq,
                        s.last_consumed_seq, s.last_turn_outcome, s.last_activity_at, s.created_at
                 FROM session s
                 JOIN subtree t ON s.id = t.id
@@ -177,6 +252,7 @@ public class SessionStoreImpl implements SessionStore {
                         rs.getString("state_code"),
                         rs.getObject("agent_revision_id", UUID.class),
                         rs.getObject("parent_session_id", UUID.class),
+                        rs.getInt("depth"),
                         rs.getBoolean("cancel_requested"),
                         rs.getLong("last_seq"),
                         rs.getLong("last_consumed_seq"),
@@ -573,6 +649,7 @@ public class SessionStoreImpl implements SessionStore {
                 entity.getStateCode(),
                 entity.getAgentRevisionId(),
                 entity.getParentSessionId(),
+                entity.getDepth(),
                 entity.isCancelRequested(),
                 entity.getLastSeq(),
                 entity.getLastConsumedSeq(),

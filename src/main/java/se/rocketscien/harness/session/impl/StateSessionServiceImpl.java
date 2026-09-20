@@ -135,7 +135,7 @@ public class StateSessionServiceImpl implements StateSessionService {
     private Session findStateSession(UUID taskId, String stateCode) {
         return jdbcTemplate.query("""
                         SELECT id, title, owner_user_id, kind, task_id, state_code, agent_revision_id,
-                               parent_session_id, cancel_requested, last_seq, last_consumed_seq,
+                               parent_session_id, depth, cancel_requested, last_seq, last_consumed_seq,
                                last_turn_outcome, last_activity_at, created_at
                         FROM session
                         WHERE task_id = ? AND state_code = ? AND kind = 'STATE'
@@ -149,6 +149,7 @@ public class StateSessionServiceImpl implements StateSessionService {
                         rs.getString("state_code"),
                         rs.getObject("agent_revision_id", UUID.class),
                         rs.getObject("parent_session_id", UUID.class),
+                        rs.getInt("depth"),
                         rs.getBoolean("cancel_requested"),
                         rs.getLong("last_seq"),
                         rs.getLong("last_consumed_seq"),

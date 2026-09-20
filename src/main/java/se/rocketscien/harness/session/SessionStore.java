@@ -31,6 +31,36 @@ public interface SessionStore {
 
     Session createFreeSession(UUID ownerUserId, String agentKey, Integer agentRevision, String title);
 
+    /**
+     * Дочерняя сессия субагента (M3 O.1, спека subagent-lifecycle): {@code parent_session_id}
+     * = родитель, {@code depth = parent.depth + 1} (D-61), {@code owner_user_id} наследуется
+     * от родителя, ревизия агента — последняя по {@code agentKey}. Лимит depth проверяет
+     * вызывающий (до создания). Неизвестный родитель → {@link SessionNotFoundException};
+     * неизвестный агент → {@link AgentNotFoundException}.
+     */
+    Session createChildSession(UUID parentSessionId, String agentKey, String title);
+
+    /**
+     * Текст последнего ASSISTANT-сообщения сессии (M3 O.2: финальный ответ субагента для
+     * TOOL_RESULT родителя); {@code null} — ASSISTANT ещё не было.
+     */
+    String findLastAssistantText(UUID sessionId);
+
+    /**
+     * Резолв ULID события → {@code (sessionId, seq, kind)} (M3 O.4). ULID глобально
+     * уникален, но cross-session-чтение в M3 запрещено — сессию возвращает вызывающему
+     * для сверки с текущей. Не найдено — {@code empty}.
+     */
+    Optional<MessageRef> findMessageRef(String messageId);
+
+    /**
+     * Оригиналы, скрытые COMPACT-покрытием (M3 O.4, D-44): компакт, чей {@code covers}
+     * включает {@code seq} (или сам компакт с этим seq — берётся последний покрывающий),
+     * → все сообщения его интервалов покрытия по возрастанию seq. COMPACT не модифицируется.
+     * Пустой список — seq ничем не покрыт.
+     */
+    List<SessionMessageEntity> findCompactedOriginals(UUID sessionId, long seq);
+
     AppendedEvent appendEvent(UUID sessionId, MessageKind kind, UUID authorUserId, Map<String, Object> payload);
 
     /**
@@ -153,6 +183,12 @@ public interface SessionStore {
      * {@code TOOL_RESULT} (M3 N.6).
      */
     record PendingAsyncCall(UUID sessionId, String callId, String tool, Instant createdAt) {
+    }
+
+    /**
+     * Ссылка на событие журнала по глобальному ULID (M3 O.4).
+     */
+    record MessageRef(UUID sessionId, long seq, MessageKind kind) {
     }
 
     /**

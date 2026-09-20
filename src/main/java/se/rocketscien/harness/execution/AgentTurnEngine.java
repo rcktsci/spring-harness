@@ -12,6 +12,8 @@ import reactor.core.Disposable;
 import se.rocketscien.harness.common.IdGenerator;
 import se.rocketscien.harness.config.TaskProperties;
 import se.rocketscien.harness.execution.impl.AsyncToolExecutor;
+import se.rocketscien.harness.execution.impl.ReadCompactedTool;
+import se.rocketscien.harness.execution.impl.SubagentSpawner;
 import se.rocketscien.harness.intelligence.LlmInvoker;
 import se.rocketscien.harness.session.MessageKind;
 import se.rocketscien.harness.session.Session;
@@ -78,6 +80,8 @@ public class AgentTurnEngine {
     private final TransitionMetaTool transitionTool;
     private final SessionPromptBuilder promptBuilder;
     private final AsyncToolExecutor asyncExecutor;
+    private final SubagentSpawner spawner;
+    private final ReadCompactedTool readCompactedTool;
     private final ObjectMapper objectMapper;
     private final IdGenerator idGenerator;
     private final TaskProperties taskProperties;
@@ -101,6 +105,12 @@ public class AgentTurnEngine {
         }
         SessionStore.AgentRuntime agent = sessionStore.agentRuntime(session.agentRevisionId());
         List<ToolCallback> toolCallbacks = new ArrayList<>(agentTools.declarations(agent));
+        // O.4: read_compacted доступен всем агентам в их собственной сессии
+        toolCallbacks.add(readCompactedTool.declaration());
+        // O.1: spawn_subagent — только оркестраторам (permissions_jsonb.metaTools = true)
+        if (isOrchestrator(agent)) {
+            toolCallbacks.add(spawner.declaration());
+        }
         if (session.kind() == SessionKind.STATE) {
             toolCallbacks.add(transitionTool.declaration());
         }
@@ -218,7 +228,7 @@ public class AgentTurnEngine {
                             null);
                     continue;
                 }
-                ToolResult result = executeToolCall(session, state, pendingCall, cancellation);
+                ToolResult result = executeToolCall(session, agent, state, pendingCall, cancellation);
                 sessionStore.appendEvent(sessionId, MessageKind.TOOL_RESULT, null,
                         TurnPayloads.toolResult(pendingCall.callId(), pendingCall.tool(), result), null);
             }
@@ -360,12 +370,35 @@ public class AgentTurnEngine {
     /**
      * Исполнение tool-call. Мета-инструменты (D-52/D-59) диспетчируются отдельно: гейт
      * {@code instructionSource = USER}, лимит {@code harness.task.transition.max-per-turn}
-     * и применение (транзакционно, в момент tool-call). Нативные — как раньше.
+     * и применение (транзакционно, в момент tool-call). Инструменты O-пачки:
+     * {@code spawn_subagent} — только оркестраторам (metaTools=true, без D-59-гейта —
+     * спавн разрешён в любом ходе оркестратора); {@code read_compacted} — всем.
+     * Нативные — как раньше.
      */
-    private ToolResult executeToolCall(Session session, TurnState state, PendingCall pendingCall,
-                                       TurnCancellation cancellation) {
+    private ToolResult executeToolCall(Session session, SessionStore.AgentRuntime agent, TurnState state,
+                                       PendingCall pendingCall, TurnCancellation cancellation) {
         if (TransitionMetaTool.NAME.equals(pendingCall.tool())) {
             return executeTransition(session, state, pendingCall);
+        }
+        if (SubagentSpawner.NAME.equals(pendingCall.tool())) {
+            if (!isOrchestrator(agent)) {
+                return ToolResult.error(pendingCall.callId(), pendingCall.tool(),
+                        "forbidden (no-metaTools): spawn_subagent доступен только оркестраторам");
+            }
+            try {
+                return spawner.execute(session.id(), pendingCall.callId(), pendingCall.arguments());
+            } catch (Exception e) {
+                log.warn("Инструмент {} сессии {} упал: {}", pendingCall.tool(), session.id(), e.getMessage());
+                return ToolResult.error(pendingCall.callId(), pendingCall.tool(), e.getMessage());
+            }
+        }
+        if (ReadCompactedTool.NAME.equals(pendingCall.tool())) {
+            try {
+                return readCompactedTool.execute(session.id(), pendingCall.callId(), pendingCall.arguments());
+            } catch (Exception e) {
+                log.warn("Инструмент {} сессии {} упал: {}", pendingCall.tool(), session.id(), e.getMessage());
+                return ToolResult.error(pendingCall.callId(), pendingCall.tool(), e.getMessage());
+            }
         }
         try {
             return agentTools.execute(session.id(), pendingCall.tool(), pendingCall.arguments(), cancellation);
@@ -373,6 +406,12 @@ public class AgentTurnEngine {
             log.warn("Инструмент {} сессии {} упал: {}", pendingCall.tool(), session.id(), e.getMessage());
             return ToolResult.error(pendingCall.callId(), pendingCall.tool(), e.getMessage());
         }
+    }
+
+    /** Оркестратор — агент с {@code permissions_jsonb.metaTools = true} (D-62, P-пачка). */
+    private static boolean isOrchestrator(SessionStore.AgentRuntime agent) {
+        return agent.permissions() != null
+                && Boolean.TRUE.equals(agent.permissions().get("metaTools"));
     }
 
     /**

@@ -45,6 +45,8 @@ public class SessionMessagesController implements SessionMessagesApi {
         rejectBlank(sendMessageRequest.getText());
 
         UUID authorId = caller.userId();
+        // USER-допись сама снимает персистентный stop (O-2: сброс cancel_requested в
+        // SessionStore.appendEvent) — явный resume для гейта tryStart
         SessionStore.AppendedEvent appended = sessionStore.appendEvent(
                 id, MessageKind.USER, authorId, Map.of(TurnPayloads.TEXT, sendMessageRequest.getText()));
 

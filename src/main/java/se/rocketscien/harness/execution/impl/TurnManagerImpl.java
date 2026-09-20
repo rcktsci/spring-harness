@@ -47,6 +47,7 @@ class TurnManagerImpl implements TurnManager {
     private final AgentTurnEngine engine;
     private final ActiveTurnRegistry activeTurns;
     private final SessionEventBroadcaster broadcaster;
+    private final SubtreeCanceller subtreeCanceller;
     private final ExecutorService turnExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     @Override
@@ -55,16 +56,21 @@ class TurnManagerImpl implements TurnManager {
         if (session.isEmpty() || session.get().lastSeq() <= session.get().lastConsumedSeq()) {
             return;
         }
+        if (session.get().cancelRequested()) {
+            // O-2: stop персистентен — сессия остановленного поддерева (SubtreeCanceller /
+            // requestStop) не поднимается POLL'ом, поздним результатом или рестарт-сканом,
+            // пока не случится явный resume: сообщение пользователя (SessionMessagesController)
+            // или вход/resume задачи (AgentStateBootstrapper) — они сбрасывают флаг.
+            log.debug("Сессия {}: под cancel_requested — попытка запуска без эффекта", sessionId);
+            return;
+        }
         turnExecutor.submit(() -> runTurn(sessionId));
     }
 
     @Override
     public void requestStop(UUID sessionId) {
-        sessionStore.requestCancel(sessionId);
-        TurnCancellation cancellation = activeTurns.get(sessionId);
-        if (cancellation != null) {
-            cancellation.cancel();
-        }
+        // O.3: stop каскадирует по поддереву (parent_session_id) — включая саму сессию
+        subtreeCanceller.cancelSubtree(sessionId);
     }
 
     private void runTurn(UUID sessionId) {

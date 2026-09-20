@@ -53,6 +53,17 @@ harness:
       1: ${HARNESS_LLM_KEY_V1:}
   compact:
     threshold: 0.8
+    # Лимит одной записи ответа read_compacted (D-67): оригинал больше — усечён + truncated.
+    read-max-bytes: 16KB
+  spawn:
+    # Лимит глубины дерева сессий субагентов (D-61): root = 0, проверка ДО создания дочерней.
+    max-depth: 2
+    # Стратегия workspace субагента (D-66): M3 — только inherit; new — точка эволюции.
+    workspace-strategy: inherit
+    # Таймаут блокирующего ожидания завершения субагента (spawn_subagent).
+    timeout-ms: 1800000
+    # Интервал опроса завершения субагента.
+    poll-interval: 200ms
   async:
     # Окно синхронного ожидания async-capable инструмента (bash, D-60): превышение —
     # TOOL_CALL + ASYNC_ACCEPTED в одной транзакции + фон; поздний TOOL_RESULT(late=true).

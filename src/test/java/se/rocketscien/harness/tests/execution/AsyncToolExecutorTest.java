@@ -282,6 +282,26 @@ class AsyncToolExecutorTest {
         }
 
         @Override
+        public Session createChildSession(UUID parentSessionId, String agentKey, String title) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public String findLastAssistantText(UUID id) {
+            return null;
+        }
+
+        @Override
+        public Optional<MessageRef> findMessageRef(String messageId) {
+            return Optional.empty();
+        }
+
+        @Override
+        public List<SessionMessageEntity> findCompactedOriginals(UUID id, long seq) {
+            return List.of();
+        }
+
+        @Override
         public AppendedEvent appendEvent(UUID id, MessageKind kind, UUID authorUserId, Map<String, Object> payload) {
             appended.add(new Appended(kind, payload));
             return new AppendedEvent(appended.size(), "ulid-" + appended.size());
@@ -306,7 +326,8 @@ class AsyncToolExecutorTest {
         @Override
         public Optional<Session> findSession(UUID id) {
             return Optional.of(new Session(sessionId, SessionKind.FREE, null, UUID.randomUUID(), null, null,
-                    UUID.randomUUID(), null, false, 0, 0, TurnOutcome.COMPLETED, Instant.now(), Instant.now()));
+                    UUID.randomUUID(), null, 0, false, 0, 0, TurnOutcome.COMPLETED,
+                    Instant.now(), Instant.now()));
         }
 
         @Override

@@ -9,6 +9,7 @@ import se.rocketscien.harness.config.SecurityProperties;
 import se.rocketscien.harness.config.SseProperties;
 import se.rocketscien.harness.config.LlmProperties;
 import se.rocketscien.harness.config.LockProperties;
+import se.rocketscien.harness.config.SpawnProperties;
 import se.rocketscien.harness.config.TurnProperties;
 import se.rocketscien.harness.config.WorkflowProperties;
 import se.rocketscien.harness.config.TaskProperties;
@@ -75,6 +76,20 @@ class ConfigPropertiesBindingTest {
         contextRunner.run(context -> {
             CompactProperties properties = context.getBean(CompactProperties.class);
             assertThat(properties.threshold()).isEqualTo(0.8);
+            // Лимит read_compacted (O.4/D-67) — только конфиг
+            assertThat(properties.readMaxBytes()).isEqualTo(org.springframework.util.unit.DataSize.ofKilobytes(16));
+        });
+    }
+
+    @Test
+    void bindsSpawnDefaults() {
+        contextRunner.run(context -> {
+            SpawnProperties properties = context.getBean(SpawnProperties.class);
+            // Спавн субагентов (O.1/O.2): лимиты и таймауты — только конфиг
+            assertThat(properties.maxDepth()).isEqualTo(2);
+            assertThat(properties.workspaceStrategy()).isEqualTo("inherit");
+            assertThat(properties.timeoutMs()).isEqualTo(Duration.ofMinutes(30));
+            assertThat(properties.pollInterval()).isEqualTo(Duration.ofMillis(200));
         });
     }
 
@@ -215,7 +230,8 @@ class ConfigPropertiesBindingTest {
             TaskProperties.class,
             WebhookProperties.class,
             AsyncProperties.class,
-            LateResultProperties.class
+            LateResultProperties.class,
+            SpawnProperties.class
     })
     static class PropertiesRegistrar {
     }
