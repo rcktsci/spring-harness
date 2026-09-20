@@ -12,6 +12,7 @@ import reactor.core.Disposable;
 import se.rocketscien.harness.common.IdGenerator;
 import se.rocketscien.harness.config.TaskProperties;
 import se.rocketscien.harness.execution.impl.AsyncToolExecutor;
+import se.rocketscien.harness.execution.impl.OrchestratorTools;
 import se.rocketscien.harness.execution.impl.ReadCompactedTool;
 import se.rocketscien.harness.execution.impl.SubagentSpawner;
 import se.rocketscien.harness.intelligence.LlmInvoker;
@@ -82,6 +83,7 @@ public class AgentTurnEngine {
     private final AsyncToolExecutor asyncExecutor;
     private final SubagentSpawner spawner;
     private final ReadCompactedTool readCompactedTool;
+    private final OrchestratorTools orchestratorTools;
     private final ObjectMapper objectMapper;
     private final IdGenerator idGenerator;
     private final TaskProperties taskProperties;
@@ -107,8 +109,11 @@ public class AgentTurnEngine {
         List<ToolCallback> toolCallbacks = new ArrayList<>(agentTools.declarations(agent));
         // O.4: read_compacted доступен всем агентам в их собственной сессии
         toolCallbacks.add(readCompactedTool.declaration());
-        // O.1: spawn_subagent — только оркестраторам (permissions_jsonb.metaTools = true)
+        // P.3: инструменты оркестратора (6 metaTools) + spawn_subagent — только
+        // агентам с permissions_jsonb.metaTools = true (D-62/D-69: флаг per-agent-revision,
+        // субагентам не наследуется — ревизия дочерней сессии пинится по agentKey спавна)
         if (isOrchestrator(agent)) {
+            toolCallbacks.addAll(orchestratorTools.declarations());
             toolCallbacks.add(spawner.declaration());
         }
         if (session.kind() == SessionKind.STATE) {
@@ -368,17 +373,29 @@ public class AgentTurnEngine {
     }
 
     /**
-     * Исполнение tool-call. Мета-инструменты (D-52/D-59) диспетчируются отдельно: гейт
-     * {@code instructionSource = USER}, лимит {@code harness.task.transition.max-per-turn}
-     * и применение (транзакционно, в момент tool-call). Инструменты O-пачки:
-     * {@code spawn_subagent} — только оркестраторам (metaTools=true, без D-59-гейта —
-     * спавн разрешён в любом ходе оркестратора); {@code read_compacted} — всем.
-     * Нативные — как раньше.
+     * Исполнение tool-call. Инструменты P-пачки (оркестраторские metaTools): гейт
+     * {@code permissions_jsonb.metaTools} — без флага {@code forbidden (no-metaTools)};
+     * с флагом D-59 (instructionSource = USER) НЕ применяется (частичный supersession
+     * D-41 — D-70). {@code spawn_subagent} — тот же гейт (O-пачка). {@code transition} —
+     * гейт D-59 в прежней силе (source = USER). Нативные — без гейтов.
      */
     private ToolResult executeToolCall(Session session, SessionStore.AgentRuntime agent, TurnState state,
                                        PendingCall pendingCall, TurnCancellation cancellation) {
         if (TransitionMetaTool.NAME.equals(pendingCall.tool())) {
             return executeTransition(session, state, pendingCall);
+        }
+        if (OrchestratorTools.NAMES.contains(pendingCall.tool())) {
+            if (!isOrchestrator(agent)) {
+                return ToolResult.error(pendingCall.callId(), pendingCall.tool(),
+                        "forbidden (no-metaTools)");
+            }
+            try {
+                return orchestratorTools.execute(session, pendingCall.callId(),
+                        pendingCall.tool(), pendingCall.arguments());
+            } catch (Exception e) {
+                log.warn("Инструмент {} сессии {} упал: {}", pendingCall.tool(), session.id(), e.getMessage());
+                return ToolResult.error(pendingCall.callId(), pendingCall.tool(), e.getMessage());
+            }
         }
         if (SubagentSpawner.NAME.equals(pendingCall.tool())) {
             if (!isOrchestrator(agent)) {

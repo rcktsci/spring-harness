@@ -28,10 +28,14 @@
 
 ## §P. Оркестратор-meta-tools
 
-- [ ] P.1 Расширить `agent.permissions_jsonb` boolean `metaTools` (через существующую jsonb — без миграции). Дефолт false. Юридическое: правка = новая ревизия (D-31 иммутабельность). Verify: unit — JSON round-trip; bootstrap-тест на `make-billing` с `metaTools=true`.
-- [ ] P.2 `agent/OrchestratorTools` — 6 metaTools (`create_workflow`/`edit_workflow`/`create_task`/`create_subtask`/`set_dependency`/`configure_trigger`), доступны только агентам с `metaTools=true` БЕЗ D-59 USER-source гейта. Обычные агенты — инструмент скрыт из manifest (явный вызов → `TOOL_RESULT forbidden (no-metaTools)`). Verify: integration — orchestrator создаёт task из TOOL_RESULT-исходного хода; обычный агент — нет.
-- [ ] P.3 Реализация metaTools через существующие контракты (`TaskRegistry` M2 H.3, `WorkflowRegistry` M2 H.2, `TriggerRegistry` M2 L.1). DTO через существующие эндпоинты REST (контракт-first не нарушается). `configure_trigger` возвращает `{ triggerId, url }`.
-- [ ] P.4 Гейт metaTools в `AgentTurnEngine.executeToolCall`: проверка `agent.metaTools` flag → если false и инструмент в orchestrator-list → TOOL_RESULT forbidden. Если true — D-59 не применяется к этим инструментам. Verify: integration — оба сценария.
+> Пачка выполнена 2026-09-20 (dev-субагент GLM-5.3-Flash). Расположение: `execution/impl/OrchestratorTools`
+> (не `agent/` — преемственность N/O: цикл слайсов ArchUnit agent↔execution; слои agent — S.1).
+> Гейт реализован в `AgentTurnEngine` (P.1/P.4 объединены), D-70 — `apply-notes.md` §P.
+
+- [x] P.1 `agent.permissions_jsonb.metaTools` (boolean, дефолт false; существующий jsonb — без миграции; правка = новая ревизия, D-31). Гейт в `AgentTurnEngine`: `isOrchestrator(agent)` + orchestrator-список → D-59 (USER-source) НЕ применяется; без флага → `TOOL_RESULT forbidden (no-metaTools)`. JSON round-trip jsonb покрыт JsonbRoundtripTest + интеграционными тестами гейта. Verify: OrchestratorMetaToolsTest (forbidden) + SubagentSpawnTest (no-metaTools для spawn).
+- [x] P.2 `execution/impl/OrchestratorTools` — 6 metaTools: `create_workflow`/`edit_workflow`/`create_task`/`create_subtask`/`set_dependency`/`configure_trigger`. Только `metaTools=true`, БЕЗ D-59 USER-source гейта; обычным агентам скрыты из манифеста (явный вызов → forbidden). Отступления от сигнатур: `start_state` опционален (дефолт — первое состояние графа; реестру H-1 нужен явно), `description` задачи опционален (дефолт — title; реестр требует непустой). Verify: OrchestratorMetaToolsTest — 9 тестов.
+- [x] P.3 Реализация через существующие контракты (`WorkflowRegistry` M2 H.2, `TaskRegistry` M2 H.3 — `create_subtask` = `createTask` с `parentTaskId`; `set_dependency` — атомарная пачка `addDependencies` K-1; `TriggerRegistry` M2 L.1 → `{triggerId, url}`). REST-эндпоинты не тронуты — контракт-first не нарушен.
+- [x] P.4 Гейт в `AgentTurnEngine.executeToolCall`: orchestrator-список → без флага forbidden, с флагом — `OrchestratorTools.execute(session, callId, tool, arguments)` (шаблон SubagentSpawner); callId mapping — write-ahead движка без изменений. transition — D-59 в прежней силе; нативные/read_compacted — без гейта. Verify: интеграционно тем же набором.
 
 ## §Q. MCP-клиент
 
@@ -50,7 +54,7 @@
 
 - [ ] S.1 ArchUnit-расширения (после M2: `api → {task, workflow}` уже есть; M3 — `agent` пакет появится, добавить в allowed-layers + foreignImpl правило). Verify: violation-фикстуры ловятся.
 - [ ] S.2 `AcceptanceMakeBillingTest` — e2e M3-критерий: orchestrator-сессия `make-billing` → USER «Сделай биллинг» → orchestrator `create_task`/`create_subtask`/`set_dependency`/WAIT_TASKS-стейджи (analytics, contract, impl-1, impl-2, tests, e2e); одна из подзадач FAILED → ERROR в parent разборщик; SUCCESS. Тест с живым Keycloak + WireMock-LLM + реальным helper-контейнером. Проверки: ~6-10 переходов; снапшоты событий; финал SUCCESS.
-- [ ] S.3 `mvn clean verify` финальный прогон; `apply-notes.md` секция «Пачка M3»; ADR D-60…D-70 в `docs/design/decisions.md` (включая **D-70**: metaTools-гейт для оркестратора частично supersede D-41 — D-41 для обычных metaTools остаётся; формат: решение → альтернативы → почему; избегать дубля с D-59); синхронизация `docs/design/agent-tools.md` §2/§4 с M3-решениями (доступность `spawn_subagent` = только `metaTools=true`; `allowedTools`/`workspaceScope` — вне M3); `AGENTS.md` — M3 завершён, следующий M4 (clients+relay).
+- [ ] S.3 `mvn clean verify` финальный прогон; `apply-notes.md` секция «Пачка M3»; ADR D-60…D-70 в `docs/design/decisions.md` (включая **D-70**: metaTools-гейт для оркестратора частично supersede D-41 — D-41 для обычных metaTools остаётся; формат: решение → альтернативы → почему; избегать дубля с D-59); синхронизация `docs/design/agent-tools.md` §2/§4 с M3-решениями (доступность `spawn_subagent` = только `metaTools=true`; `allowedTools`/`workspaceScope` — вне M3); sync `docs/design/workflow-domain.md` §6 + `docs/design/api-contracts.md` §4.1 (`TaskDto.owner` = username, как SessionDto §2 — D-41) в секции «M.3 (apply-notes)»; `AGENTS.md` — M3 завершён, следующий M4 (clients+relay).
 - [ ] S.4 `openspec archive m3-agent-layer --yes` → спеки в `openspec/specs/{async-instruments,subagent-lifecycle,orchestrator-meta-tools,mcp-client,agent-turn,session-api}/spec.md`. Commit + push.
 
 ## §T. Отложено (N/I — не выполняется в M3)

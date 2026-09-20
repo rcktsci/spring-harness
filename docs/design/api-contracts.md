@@ -69,7 +69,7 @@
 | `DELETE /api/v1/tasks/{id}/dependencies/{blockerId}` | `→ 204` |
 | `GET /api/v1/tasks/{id}/tree` | поддерево подзадач `{ items: TaskTreeNode[] }` |
 
-**TaskDto**: `id, title, description, owner, author?, workflow { key, rev }, currentState, statusProjection, suspended, parentTaskId?, tags, params, webhookUrl? (когда currentState = WAIT_WEBHOOK), workspaceBindings?: [{ stateCode, logicalKey }], createdAt, updatedAt`.
+**TaskDto**: `id, title, description, owner, author?, workflow { key, rev }, currentState, statusProjection, suspended, parentTaskId?, tags, params, webhookUrl? (когда currentState = WAIT_WEBHOOK), workspaceBindings?: [{ stateCode, logicalKey }], createdAt, updatedAt`. `owner` — **username** владельца (как `owner` в SessionDto §2: `preferred_username` из JWT; резолв `owner_user_id → username` — забота серверного слоя); `author?` — username автора, отсутствует для агентских записей (author_user_id NULL).
 
 ### 4.2 Workflow
 | Метод | Описание |

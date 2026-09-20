@@ -274,3 +274,90 @@ assert'ит видимость плейсхолдера.
 
 - Точечные прогоны: SubagentSpawnTest 3/3, ReadCompactedToolTest 3/3, SubtreeCancelApiTest 2/2.
 - Финальный `mvn clean verify` — см. отчёт пачки.
+
+## Пачка P. Оркестратор-metaTools (2026-09-20, dev-субагент GLM-5.3-Flash)
+
+### D-70: metaTools-гейт для оркестратора частично supersede D-41
+
+**Решение**: `permissions_jsonb.metaTools = true` (per-agent-revision, правка = новая
+ревизия, D-31) открывает оркестратору 6 metaTools (`create_workflow`, `edit_workflow`,
+`create_task`, `create_subtask`, `set_dependency`, `configure_trigger`) и `spawn_subagent`
+БЕЗ D-59-гейта `instructionSource = USER` — оркестратор вправе звать их в любом ходе.
+**Supersede**: D-41 («не заводить metaTools-гейты») частично — для оркестраторских
+инструментов гейт возвращается; **D-41 остаётся в силе** для обычных агентов (у них
+metaTools = false, инструменты скрыты из манифеста; явный вызов → forbidden) и для
+`transition` — там D-59 (USER-source + лимит на Turn) действует в прежней силе.
+**Альтернативы**: глобальный мета-инструмент без градаций (D-41 в чистом виде) — отклонено:
+оркестраторский сценарий «Сделай биллинг» требует программного создания задач в любом
+ходе, включая реакцию на WAIT_TASKS; полноценный ACL-4-множитель (D-38) — отклонено как
+overkill для M3 (одного boolean достаточно, точка эволюции).
+
+### Сущностные решения пачки
+
+1. **Пакет `execution/impl/OrchestratorTools`** (не `agent/`) — преемственность N/O:
+   диспетчер живёт в `AgentTurnEngine` (execution), вынос в `agent/` дал бы цикл слайсов
+   ArchUnit; слои agent — S.1.
+
+2. **Гейт — в движке, не в реестрах**: `isOrchestrator(agent)` проверяет
+   `permissions_jsonb.metaTools == TRUE`; orchestrator-список (`OrchestratorTools.NAMES`)
+   без флага → `forbidden (no-metaTools)`; реестры (Workflow/Task/Trigger Registry) гейтов
+   не знают — они остаются чистыми дверями (D-M1-1), REST-путь не затронут (контракт-first).
+
+3. **Владелец созданных сущностей — владелец сессии** (owner-наследование O-пачки):
+   `createWorkflow`/`createTask`/`configure_trigger` получают `session.ownerUserId()`;
+   author задач — агент (`authorUserId = null`, data-model §4). Альтернатива — владелец
+   ревизии агента: отклонено, agent не пользователь.
+
+4. **Сигнатуры с дозволенными дефолтами** (отступление от буквы задач):
+   `start_state` опционален — дефолт «первое состояние графа» (реестру H-1 нужен явно);
+   `description` задачи опционален — дефолт title (TaskRegistry требует непустой);
+   `name` workflow опционален — дефолт key. Всё остальное — строго по сигнатурам задач.
+
+5. **`create_subtask` = `createTask` + `parentTaskId`** (реестр изначально поддерживает);
+   `set_dependency` — один вызов `TaskRegistry.addDependencies` (атомарная пачка K-1,
+   частичный коммит невозможен), не цикл `addDependency`.
+
+6. **Ошибки реестров → машиночитаемые коды в TOOL_RESULT** (префиксы в output):
+   `422 graph-invalid`, `422 params-schema`, `422 dependency-invalid`,
+   `404 workflow-not-found`, `404 task-not-found`, `409 workflow-key-exists` (+ текст
+   errors[] валидатора). Turn не падает — модель видит причину и может скорректировать
+   вызов (агентный цикл).
+
+7. **`configure_trigger` возвращает `{triggerId, url}`** — capability-URL с HMAC-токеном
+   (M2 L.1); rev пинится в latestRev (CreateTriggerCommand.rev = null).
+
+8. **Манифест (P.3)**: orchestrator-6 + `spawn_subagent` — только metaTools=true;
+   `read_compacted` — всем; `transition` — STATE-сессиям (D-59 в прежней силе); native —
+   всем (allowlist permissions_jsonb.allowedTools). D-69 не требует кода: флаг per-agent-
+   revision, дочерняя сессия пинит ревизию по agentKey спавна — «наследование» невозможно
+   по построению; поведение покрыто SubagentSpawnTest (explicitSpawnByPlainAgentIsForbidden).
+
+### Файлы пачки
+
+- `execution/impl/OrchestratorTools` (новый), `AgentTurnEngine` (манифест + диспетчер + гейт).
+- Тесты: `OrchestratorMetaToolsTest` (9: 6 happy-path, гейт no-metaTools, graph-invalid +
+  workflow-not-found коды, params-schema).
+
+### Verify пачки P
+
+- OrchestratorMetaToolsTest 9/9; финальный `mvn clean verify` — см. отчёт пачки.
+
+### Фикс-round пачки P (2026-09-20)
+
+- **P-1**: tasks.md S.3 расширен — в apply-синхронизацию добавлены
+  `workflow-domain.md §6` и `api-contracts.md §4.1` (TaskDto.owner = username, D-41).
+- **P-2**: `docs/design/api-contracts.md` §4.1 — `TaskDto.owner`/`author` документированы
+  как username (по образцу SessionDto §2).
+- **P-3**: `create_task`/`create_subtask` приняли `rev?` (agent-tools §2b «пин последней
+  ревизии (или явной)»): отсутствует → latest, указан → пин той ревизии
+  (`getRevision(key, rev)`; неизвестная → 404 workflow-not-found). Тест
+  `createTaskWithExplicitRevPinsThatRevision`.
+- **P-4**: `create_workflow`/`edit_workflow` валидируют key по `^[a-z][a-z0-9-]*$`
+  (тот же pattern, что REST-bean-validation) → `422 validation-failed (rule=kebab-case)`.
+  Тест `createWorkflowRejectsNonKebabKey`.
+- **P-5**: `OrchestratorTools.ok` пишет в TOOL_RESULT фактическое имя инструмента
+  (`create_task` и т.д.) вместо заглушки «orchestrator».
+- **P-6 (D-69)**: тест `subagentOfOrchestratorCannotCallOrchestratorTools` — оркестратор
+  спавнит кодера (без metaTools), кодер явно зовёт `create_workflow` →
+  `forbidden (no-metaTools)`, workflow не создан; у кодера ровно 4 LLM-вызова на цепочку.
+
