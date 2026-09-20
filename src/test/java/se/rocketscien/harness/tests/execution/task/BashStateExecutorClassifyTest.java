@@ -18,7 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class BashStateExecutorClassifyTest {
 
     private static ToolResult ok(Integer exitCode, Boolean timedOut, String output) {
-        return new ToolResult("call-1", "bash", ToolStatus.OK, output, exitCode, false, timedOut);
+        return new ToolResult("call-1", "bash", ToolStatus.OK, output, exitCode, false, timedOut, null);
     }
 
     @Test

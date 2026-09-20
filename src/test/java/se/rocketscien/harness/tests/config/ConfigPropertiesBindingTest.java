@@ -1,7 +1,9 @@
 package se.rocketscien.harness.tests.config;
 
 import se.rocketscien.harness.config.DockerProperties;
+import se.rocketscien.harness.config.AsyncProperties;
 import se.rocketscien.harness.config.CompactProperties;
+import se.rocketscien.harness.config.LateResultProperties;
 import se.rocketscien.harness.config.LimitsProperties;
 import se.rocketscien.harness.config.SecurityProperties;
 import se.rocketscien.harness.config.SseProperties;
@@ -178,6 +180,27 @@ class ConfigPropertiesBindingTest {
         });
     }
 
+    @Test
+    void bindsAsyncDefaults() {
+        contextRunner.run(context -> {
+            AsyncProperties properties = context.getBean(AsyncProperties.class);
+            // Окно async-инструментов (D-60) — только конфиг
+            assertThat(properties.window().defaultMs()).isEqualTo(Duration.ofSeconds(30));
+            assertThat(properties.latePublishRetry()).isEqualTo(Duration.ofMillis(200));
+        });
+    }
+
+    @Test
+    void bindsLateResultDefaults() {
+        contextRunner.run(context -> {
+            LateResultProperties properties = context.getBean(LateResultProperties.class);
+            // Верхний лимит позднего результата (N.6) — только конфиг
+            assertThat(properties.timeoutMs()).isEqualTo(Duration.ofMinutes(15));
+            assertThat(properties.watchSchedule()).isEqualTo(Duration.ofSeconds(60));
+            assertThat(properties.timeout().ttl()).isEqualTo(Duration.ofSeconds(10));
+        });
+    }
+
     @Configuration
     @EnableConfigurationProperties({
             SecurityProperties.class,
@@ -190,7 +213,9 @@ class ConfigPropertiesBindingTest {
             LimitsProperties.class,
             WorkflowProperties.class,
             TaskProperties.class,
-            WebhookProperties.class
+            WebhookProperties.class,
+            AsyncProperties.class,
+            LateResultProperties.class
     })
     static class PropertiesRegistrar {
     }

@@ -53,6 +53,22 @@ harness:
       1: ${HARNESS_LLM_KEY_V1:}
   compact:
     threshold: 0.8
+  async:
+    # Окно синхронного ожидания async-capable инструмента (bash, D-60): превышение —
+    # TOOL_CALL + ASYNC_ACCEPTED в одной транзакции + фон; поздний TOOL_RESULT(late=true).
+    window:
+      default-ms: 30000
+    # Интервал повторной попытки взятия sess-лока при публикации позднего результата (D-64).
+    late-publish-retry: 200ms
+  late-result:
+    # Верхний лимит ожидания позднего результата: ASYNC_ACCEPTED старше — LOST
+    # (AsyncTimeoutWatcher; на рестарте ту же проверку делает рестарт-скан).
+    timeout-ms: 900000
+    # Расписание ShedLock-джобы async-timeout-watcher.
+    watch-schedule: 60s
+    timeout:
+      # TTL лока async-timeout-watcher (lockAtMostFor).
+      ttl: 10s
   docker:
     helper-image: harness-helper:local
     # Абсолютный путь: bind-mount хостового каталога резолвится демоном от ФС хоста, не от CWD процесса.

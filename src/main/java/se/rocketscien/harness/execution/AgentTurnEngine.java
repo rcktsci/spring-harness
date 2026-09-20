@@ -11,6 +11,7 @@ import lombok.extern.slf4j.Slf4j;
 import reactor.core.Disposable;
 import se.rocketscien.harness.common.IdGenerator;
 import se.rocketscien.harness.config.TaskProperties;
+import se.rocketscien.harness.execution.impl.AsyncToolExecutor;
 import se.rocketscien.harness.intelligence.LlmInvoker;
 import se.rocketscien.harness.session.MessageKind;
 import se.rocketscien.harness.session.Session;
@@ -55,6 +56,15 @@ import java.util.concurrent.atomic.AtomicLong;
  * замораживается на {@code userIntentSeq - 1}) — USER остаётся непрочитанным, и post-finish
  * re-wake {@code TurnManager}'а поднимает следующий Turn уже с {@code instructionSource=USER}.
  * Без cap'а COMPLETED потребил бы USER финальным ASSISTANT'ом, и намерение терялось.</p>
+ *
+ * <p>Async-инструменты (M3, D-60/D-65): TOOL_CALL всех вызовов — в write-ahead батче хода
+ * (execution-model §1: журнал — маркер «в полёте»; рестарт-скан закрывает потерянные).
+ * Async-capable (по {@code asyncCapabilities}) исполняются в окне
+ * {@code harness.async.window.default-ms}: уложившийся — TOOL_RESULT как sync; превысивший —
+ * в журнал дописывается {@code ASYNC_ACCEPTED(callId)}, ход завершается COMPLETED (исход
+ * раунда не расширяется), сессия паркуется в {@code PARKED_ASYNC} (TurnResult.parkedAsync →
+ * TurnManager), фоновое продолжение {@code AsyncToolExecutor} публикует поздний
+ * {@code TOOL_RESULT(late=true)} под sess-локом (D-64, «первый финальный выигрывает») с wake.</p>
  */
 @Component
 @RequiredArgsConstructor
@@ -67,16 +77,24 @@ public class AgentTurnEngine {
     private final NativeAgentTools agentTools;
     private final TransitionMetaTool transitionTool;
     private final SessionPromptBuilder promptBuilder;
+    private final AsyncToolExecutor asyncExecutor;
     private final ObjectMapper objectMapper;
     private final IdGenerator idGenerator;
     private final TaskProperties taskProperties;
 
     /**
-     * Прогон Turn'а; возвращает источник инструкции, поднятвшей его (J-1): по нему
-     * {@code TurnManager} после turn-finish переподнимает Turn для непрочитанных
-     * USER-сообщений не-USER-хода. {@code null} — сессия исчезла, Turn не начинался.
+     * Итог Turn'а: источник инструкции (J-1) и признак парковки в ожидании поздних
+     * результатов async-инструментов (M3 D-60) — по нему {@code TurnManager} публикует
+     * {@code PARKED_ASYNC} вместо {@code IDLE}. {@code source == null} — сессия исчезла.
      */
-    public InstructionSource run(UUID sessionId, TurnCancellation cancellation) {
+    public record TurnResult(InstructionSource source, boolean parkedAsync) {
+    }
+
+    /**
+     * Прогон Turn'а; возвращает источник инструкции, поднятвшего его (J-1), и признак
+     * парковки (M3). {@code null} — сессия исчезла, Turn не начинался.
+     */
+    public TurnResult run(UUID sessionId, TurnCancellation cancellation) {
         Session session = sessionStore.findSession(sessionId).orElse(null);
         if (session == null) {
             return null;
@@ -93,7 +111,7 @@ public class AgentTurnEngine {
         while (true) {
             if (isCancelled(sessionId, cancellation)) {
                 finishTurn(sessionId, TurnOutcome.CANCELLED, cappedConsumption(state, renderedWatermark));
-                return source;
+                return new TurnResult(source, false);
             }
 
             Session current = sessionStore.findSession(sessionId).orElse(null);
@@ -112,14 +130,14 @@ public class AgentTurnEngine {
             LlmRound round = callModel(agent, visible, toolCallbacks, cancellation);
             if (round.cancelled()) {
                 finishTurn(sessionId, TurnOutcome.CANCELLED, cappedConsumption(state, renderedWatermark));
-                return source;
+                return new TurnResult(source, false);
             }
             if (round.error() != null) {
                 log.warn("LLM-вызов сессии {} не удался: {}", sessionId, round.error().getMessage());
                 SessionStore.AppendedEvent systemEvent = sessionStore.appendEvent(
                         sessionId, MessageKind.SYSTEM, null, TurnPayloads.systemFailure(round.error()), null);
                 finishTurn(sessionId, TurnOutcome.FAILED, cappedConsumption(state, systemEvent.seq()));
-                return source;
+                return new TurnResult(source, false);
             }
             ChatResponse response = round.response();
 
@@ -137,21 +155,36 @@ public class AgentTurnEngine {
             long lastAppendedSeq = assistantEvent.seq();
             appendedByRound++;
 
-            List<PendingCall> pendingCalls = new ArrayList<>();
+            List<PendingCall> syncCalls = new ArrayList<>();
+            List<PendingCall> asyncCalls = new ArrayList<>();
             for (AssistantMessage.ToolCall toolCall : toolCalls) {
                 String callId = idGenerator.newUlid();
                 Map<String, Object> arguments = parseArguments(toolCall.arguments());
+                PendingCall pendingCall = new PendingCall(callId, toolCall.name(), arguments);
+                if (asyncExecutor.isAsyncCapable(toolCall.name())) {
+                    asyncCalls.add(pendingCall);
+                } else {
+                    syncCalls.add(pendingCall);
+                }
+                // Write-ahead (execution-model §1) — для всех вызовов: журнал всегда отражает
+                // «в полёте»; крах окна закрывает рестарт-скан синтетическим LOST
                 SessionStore.AppendedEvent toolCallEvent = sessionStore.appendEvent(
                         sessionId, MessageKind.TOOL_CALL, null,
                         TurnPayloads.toolCall(callId, toolCall.id(), toolCall.name(), arguments),
                         null);
                 lastAppendedSeq = toolCallEvent.seq();
                 appendedByRound++;
-                pendingCalls.add(new PendingCall(callId, toolCall.name(), arguments));
             }
 
             if (isCancelled(sessionId, cancellation)) {
-                for (PendingCall pendingCall : pendingCalls) {
+                for (PendingCall pendingCall : syncCalls) {
+                    sessionStore.appendEvent(sessionId, MessageKind.TOOL_RESULT, null,
+                            TurnPayloads.toolResultSynthetic(
+                                    pendingCall.callId(), pendingCall.tool(), ToolStatus.CANCELLED,
+                                    "отменено пользователем"),
+                            null);
+                }
+                for (PendingCall pendingCall : asyncCalls) {
                     sessionStore.appendEvent(sessionId, MessageKind.TOOL_RESULT, null,
                             TurnPayloads.toolResultSynthetic(
                                     pendingCall.callId(), pendingCall.tool(), ToolStatus.CANCELLED,
@@ -160,24 +193,24 @@ public class AgentTurnEngine {
                 }
                 // Watermark — по рендеру: собственные результаты и свежий USER поднимут новый Turn
                 finishTurn(sessionId, TurnOutcome.CANCELLED, cappedConsumption(state, renderedWatermark));
-                return source;
+                return new TurnResult(source, false);
             }
 
-            if (pendingCalls.isEmpty()) {
+            if (syncCalls.isEmpty() && asyncCalls.isEmpty()) {
                 Session after = sessionStore.findSession(sessionId).orElse(null);
                 if (after == null) {
                     return null;
                 }
                 if (after.lastSeq() - roundBasisSeq == appendedByRound) {
                     finishTurn(sessionId, TurnOutcome.COMPLETED, cappedConsumption(state, lastAppendedSeq));
-                    return source;
+                    return new TurnResult(source, false);
                 }
                 log.debug("Сессия {}: новые события во время хода ({} > {}) — дополнительный раунд",
                         sessionId, after.lastSeq(), roundBasisSeq + appendedByRound);
                 continue;
             }
 
-            for (PendingCall pendingCall : pendingCalls) {
+            for (PendingCall pendingCall : syncCalls) {
                 if (isCancelled(sessionId, cancellation)) {
                     sessionStore.appendEvent(sessionId, MessageKind.TOOL_RESULT, null,
                             TurnPayloads.toolResultSynthetic(pendingCall.callId(), pendingCall.tool(),
@@ -188,6 +221,42 @@ public class AgentTurnEngine {
                 ToolResult result = executeToolCall(session, state, pendingCall, cancellation);
                 sessionStore.appendEvent(sessionId, MessageKind.TOOL_RESULT, null,
                         TurnPayloads.toolResult(pendingCall.callId(), pendingCall.tool(), result), null);
+            }
+
+            boolean parked = false;
+            for (PendingCall asyncCall : asyncCalls) {
+                if (isCancelled(sessionId, cancellation)) {
+                    sessionStore.appendEvent(sessionId, MessageKind.TOOL_RESULT, null,
+                            TurnPayloads.toolResultSynthetic(asyncCall.callId(), asyncCall.tool(),
+                                    ToolStatus.CANCELLED, "отменено пользователем"),
+                            null);
+                    continue;
+                }
+                AsyncToolExecutor.Outcome outcome = asyncExecutor.execute(
+                        sessionId, asyncCall.callId(), asyncCall.tool(), asyncCall.arguments(), cancellation);
+                SessionStore.AppendedEvent resolutionEvent;
+                if (outcome instanceof AsyncToolExecutor.Outcome.Resolved resolved) {
+                    resolutionEvent = sessionStore.appendEvent(sessionId, MessageKind.TOOL_RESULT, null,
+                            TurnPayloads.toolResult(asyncCall.callId(), asyncCall.tool(), resolved.result()), null);
+                } else if (outcome instanceof AsyncToolExecutor.Outcome.Parked) {
+                    // Плейсхолдер «принято, в полёте» (D-60/D-65): ход возвращается модели,
+                    // сессия паркуется; TOOL_CALL уже в write-ahead — рестарт-скан надёжен
+                    resolutionEvent = sessionStore.appendEvent(sessionId, MessageKind.ASYNC_ACCEPTED, null,
+                            TurnPayloads.asyncAccepted(asyncCall.callId(), asyncCall.tool()), null);
+                    parked = true;
+                    log.info("Сессия {}: инструмент {} (callId {}) превысил окно — ASYNC_ACCEPTED, фон дорабатывает",
+                            sessionId, asyncCall.tool(), asyncCall.callId());
+                } else {
+                    continue;
+                }
+                lastAppendedSeq = resolutionEvent.seq();
+            }
+
+            if (parked) {
+                // D-60: парковка — состояние сессии (PARKED_ASYNC публикует TurnManager),
+                // исход раунда COMPLETED при pending > 0; wake придёт с поздним TOOL_RESULT
+                finishTurn(sessionId, TurnOutcome.COMPLETED, cappedConsumption(state, lastAppendedSeq));
+                return new TurnResult(source, true);
             }
         }
     }

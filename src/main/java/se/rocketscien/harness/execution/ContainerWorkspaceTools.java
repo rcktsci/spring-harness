@@ -14,6 +14,7 @@ import java.nio.file.PathMatcher;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -33,10 +34,18 @@ public class ContainerWorkspaceTools implements WorkspaceTools {
 
     private static final String MOUNT = "/workspace";
 
+    /** bash объявлен async-capable (M3, D-60): окно → ASYNC_ACCEPTED → поздний TOOL_RESULT. */
+    private static final Set<String> ASYNC_CAPABLE = Set.of("bash");
+
     private final WorkspaceContainerManager containers;
     private final DockerProperties dockerProperties;
     private final LimitsProperties limits;
     private final IdGenerator idGenerator;
+
+    @Override
+    public Set<String> asyncCapabilities() {
+        return ASYNC_CAPABLE;
+    }
 
     @Override
     public ToolResult readFile(UUID sessionId, String path, Integer offset, Integer limit) {

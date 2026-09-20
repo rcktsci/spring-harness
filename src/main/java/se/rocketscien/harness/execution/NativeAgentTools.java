@@ -30,6 +30,14 @@ public class NativeAgentTools {
 
     private final WorkspaceTools workspaceTools;
 
+    /**
+     * Async-capable инструменты (M3 D-60) — по декларациям workspace-инструментов;
+     * единая точка для движка Turn'а и {@code AsyncToolExecutor}.
+     */
+    public Set<String> asyncCapabilities() {
+        return workspaceTools.asyncCapabilities();
+    }
+
     public List<ToolCallback> declarations(SessionStore.AgentRuntime agent) {
         Set<String> allowed = allowedTools(agent);
         List<ToolCallback> callbacks = new ArrayList<>();

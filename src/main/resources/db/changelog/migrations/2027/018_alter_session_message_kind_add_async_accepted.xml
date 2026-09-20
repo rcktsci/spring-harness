@@ -1,0 +1,45 @@
+<?xml version="1.1" encoding="UTF-8" standalone="no"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                                       https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- Расширение kind-CHECK значением ASYNC_ACCEPTED (D-60/D-65): плейсхолдер «принято,
+         в полёте» для async-инструментов. Два шага (DROP + ADD): Postgres не умеет
+         ALTER CHECK IN-список на месте. Идемпотентно к чистой базе и апгрейду с M1/M2. -->
+    <changeSet id="1"
+               author="rocket-science">
+
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="1">
+                SELECT COUNT(*)
+                FROM pg_constraint
+                WHERE conname = 'ck_session_message__kind'
+            </sqlCheck>
+        </preConditions>
+
+        <sql>
+            ALTER TABLE session_message
+                DROP CONSTRAINT ck_session_message__kind;
+        </sql>
+    </changeSet>
+
+    <changeSet id="2"
+               author="rocket-science">
+
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">
+                SELECT COUNT(*)
+                FROM pg_constraint
+                WHERE conname = 'ck_session_message__kind'
+            </sqlCheck>
+        </preConditions>
+
+        <sql>
+            ALTER TABLE session_message
+                ADD CONSTRAINT ck_session_message__kind
+                    CHECK (kind IN ('USER', 'ASSISTANT', 'SYSTEM', 'TOOL_CALL', 'TOOL_RESULT', 'COMPACT', 'ASYNC_ACCEPTED'));
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

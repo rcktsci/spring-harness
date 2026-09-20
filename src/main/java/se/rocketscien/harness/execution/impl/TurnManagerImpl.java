@@ -76,11 +76,11 @@ class TurnManagerImpl implements TurnManager {
         TurnCancellation cancellation = activeTurns.register(sessionId);
         broadcaster.publishStatus(sessionId, SessionRuntimeStatus.TURN_RUNNING,
                 sessionStore.findSession(sessionId).map(Session::lastTurnOutcome).orElse(null));
-        InstructionSource source = null;
+        AgentTurnEngine.TurnResult result = null;
         try {
             // Сброс флага на старте нового Turn'а (спека agent-turn; stop по IDLE не гасит новые ходы)
             sessionStore.resetCancelRequested(sessionId);
-            source = engine.run(sessionId, cancellation);
+            result = engine.run(sessionId, cancellation);
         } catch (Exception e) {
             log.error("Turn сессии {} упал неожиданно", sessionId, e);
             try {
@@ -91,14 +91,18 @@ class TurnManagerImpl implements TurnManager {
                 log.error("Не удалось зафиксировать FAILED для сессии {}", sessionId, finishFailure);
             }
         } finally {
-            // DS F5: кадр session.status обязан нести lastTurnOutcome (api-contracts §3.1)
-            broadcaster.publishStatus(sessionId, SessionRuntimeStatus.IDLE,
+            // DS F5: кадр session.status обязан нести lastTurnOutcome (api-contracts §3.1).
+            // M3 D-60: Turn вышел с pending async — сессия паркуется в PARKED_ASYNC;
+            // wake придёт с поздним TOOL_RESULT (message.created)
+            boolean parkedAsync = result != null && result.parkedAsync();
+            broadcaster.publishStatus(sessionId,
+                    parkedAsync ? SessionRuntimeStatus.PARKED_ASYNC : SessionRuntimeStatus.IDLE,
                     sessionStore.findSession(sessionId).map(Session::lastTurnOutcome).orElse(null));
             activeTurns.unregister(sessionId);
             lock.get().close();
         }
-        if (source != null) {
-            rewakeForUserIntent(sessionId, source);
+        if (result != null && result.source() != null) {
+            rewakeForUserIntent(sessionId, result.source());
         }
     }
 

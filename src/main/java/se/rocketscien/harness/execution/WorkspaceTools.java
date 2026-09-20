@@ -1,6 +1,7 @@
 package se.rocketscien.harness.execution;
 
 import java.time.Duration;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -8,6 +9,15 @@ import java.util.UUID;
  * Все пути — относительные, резолв от корня workspace сессии; выход за его пределы запрещён.
  */
 public interface WorkspaceTools {
+
+    /**
+     * Имена инструментов, способных исполняться дольше окна синхронного ожидания
+     * ({@code harness.async.window.default-ms}, M3 D-60). Превышение окна →
+     * {@code TOOL_CALL + ASYNC_ACCEPTED} + фон, поздний {@code TOOL_RESULT(late=true)}.
+     */
+    default Set<String> asyncCapabilities() {
+        return Set.of();
+    }
 
     /**
      * {@code offset}/{@code limit} — в БАЙТАХ UTF-8; граница может разрезать code point

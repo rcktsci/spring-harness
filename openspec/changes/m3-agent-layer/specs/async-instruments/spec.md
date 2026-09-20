@@ -6,7 +6,7 @@ Async-инструменты с временным окном: `ASYNC_ACCEPTED(c
 
 ### Requirement: Async-инструмент — окно и плейсхолдер
 
-Инструмент, объявленный `async-capable`, при превышении окна (конфиг `harness.async.window.default-ms`) SHALL быть заменён синхронно в журнале на `TOOL_CALL(callId) + ASYNC_ACCEPTED(callId)` (`ASYNC_ACCEPTED` — допустимое значение `MessageKind`, enum расширяется миграцией 075; модель видит, что инструмент «принят, не закончен»). Фон-исполнитель доводит инструмент вне Turn'а; по завершении — `TOOL_RESULT(callId, late=true)` через сессионный канал `message.created`/`session_message.seq` (M1 `InMemorySessionEventBroadcaster`, инкремент `last_seq` сессии); если Turn уже COMPLETED — wake (новый Turn, source=lazy/factory-tool-result).
+Инструмент, объявленный `async-capable`, при превышении окна (конфиг `harness.async.window.default-ms`) SHALL быть заменён синхронно в журнале на `TOOL_CALL(callId) + ASYNC_ACCEPTED(callId)` (`ASYNC_ACCEPTED` — допустимое значение `MessageKind`, enum расширяется миграцией 018; модель видит, что инструмент «принят, не закончен»). Sync-результаты раунда фиксируются в этом же раунде; если в раунде есть async-вызов(ы), не уложившиеся в окно, Turn завершает раунд и паркует сессию (`PARKED_ASYNC`). Фон-исполнитель доводит инструмент вне Turn'а; по завершении — `TOOL_RESULT(callId, late=true)` через сессионный канал `message.created`/`session_message.seq` (M1 `InMemorySessionEventBroadcaster`, инкремент `last_seq` сессии); поздний результат поднимает новый Turn, в рендер которого входят и плейсхолдер, и поздний результат.
 
 #### Scenario: bash в окне
 
@@ -25,17 +25,17 @@ Async-инструменты с временным окном: `ASYNC_ACCEPTED(c
 
 ### Requirement: Late `TOOL_RESULT` через EventBus
 
-Поздний `TOOL_RESULT` SHALL публиковаться через `InMemorySessionEventBroadcaster` (existing M1) как `message.created`/`session_message.seq` — запись журнала инкрементирует `last_seq` сессии и вызывает wake существующим `AgentTurnEngine.run`-путём (M2 J-1: USER-source rewake + новый Turn с early-exit pending). M2 `task_event_seq` (счётчик задач, канал `tasks/{id}/events`) на сессионном канале не используется.
+Поздний `TOOL_RESULT` SHALL публиковаться через `InMemorySessionEventBroadcaster` (existing M1) как `message.created`/`session_message.seq` — запись журнала инкрементирует `last_seq` сессии и вызывает wake существующим `TurnManager.tryStart`-путём. После парковки (раунд с async, не уложившимся в окно, — Turn завершён, `PARKED_ASYNC`) поздний результат всегда поднимает новый Turn с `instructionSource=TOOL_RESULT`. M2 `task_event_seq` (счётчик задач, канал `tasks/{id}/events`) на сессионном канале не используется.
 
-#### Scenario: late-result, Turn активен
+#### Scenario: late-result после парковки
 
-- **WHEN** late TOOL_RESULT приходит во время активного Turn'а
-- **THEN** Turn подхватывает его в дополнительном раунде
+- **WHEN** поздний TOOL_RESULT приходит в запаркованную сессию (Turn завершён)
+- **THEN** поднимается новый Turn; модель видит плейсхолдер ASYNC_ACCEPTED, поздний результат и финальную обработку
 
-#### Scenario: late-result, Turn COMPLETED
+#### Scenario: late-result при активном Turn'е
 
-- **WHEN** late TOOL_RESULT приходит после того, как Turn COMPLETED
-- **THEN** новый Turn стартует с приоритетом на этот результат; журнал видит результат + финальную обработку моделью
+- **WHEN** поздний TOOL_RESULT приходит, пока Turn активен (например, USER разбудил сессию во время фона)
+- **THEN** активный Turn подхватывает результат дополнительным раундом (M1-семантика событий во время хода)
 
 ### Requirement: Рестарт-скан закрывает долгие async
 

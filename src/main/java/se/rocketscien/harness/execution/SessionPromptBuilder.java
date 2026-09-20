@@ -26,13 +26,20 @@ import java.util.Map;
  * <p>D-J-3 (OpenAI-протокол): tool-ответы обязаны идти строго сразу за своим
  * {@code assistant(tool_calls)}; события, interleaved'нутые в журнал между tool-calls и
  * их результатами (USER во время долгого bash), выносятся ПОСЛЕ группы tool-ответов —
- * порядок ролей валиден при любом интерливинге.</p>
+ * порядок ролей валиден при любом интерлингe.</p>
+ *
+ * <p>M3 (D-60/D-65): плейсхолдер {@code ASYNC_ACCEPTED} рендерится tool-ответом «принято,
+ * в полёте» с id = callId; поздний {@code TOOL_RESULT} (payload late=true) — с уникальным
+ * id {@code callId + "-late"} (OpenAI-протокол не допускает дубль tool_call_id).</p>
  */
 @Component
 @RequiredArgsConstructor
 public class SessionPromptBuilder {
 
     private static final String TOOL_CALL_TYPE = "function";
+
+    private static final String ACCEPTED_OUTPUT =
+            "принято: исполняется в фоне, результат придёт отдельным сообщением";
 
     private final ObjectMapper objectMapper;
 
@@ -97,6 +104,16 @@ public class SessionPromptBuilder {
                         group.responses().add(toolResponse(providerIds, payload));
                     }
                 }
+                case ASYNC_ACCEPTED -> {
+                    // D-65: плейсхолдер «принято, в полёте» модель видит tool-ответом с
+                    // уникальным id (= callId); поздний результат придёт отдельным сообщением
+                    ToolResponseMessage.ToolResponse accepted = acceptedResponse(payload);
+                    if (group == null) {
+                        messages.add(ToolResponseMessage.builder().responses(List.of(accepted)).build());
+                    } else {
+                        group.responses().add(accepted);
+                    }
+                }
                 default -> flush(messages, group, heldAfterGroup);
             }
         }
@@ -129,8 +146,29 @@ public class SessionPromptBuilder {
     private ToolResponseMessage.ToolResponse toolResponse(Map<String, String> providerIds,
                                                           Map<String, Object> payload) {
         String callId = TurnPayloads.callId(payload);
-        String providerId = callId != null ? providerIds.getOrDefault(callId, callId) : null;
+        String providerId = providerIdFor(providerIds, payload, callId);
         return new ToolResponseMessage.ToolResponse(providerId, TurnPayloads.tool(payload), outputOf(payload));
+    }
+
+    /**
+     * id tool-ответа для провайдера (D-65): обычный результат — по карте провайдерских id;
+     * поздний (late=true) — с уникальным {@code callId + "-late"} (дубль id провайдер
+     * отверг бы); ASYNC_ACCEPTED — с id = callId (уникальный, в карте провайдерских нет).
+     */
+    private String providerIdFor(Map<String, String> providerIds, Map<String, Object> payload, String callId) {
+        if (callId == null) {
+            return null;
+        }
+        if (TurnPayloads.late(payload)) {
+            return callId + TurnPayloads.LATE_ID_SUFFIX;
+        }
+        return providerIds.getOrDefault(callId, callId);
+    }
+
+    /** Текст tool-ответа плейсхолдера: модель знает, что результат придёт позже. */
+    private ToolResponseMessage.ToolResponse acceptedResponse(Map<String, Object> payload) {
+        String callId = TurnPayloads.callId(payload);
+        return new ToolResponseMessage.ToolResponse(callId, TurnPayloads.tool(payload), ACCEPTED_OUTPUT);
     }
 
     private String argumentsJson(Map<String, Object> arguments) {

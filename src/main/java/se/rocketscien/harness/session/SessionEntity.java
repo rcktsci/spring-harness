@@ -45,6 +45,10 @@ public class SessionEntity {
     @Column(name = "parent_session_id")
     private UUID parentSessionId;
 
+    /** Глубина в дереве сессий: root = 0, субагентская = parent.depth + 1 (D-61, миграция 017). */
+    @Column(name = "depth", nullable = false)
+    private int depth;
+
     @Column(name = "cancel_requested", nullable = false)
     private boolean cancelRequested;
 
@@ -108,6 +112,10 @@ public class SessionEntity {
 
     public UUID getParentSessionId() {
         return parentSessionId;
+    }
+
+    public int getDepth() {
+        return depth;
     }
 
     public boolean isCancelRequested() {

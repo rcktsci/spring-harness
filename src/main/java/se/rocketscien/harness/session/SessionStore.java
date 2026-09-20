@@ -1,5 +1,6 @@
 package se.rocketscien.harness.session;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -37,6 +38,20 @@ public interface SessionStore {
      */
     AppendedEvent appendEvent(UUID sessionId, MessageKind kind, UUID authorUserId, Map<String, Object> payload,
                               Integer tokens);
+
+    /**
+     * Есть ли в журнале сессии {@code TOOL_RESULT} с данным {@code callId} (M3 D-64,
+     * «первый финальный выигрывает»): вызывается под программным локом сессии
+     * {@code sess-{id}} перед дописью позднего результата/синтетического LOST.
+     */
+    boolean hasToolResultForCall(UUID sessionId, String callId);
+
+    /**
+     * Плейсхолдеры {@code ASYNC_ACCEPTED} старше границы (M3 N.6) без парного финального
+     * {@code TOOL_RESULT} по {@code payload.callId} — вход {@code AsyncTimeoutWatcher}.
+     * Порядок — по (sessionId, seq).
+     */
+    List<PendingAsyncCall> findExpiredAsyncAccepteds(Instant createdBefore);
 
     Optional<Session> findSession(UUID sessionId);
 
@@ -131,6 +146,13 @@ public interface SessionStore {
      * Результат дописи: присвоенный {@code seq} и ULID события.
      */
     record AppendedEvent(long seq, String ulid) {
+    }
+
+    /**
+     * Зависший async-вызов: плейсхолдер {@code ASYNC_ACCEPTED} без парного финального
+     * {@code TOOL_RESULT} (M3 N.6).
+     */
+    record PendingAsyncCall(UUID sessionId, String callId, String tool, Instant createdAt) {
     }
 
     /**

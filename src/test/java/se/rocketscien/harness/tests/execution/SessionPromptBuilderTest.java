@@ -154,6 +154,54 @@ class SessionPromptBuilderTest {
         assertThat(messages.get(3).getText()).isEqualTo("ответ");
     }
 
+    @Test
+    void asyncAcceptedRendersAsToolResponseWithInternalCallId() {
+        // D-65: плейсхолдер «принято, в полёте» — tool-ответ с id = callId (не провайдерский)
+        List<Message> messages = builder.buildPrompt(
+                agent(null, null),
+                List.of(
+                        event(1, MessageKind.ASSISTANT, Map.of("text", "запускаю долгую команду")),
+                        toolCallEvent(2, "call-internal-1", "call-provider-1", "bash", Map.of("command", "sleep 30")),
+                        event(3, MessageKind.ASYNC_ACCEPTED, Map.of(
+                                "callId", "call-internal-1", "tool", "bash"))
+                )).getInstructions();
+
+        assertThat(messages).hasSize(2);
+        AssistantMessage assistant = (AssistantMessage) messages.get(0);
+        assertThat(assistant.getToolCalls()).hasSize(1);
+        assertThat(messages.get(1)).isInstanceOf(ToolResponseMessage.class);
+        ToolResponseMessage.ToolResponse response =
+                ((ToolResponseMessage) messages.get(1)).getResponses().getFirst();
+        assertThat(response.id()).isEqualTo("call-internal-1");
+        assertThat(response.name()).isEqualTo("bash");
+        assertThat(response.responseData()).contains("принято");
+    }
+
+    @Test
+    void lateToolResultGetsUniqueProviderId() {
+        // D-65: поздний результат — с уникальным id callId + "-late" (дубль tool_call_id недопустим)
+        List<Message> messages = builder.buildPrompt(
+                agent(null, null),
+                List.of(
+                        event(1, MessageKind.ASSISTANT, Map.of("text", "")),
+                        toolCallEvent(2, "call-internal-1", "call-provider-1", "bash", Map.of("command", "sleep 30")),
+                        event(3, MessageKind.ASYNC_ACCEPTED, Map.of(
+                                "callId", "call-internal-1", "tool", "bash")),
+                        event(4, MessageKind.TOOL_RESULT, Map.of(
+                                "callId", "call-internal-1", "tool", "bash", "status", "OK",
+                                "output", "готово", "late", true))
+                )).getInstructions();
+
+        assertThat(messages).hasSize(2);
+        assertThat(messages.get(1)).isInstanceOf(ToolResponseMessage.class);
+        List<ToolResponseMessage.ToolResponse> responses =
+                ((ToolResponseMessage) messages.get(1)).getResponses();
+        assertThat(responses).hasSize(2);
+        assertThat(responses.get(0).id()).isEqualTo("call-internal-1");
+        assertThat(responses.get(1).id()).isEqualTo("call-internal-1-late");
+        assertThat(responses.get(1).responseData()).isEqualTo("готово");
+    }
+
     private SessionStore.AgentRuntime agent(String rolePrompt, Map<String, Object> permissions) {
         return new SessionStore.AgentRuntime(
                 UUID.randomUUID(), "agent", 1, rolePrompt, null, permissions, UUID.randomUUID());

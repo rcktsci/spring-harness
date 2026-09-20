@@ -106,6 +106,47 @@ public class SessionStoreImpl implements SessionStore {
 
     @Override
     @Transactional(readOnly = true)
+    public boolean hasToolResultForCall(UUID sessionId, String callId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM session_message"
+                        + " WHERE session_id = ? AND kind = 'TOOL_RESULT' AND payload_jsonb ->> 'callId' = ?",
+                Integer.class, sessionId, callId);
+        return count != null && count > 0;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<PendingAsyncCall> findExpiredAsyncAccepteds(Instant createdBefore) {
+        List<Object[]> rows = jdbcTemplate.query(
+                """
+                SELECT sm.session_id, sm.payload_jsonb ->> 'callId' AS call_id,
+                       sm.payload_jsonb ->> 'tool' AS tool, sm.created_at
+                FROM session_message AS sm
+                WHERE sm.kind = 'ASYNC_ACCEPTED'
+                  AND sm.created_at < ?
+                  AND sm.payload_jsonb ->> 'callId' IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM session_message AS tr
+                      WHERE tr.session_id = sm.session_id
+                        AND tr.kind = 'TOOL_RESULT'
+                        AND tr.payload_jsonb ->> 'callId' = sm.payload_jsonb ->> 'callId'
+                  )
+                ORDER BY sm.session_id, sm.id
+                """,
+                (rs, rowNum) -> new Object[] {
+                        rs.getObject("session_id", UUID.class),
+                        rs.getString("call_id"),
+                        rs.getString("tool"),
+                        rs.getTimestamp("created_at").toInstant()
+                },
+                Timestamp.from(createdBefore));
+        return rows.stream()
+                .map(row -> new PendingAsyncCall((UUID) row[0], (String) row[1], (String) row[2], (Instant) row[3]))
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Optional<Session> findSession(UUID sessionId) {
         return Optional.ofNullable(entityManager.find(SessionEntity.class, sessionId)).map(SessionStoreImpl::toSession);
     }

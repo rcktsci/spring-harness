@@ -55,8 +55,9 @@ import java.util.UUID;
 /**
  * Тонкие ручные мапперы домен → сгенерированные DTO (шаг 2 contract-first). Время — ISO-8601 UTC
  * (Instant → OffsetDateTime UTC); перечисления домена и спеки совпадают по именам (name-based
- * конвертация); workspace — SERVER_DIR auto (M1); поле MessageDto.late (M3) не заполняется.
- * Перечисления генерации — FQDN: простые имена заняты доменными (SessionKind, MessageKind и пр.).
+ * конвертация); workspace — SERVER_DIR auto (M1); MessageDto.late — маркер позднего TOOL_RESULT
+ * async-инструмента (M3, спека session-api). Перечисления генерации — FQDN: простые имена заняты
+ * доменными (SessionKind, MessageKind и пр.).
  */
 final class ApiMappers {
 
@@ -104,6 +105,10 @@ final class ApiMappers {
                         ? usernames.get(message.getAuthorUserId())
                         : null,
                 TurnPayloads.callId(message.getPayloadJsonb()));
+        if (message.getKind() == MessageKind.TOOL_RESULT
+                && TurnPayloads.late(message.getPayloadJsonb())) {
+            dto.setLate(true);
+        }
         if (message.getTokens() != null) {
             dto.setTokens(message.getTokens());
         }
@@ -123,6 +128,9 @@ final class ApiMappers {
                         ? authorUsername
                         : null,
                 TurnPayloads.callId(message.payload()));
+        if (message.kind() == MessageKind.TOOL_RESULT && TurnPayloads.late(message.payload())) {
+            dto.setLate(true);
+        }
         if (message.tokens() != null) {
             dto.setTokens(message.tokens());
         }
@@ -133,7 +141,8 @@ final class ApiMappers {
         if (author != null) {
             dto.setAuthor(author);
         }
-        if (kind == MessageKind.TOOL_CALL || kind == MessageKind.TOOL_RESULT) {
+        if (kind == MessageKind.TOOL_CALL || kind == MessageKind.TOOL_RESULT
+                || kind == MessageKind.ASYNC_ACCEPTED) {
             dto.setCallId(callId);
         }
     }

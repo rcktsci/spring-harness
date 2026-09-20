@@ -11,7 +11,10 @@ import java.util.Map;
  *   <li>{@code TOOL_CALL}: {@code {"callId": <внутренний ULID>, "toolCallId": <id провайдера>,
  *       "tool": <имя>, "arguments": {...}}};</li>
  *   <li>{@code TOOL_RESULT}: {@code {"callId": ..., "tool": ..., "status": OK|ERROR|CANCELLED|LOST,
- *       "output"?: ..., "exitCode"?: ..., "truncated"?: ..., "timedOut"?: ...}}.</li>
+ *       "output"?: ..., "exitCode"?: ..., "truncated"?: ..., "timedOut"?: ..., "late"?: true}};</li>
+ *   <li>{@code ASYNC_ACCEPTED} (M3, D-60/D-65): {@code {"callId": ..., "tool": ...}} —
+ *       плейсхолдер «принято, в полёте»; поздний TOOL_RESULT того же callId несёт
+ *       {@code late=true}.</li>
  * </ul>
  */
 public final class TurnPayloads {
@@ -26,6 +29,14 @@ public final class TurnPayloads {
     public static final String EXIT_CODE = "exitCode";
     public static final String TRUNCATED = "truncated";
     public static final String TIMED_OUT = "timedOut";
+    public static final String LATE = "late";
+
+    /**
+     * Суффикс провайдерского id позднего результата (D-65): OpenAI-протокол запрещает дубль
+     * {@code tool_call_id}, поэтому ASYNC_ACCEPTED идёт с id = callId, а поздний
+     * TOOL_RESULT — с id = {@code callId + "-late"}.
+     */
+    public static final String LATE_ID_SUFFIX = "-late";
 
     private TurnPayloads() {
     }
@@ -67,6 +78,17 @@ public final class TurnPayloads {
         if (result.timedOut() != null) {
             payload.put(TIMED_OUT, result.timedOut());
         }
+        if (Boolean.TRUE.equals(result.late())) {
+            payload.put(LATE, true);
+        }
+        return payload;
+    }
+
+    /** Плейсхолдер async-инструмента «принято, в полёте» (D-60/D-65); финальным не считается. */
+    public static Map<String, Object> asyncAccepted(String callId, String tool) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put(CALL_ID, callId);
+        payload.put(TOOL, tool);
         return payload;
     }
 
@@ -109,6 +131,11 @@ public final class TurnPayloads {
 
     public static String tool(Map<String, Object> payload) {
         return payload == null ? null : asString(payload.get(TOOL));
+    }
+
+    /** Маркер позднего результата async-инструмента ({@code late=true}, M3 D-60). */
+    public static boolean late(Map<String, Object> payload) {
+        return payload != null && Boolean.TRUE.equals(payload.get(LATE));
     }
 
     @SuppressWarnings("unchecked")

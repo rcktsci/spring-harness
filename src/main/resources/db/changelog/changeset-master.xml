@@ -37,5 +37,9 @@
              relativeToChangelogFile="true"/>
     <include file="migrations/2026/016_create_table_trigger.xml"
              relativeToChangelogFile="true"/>
+    <include file="migrations/2027/017_create_column_session_depth.xml"
+             relativeToChangelogFile="true"/>
+    <include file="migrations/2027/018_alter_session_message_kind_add_async_accepted.xml"
+             relativeToChangelogFile="true"/>
 
 </databaseChangeLog>

@@ -1,0 +1,27 @@
+<?xml version="1.1" encoding="UTF-8" standalone="no"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                                       https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="1"
+               author="rocket-science">
+
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="session"
+                              columnName="depth"/>
+            </not>
+        </preConditions>
+
+        <addColumn tableName="session">
+            <column name="depth"
+                    type="INT"
+                    defaultValueNumeric="0"
+                    remarks="глубина в дереве сессий: root = 0, субагентская = parent.depth + 1 (D-61)">
+                <constraints nullable="false"/>
+            </column>
+        </addColumn>
+    </changeSet>
+
+</databaseChangeLog>

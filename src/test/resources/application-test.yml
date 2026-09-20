@@ -26,6 +26,18 @@ harness:
   lock:
     # Быстрый heartbeat для проверки продления лока реальным таймером (task 7.1).
     heartbeat-interval: 200ms
+  async:
+    # Окно больше всех «синхронных» bash старых тестов (sleep 2/3) и меньше sleep 15
+    # async-тестов: парковка детерминирована, sync-поток M1 не задет.
+    window:
+      default-ms: 10s
+    late-publish-retry: 50ms
+  late-result:
+    # Скан в тестах не тикает сам (Act вызывает scan() напрямую); протухание — 200ms.
+    timeout-ms: 200ms
+    watch-schedule: 1h
+    timeout:
+      ttl: 10s
   turn:
     # POLL-джоба в тестах не стартует сама (первый запуск через интервал); Act вызывает poll() напрямую.
     poll-interval: 1h

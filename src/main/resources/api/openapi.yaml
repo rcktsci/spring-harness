@@ -1434,10 +1434,13 @@ components:
           description: Отсутствует/null до завершения первого Turn'а.
     MessageKind:
       type: string
-      enum: [USER, ASSISTANT, SYSTEM, TOOL_CALL, TOOL_RESULT, COMPACT]
+      enum: [USER, ASSISTANT, SYSTEM, TOOL_CALL, TOOL_RESULT, COMPACT, ASYNC_ACCEPTED]
       description: >-
         Вид события журнала. COMPACT скрывает покрываемые им события — видимость производная
         (сообщение скрыто ⟺ существует более поздний COMPACT, покрывающий его).
+        ASYNC_ACCEPTED (M3) — плейсхолдер «принято, в полёте» для async-capable инструмента;
+        финальным результатом не считается, закрывается поздним TOOL_RESULT (late=true)
+        либо синтетическим LOST.
     ProblemCode:
       type: string
       enum:
@@ -1579,7 +1582,8 @@ components:
             USER/ASSISTANT/SYSTEM — {"text": string} (SYSTEM — причина сбоя тем же ключом);
             TOOL_CALL — {"callId": ULID, "toolCallId"?: string, "tool": string, "arguments": object};
             TOOL_RESULT — {"callId": ULID, "tool": string, "status": OK|ERROR|CANCELLED|LOST,
-            "output"?, "exitCode"?, "truncated"?, "timedOut"?};
+            "output"?, "exitCode"?, "truncated"?, "timedOut"?, "late"?: true};
+            ASYNC_ACCEPTED — {"callId": ULID, "tool": string} (M3, плейсхолдер);
             COMPACT — {"covers": [{"from": seq, "to": seq}, ...], "summary": string}
             (D-44; видимость = журнал минус объединение covers).
           examples:
@@ -1591,15 +1595,15 @@ components:
               summary: Разбор первой задачи — договорились о подходе
         callId:
           type: string
-          description: ULID вызова инструмента; только для TOOL_CALL/TOOL_RESULT.
+          description: ULID вызова инструмента; только для TOOL_CALL/TOOL_RESULT/ASYNC_ACCEPTED.
           pattern: '^[0-9A-HJKMNP-TV-Z]{26}$'
           minLength: 26
           maxLength: 26
         late:
           type: boolean
           description: >-
-            Поле M3: признак второго TOOL_RESULT завершившегося асинхронного инструмента.
-            В M1 не возвращается.
+            Поле M3: признак второго TOOL_RESULT завершившегося асинхронного инструмента
+            (late=true); для TOOL_CALL/ASYNC_ACCEPTED не выставляется.
         tokens:
           type: integer
           format: int32
