@@ -98,52 +98,151 @@ Capability-URL: `token = HMAC(server_secret, kind + ':' + entityId)` в пути
 
 `webhookUrl` — полем TaskDto (WAIT_WEBHOOK) и TriggerDto. Threat-model — D-26 (идемпотентность по построению, TLS, логирование).
 
-## 5. Клиент-релей CLIENT_EXEC
+## 5. Клиент-релей (WebSocket)
 
-WebSocket `/api/v1/relay` (Bearer; для браузерного клиента — билет, WebUI-фаза §8).
+`WS /api/v1/relay` — Bearer-JWT (тот же SSO-гейт D-41; браузерному клиенту — билет,
+WebUI-фаза §9). Единица маршрутизации — **сессия** (D-84): релей обслуживает FREE
+root-сессии; сессии задач (STATE, ролевой агент) — всегда SERVER. Транспорт — JSON-фреймы,
+у каждого поле `type`. Исходящие кадры одного соединения сериализуются (D-83).
+
+### 5.1 Handshake
 
 | Направление | Фрейм | Семантика |
 |---|---|---|
-| → | `hello { protocol: 1 }` | ← `welcome { protocol }` |
-| → | `register { taskId, binding, basePath }` | регистрация исполнителя workspace `(taskId, binding)`; занято → `error workspace-occupied` (close 4409); успех → `← registered { workspaceId }` |
-| ← | `tool.call { callId, sessionId, tool: BASH\|READ\|WRITE\|EDIT\|GLOB\|GREP, args }` | клиент исполняет локально |
-| → | `tool.progress { callId, chunk }` | опционально |
-| → | `tool.result { callId, output, exitCode }` | идемпотентно по callId |
-| ←→ | `ping`/`pong` 15 с | разрыв по 2×15 с |
-| ← | `tool.cancel { callId }` | отмена in-flight |
+| → | `hello { protocol: 1 }` | первый фрейм клиента |
+| ← | `welcome { protocol: 1 }` | версия согласована, соединение активно |
+| × | — | нет/невалиден JWT → close **4401** `unauthenticated` |
+| × | — | фрейм до `hello` → close **4403** `protocol` |
+| × | — | версия протокола вне поддержки → close **4403** `protocol-mismatch` |
 
-Разрыв: незавершённые `tool.call` → синтетический `TOOL_RESULT` «потеряно при отключении исполнителя»; задача → `PARKED_CLIENT`.
+### 5.2 Регистрация и декларация инструментов
+
+| Направление | Фрейм | Семантика |
+|---|---|---|
+| → | `register { sessionId, basePath, client: { version, tools[] } }` | `basePath` — локальный корень клиента (информативно, логи/UI); `client.version` — версия клиента; `tools[]` — декларация |
+| ← | `registered { sessionId }` | успех; декларация — активный runtime-оверлей сессии |
+| ← | `error { code, message }` + close **4409** | отказ регистрации (коды ниже) |
+
+`tools[]: { name, description, inputSchema, source }`:
+- `name` — **free-form имя** (не enum), уникально в декларации; дубликат → `duplicate-tool-name`;
+- `description` — для рендера манифеста модели;
+- `inputSchema` — JSON Schema; `args` валидируются сервером до отправки `tool.call`;
+- `source` ∈ {`client`, `client.mcp:<server>`} — информативная метка для UI/аудита; сервер к
+  MCP-серверам клиента **не ходит** (D-82);
+- пустая декларация валидна.
+
+Отказы регистрации (`error`-фрейм, close 4409):
+
+| code | Ситуация |
+|---|---|
+| `session-not-found` | `sessionId` неизвестен |
+| `wrong-session-kind` | STATE-сессия задачи (релею доступны только FREE root-сессии) |
+| `workspace-occupied` | сессия занята живым соединением **другого** principal |
+| `duplicate-tool-name` | дубль имени в `tools[]` |
+| `superseded` | закрывается **старое** соединение при takeover тем же principal |
+
+Повторный `register` с того же соединения — idempotent success. Takeover: тот же principal
+на живой сессии → старое закрывается 4409 `superseded`, новое получает `registered`;
+`unregister` — CAS по connection-identity, протухший сокет не вытесняет новое (D-78).
+
+### 5.3 Маршрутизация tool-фреймов
+
+| Направление | Фрейм | Семантика |
+|---|---|---|
+| ← | `tool.call { callId, sessionId, tool, args }` | `tool` — free-form имя из декларации; клиент исполняет локально |
+| → | `tool.progress { callId, chunk }` | опционально, промежуточный вывод |
+| → | `tool.result { callId, output, exitCode }` | идемпотентно по `callId` (первый финал выигрывает) |
+| ← | `tool.cancel { callId }` | отмена in-flight (stop Turn'а); поздний `tool.result` игнорируется |
+
+`tool` — **free-form имя декларации**, не enum. Финальную запись в журнал делает Turn-поток
+под `sess`-локом; WS-поток только complete'ит future по `callId` (D-81, как async/MCP — D-64).
+Tool-уровневые отказы отдаются агенту как `TOOL_RESULT ERROR <code>` (§6): `tool-not-available`
+(инструмент не резолвится), `params-schema` (`args` не прошли `inputSchema` — клиент не
+дёргается), `tool-timeout` (нет ответа за `harness.relay.tool-call-timeout`).
+
+### 5.4 Heartbeat и разрыв
+
+| Направление | Фрейм | Семантика |
+|---|---|---|
+| ← | `ping { }` | **инициирует сервер**, интервал `harness.relay.heartbeat-interval` (дефолт 15 с) |
+| → | `pong { }` | ответ клиента |
+| × | — | нет `pong` за `2 × heartbeat-interval` → разрыв соединения |
+
+Разрыв: незавершённые `tool.call` → синтетический `TOOL_RESULT LOST` «потеряно при
+отключении исполнителя»; оверлей сессии очищается (D-80), повторное подключение
+восстанавливает его новой декларацией. Реестр соединений — in-memory (D-78); при рестарте
+процесса пуст, осиротевшие вызовы закрывает рестарт-скан LOST «операция потеряна при
+перезапуске». Авто-парковки (`PARKED_CLIENT`) нет — вызовы после disconnect →
+`tool-not-available`.
+
+### 5.5 Close-коды
+
+| close | code | Ситуация |
+|---|---|---|
+| **4401** | `unauthenticated` | нет/невалиден JWT |
+| **4403** | `protocol` / `protocol-mismatch` | фрейм до `hello` / несовместимая версия |
+| **4409** | `session-not-found`, `wrong-session-kind`, `workspace-occupied`, `superseded`, `duplicate-tool-name` | отказ регистрации / takeover |
 
 ## 6. Каталог ошибок
 
-| code | HTTP | Ситуация |
+| code | HTTP / WS | Ситуация |
 |---|---|---|
 | `validation-failed` | 400/422 | тело/параметры; граф/params — `errors[]` |
 | `unauthenticated` / `signature-invalid` | 401 | без challenge |
 | `session-not-found` / `task-not-found` / `workflow-not-found` / `trigger-not-found` / `agent-not-found` | 404 | |
+| `file-not-found` | 404 | файла/каталога назначения нет в workspace сессии (§8) |
 | `method-not-allowed` / `not-acceptable` / `unsupported-media-type` | 405/406/415 | |
-| `wrong-session-kind` | 409 | compact на STATE |
+| `wrong-session-kind` | 409 / WS 4409 | compact на STATE; регистрация релея на STATE-сессии (§5) |
 | `task-not-waiting-webhook` / `task-already-terminal` | 409 | |
 | `wrong-transition` | 409 | transition не по разрешённому ребру / пустой reason |
-| `workspace-occupied` (WS error / close 4409) | — | |
-| `graph-invalid` / `dependency-invalid` / `params-schema` | 422 | |
-| `payload-too-large` | 413 | тело > лимита |
+| `workspace-occupied` | WS 4409 | сессия занята соединением иного principal (§5) |
+| `superseded` | WS 4409 | старое соединение вытеснено takeover'ом (§5) |
+| `duplicate-tool-name` | WS 4409 | дубль имени в декларации `tools[]` (§5) |
+| `protocol-mismatch` | WS 4403 | несовместимая версия протокола релея (§5) |
+| `graph-invalid` / `dependency-invalid` | 422 | |
+| `params-schema` | 422 / TOOL_RESULT ERROR | params против paramsSchema ревизии; также `args` клиентского инструмента против `inputSchema` (§5) |
+| `path-invalid` | 422 | canonical-path-гвард: абсолютный путь, `..`-эскейп, symlink, каталог (§8) |
+| `extension-not-allowed` | 422 | расширение вне `workspace.download.allow-extensions` (§8) |
+| `payload-too-large` | 413 | тело > лимита (дефолт 1 МБ) либо файл > `workspace.download.max-bytes` (§8) |
 | `trigger-revoked` | 410 | |
+| `tool-not-available` / `tool-timeout` | TOOL_RESULT ERROR | клиентский инструмент не резолвится / нет ответа за `tool-call-timeout` (§5) |
+| `not-implemented` | 501 | метод ещё не реализован в текущем apply-проходе (stubs); не ошибка контракта |
 
 ## 7. Доступ
 
 SSO-гейт (`groups`-claim, конфиг) → дальше всё (D-41). Владелец — метаданные для UI («моё»), не барьер. Сырые payload'ы видны всем — прозрачность (D-27).
 
-## 8. Фазы и вне объёма MVP
+## 8. Скачивание workspace-файлов
 
-- **WebUI-фаза** (может идти сразу после M1, раньше CLI — D-42): билеты `POST /api/v1/auth/ticket` для SSE/WS браузера; скачивание workspace-файлов (`GET /sessions/{id}/workspace/files?path=`, с canonical-path-гвардом).
+`GET /api/v1/sessions/{id}/workspace/files?path=<relative>` — отдача файла из **серверного**
+каталога workspace сессии `workspaces/sessions/{sessionId}` (SSO-гейт D-41; машиночитаемый
+контракт — `api/openapi.yaml`). Ответы: 200 (поток, `application/octet-stream`), 404
+`session-not-found` / `file-not-found`, 413 `payload-too-large`, 422 `path-invalid` /
+`extension-not-allowed`.
+
+- **Canonical-path-гвард** (D-72): посегментная symlink-проверка, canonical-резолв,
+  containment в корне `workspaces/sessions/{sessionId}`, `NOFOLLOW_LINKS` на финальный
+  компонент; абсолютный путь, `..`-эскейп, нулевые сегменты, каталог и symlink → 422.
+  Остаточный TOCTOU — принятый риск (потребитель — аутентифицированный SSO-пользователь).
+- **Safe-лист** расширений (`harness.workspace.download.allow-extensions`, дефолт —
+  текстовые/кодовые расширения; сравнение case-insensitive); вне листа → 422
+  `extension-not-allowed`.
+- **Pre-stat 413** до отправки заголовков (`Files.size` против
+  `harness.workspace.download.max-bytes`, дефолт 10 МБ); отдача — потоком (chunked), без
+  загрузки файла в память. Усечение «в процессе» не используется.
+- Для CLIENT-сессий (релей §5) серверный workspace может быть пуст — файлы у клиента; это
+  задокументированное ограничение, основные потребители — SERVER-сессии и Web Desktop.
+
+## 9. Фазы и вне объёма MVP
+
+- **WebUI-фаза** (может идти после M1 — D-42): билеты `POST /api/v1/auth/ticket` для SSE/WS браузера.
 - **Выброшено** (вернём при появлении нужды): папки, шары, visibility, fork, rewind, includeHidden, экспорт, архивация, идемпотентность-хранилище.
 - Селективная компакция (агентская), MCP-сервер наружу, авто-регистрация вебхуков — как раньше.
 
-## 9. Решения по открытым вопросам
+## 10. Решения по открытым вопросам
 
 1. Suspend + Stop — обе; подтверждено владельцем.
-2. Роуминг-workspace: `(taskId, binding)` + `basePath` — принято.
+2. ~~Роуминг-workspace: `(taskId, binding)` + `basePath`~~ — **supersede D-84**: единица маршрутизации релея — **сессия**, регистрация `register { sessionId, basePath, ... }`; `CLIENT_EXEC`/`binding` релеем не используются.
 3. Триггер-сущность — D-25.
 4. `/v1` — да; вебхуки без версии.
 5. Capability-URL — D-26.

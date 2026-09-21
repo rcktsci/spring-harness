@@ -344,7 +344,7 @@
                                 <hideGenerationTimestamp>true</hideGenerationTimestamp>
                             </configOptions>
                             <globalProperties>
-                                <apis>Agents,Sessions,SessionMessages,SessionCommands,Tasks,TaskCommands,Workflows,Triggers,Webhooks</apis>
+                                <apis>Agents,Sessions,Workspace,SessionMessages,SessionCommands,Tasks,TaskCommands,Workflows,Triggers,Webhooks</apis>
                                 <models></models>
                             </globalProperties>
                         </configuration>
@@ -372,7 +372,7 @@
                                 <hideGenerationTimestamp>true</hideGenerationTimestamp>
                             </configOptions>
                             <globalProperties>
-                                <apis>Agents,Sessions,SessionMessages,SessionCommands,Tasks,TaskCommands,Workflows,Triggers,Webhooks</apis>
+                                <apis>Agents,Sessions,Workspace,SessionMessages,SessionCommands,Tasks,TaskCommands,Workflows,Triggers,Webhooks</apis>
                                 <models></models>
                                 <supportingFiles></supportingFiles>
                             </globalProperties>

@@ -36,7 +36,7 @@ import java.io.IOException;
 import java.util.List;
 
 /**
- * Все ошибки API — RFC 9457 Problem Details с {@code code} из каталога M1+M2
+ * Все ошибки API — RFC 9457 Problem Details с {@code code} из каталога M1+M2+M4
  * (api-contracts §0.2, §6); 422 — с {@code errors[]} {pointer, rule, message}.
  * Коды вне каталога — дефект реализации.
  */
@@ -194,6 +194,13 @@ public class ApiExceptionHandler {
     public void triggerRevoked(TriggerRevokedException exception,
                                HttpServletResponse response) throws IOException {
         problemWriter.write(response, HttpStatus.GONE, ProblemCodes.TRIGGER_REVOKED,
+                exception.getMessage(), null);
+    }
+
+    /** Метод контракта ещё не реализован (stub пачки 1; §6 — переходный not-implemented). */
+    @ExceptionHandler(ApiNotImplementedException.class)
+    public void notImplemented(ApiNotImplementedException exception, HttpServletResponse response) throws IOException {
+        problemWriter.write(response, HttpStatus.NOT_IMPLEMENTED, ProblemCodes.NOT_IMPLEMENTED,
                 exception.getMessage(), null);
     }
 

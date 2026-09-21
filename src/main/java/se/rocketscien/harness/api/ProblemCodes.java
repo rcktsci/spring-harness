@@ -3,7 +3,7 @@ package se.rocketscien.harness.api;
 import se.rocketscien.harness.api.gen.model.ProblemCode;
 
 /**
- * Строковые значения каталога кодов ошибок M1 (api-contracts §6) для сериализации в
+ * Строковые значения каталога кодов ошибок (api-contracts §6) для сериализации в
  * {@code code} Problem Details; значения — из сгенерированного {@link ProblemCode}
  * (замороженная спека), расхождение каталога исключено.
  */
@@ -28,6 +28,10 @@ final class ProblemCodes {
     static final String PARAMS_SCHEMA = ProblemCode.PARAMS_SCHEMA.getValue();
     static final String GRAPH_INVALID = ProblemCode.GRAPH_INVALID.getValue();
     static final String TRIGGER_REVOKED = ProblemCode.TRIGGER_REVOKED.getValue();
+    static final String FILE_NOT_FOUND = ProblemCode.FILE_NOT_FOUND.getValue();
+    static final String PATH_INVALID = ProblemCode.PATH_INVALID.getValue();
+    static final String EXTENSION_NOT_ALLOWED = ProblemCode.EXTENSION_NOT_ALLOWED.getValue();
+    static final String NOT_IMPLEMENTED = ProblemCode.NOT_IMPLEMENTED.getValue();
 
     private ProblemCodes() {
     }

@@ -51,6 +51,11 @@ info:
       (instructionSource=USER, task-engine/agent-turn) — REST-поверхности не требует;
       код `wrong-transition` (409) в каталоге ошибок достигается этим инструментом,
       не REST-операцией.
+
+    Дополнение M4 (api-contracts §8): `GET /sessions/{id}/workspace/files` — скачивание
+    файла серверного workspace сессии (canonical-path-гвард, safe-лист расширений,
+    pre-stat 413, потоковая отдача). WS-релей `/api/v1/relay` (api-contracts §5) в
+    OpenAPI не входит — фреймовый контракт описан в api-contracts.
 servers:
   - url: /api/v1
 security:
@@ -60,6 +65,8 @@ tags:
     description: Каталог агентов (управление ревизиями — вручную в БД, MVP)
   - name: Sessions
     description: Жизненный цикл сессий
+  - name: Workspace
+    description: Скачивание файлов серверного workspace сессии (api-contracts §8)
   - name: SessionMessages
     description: Журнал сообщений сессии (append-only)
   - name: SessionCommands
@@ -377,6 +384,42 @@ paths:
         '404': { $ref: '#/components/responses/SessionNotFound' }
         '406': { $ref: '#/components/responses/NotAcceptable' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
+  /sessions/{id}/workspace/files:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    get:
+      tags: [Workspace]
+      operationId: downloadWorkspaceFile
+      summary: Скачать файл серверного workspace сессии
+      description: >-
+        Отдаёт содержимое файла из серверного каталога workspace сессии
+        `workspaces/sessions/{sessionId}` (api-contracts §8). Путь проверяется
+        canonical-path-гвардом (D-72): посегментная symlink-проверка, canonical-резолв
+        каждого сегмента, containment в корне, `NOFOLLOW_LINKS` на финальный компонент.
+        Абсолютный путь, `..`-эскейп, нулевые сегменты, каталог и symlink'и (в том числе
+        ведущие внутрь корня) → 422 path-invalid. Расширение вне safe-листа
+        `harness.workspace.download.allow-extensions` (сравнение case-insensitive) →
+        422 extension-not-allowed. Размер определяется до отдачи (`Files.size`);
+        превышение `harness.workspace.download.max-bytes` → 413 payload-too-large до
+        отправки заголовков. Отдача — потоком (chunked), без загрузки файла в память.
+        Для CLIENT-сессий (релей §5) серверный workspace может быть пуст — файлы у
+        клиента; это задокументированное ограничение, основные потребители —
+        SERVER-сессии и Web Desktop.
+      parameters:
+        - $ref: '#/components/parameters/WorkspacePath'
+      responses:
+        '200':
+          description: Содержимое файла (потоковая отдача).
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/WorkspaceFileNotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+        '413': { $ref: '#/components/responses/DownloadPayloadTooLarge' }
+        '422': { $ref: '#/components/responses/WorkspacePathRejected' }
   /tasks:
     post:
       tags: [Tasks]
@@ -1169,6 +1212,16 @@ components:
       schema:
         type: string
         format: uuid
+    WorkspacePath:
+      name: path
+      in: query
+      required: true
+      description: >-
+        Относительный путь файла внутри workspace сессии (POSIX-разделители `/`).
+        Абсолютный путь, `..`-сегменты и symlink'и недопустимы → 422 path-invalid.
+      schema:
+        type: string
+        minLength: 1
     Since:
       name: since
       in: query
@@ -1400,6 +1453,31 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/WebhookError'
+    WorkspaceFileNotFound:
+      description: >-
+        404: code=session-not-found (сессии нет) либо file-not-found (файла/каталога
+        назначения нет).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    DownloadPayloadTooLarge:
+      description: >-
+        413, code=payload-too-large — размер файла превышает
+        harness.workspace.download.max-bytes (дефолт 10 МБ); проверяется до отдачи тела.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    WorkspacePathRejected:
+      description: >-
+        422: code=path-invalid (абсолютный путь, `..`-эскейп, нулевой сегмент, каталог,
+        symlink) либо extension-not-allowed (расширение вне safe-листа
+        harness.workspace.download.allow-extensions).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
   schemas:
     SessionKind:
       type: string
@@ -1464,13 +1542,24 @@ components:
         - params-schema
         - trigger-revoked
         - signature-invalid
+        - file-not-found
+        - path-invalid
+        - extension-not-allowed
+        - not-implemented
       description: >-
-        Каталог кодов ошибок M1+M2 (api-contracts §6). Точное значение для каждого ответа
-        зафиксировано в description соответствующего response-компонента. M2-коды:
-        task-not-found, workflow-not-found, trigger-not-found, task-not-waiting-webhook,
-        task-already-terminal, wrong-transition (переход не по ребру/пустой reason —
-        инструмент агента), graph-invalid, dependency-invalid, params-schema,
-        trigger-revoked, signature-invalid (вебхуки).
+        Каталог кодов ошибок M1+M2+M4 (api-contracts §6). Точное значение для каждого
+        ответа зафиксировано в description соответствующего response-компонента.
+        M2-коды: task-not-found, workflow-not-found, trigger-not-found,
+        task-not-waiting-webhook, task-already-terminal, wrong-transition (переход не по
+        ребру/пустой reason — инструмент агента), graph-invalid, dependency-invalid,
+        params-schema, trigger-revoked, signature-invalid (вебхуки).
+        M4-коды (workspace-download, §8): file-not-found, path-invalid (абсолютный путь,
+        ..-эскейп, symlink), extension-not-allowed (расширение вне safe-листа).
+        not-implemented (501) — переходный код stub-контроллера текущего apply-прохода
+        (пачка U заменит реализацией); не ошибка контракта.
+        WS-коды релея (workspace-occupied, superseded, wrong-session-kind,
+        session-not-found, duplicate-tool-name, protocol-mismatch, tool-not-available,
+        tool-timeout) — во фреймовом контракте §5, вне OpenAPI.
     AgentRef:
       type: object
       description: Ссылка на пиннутую ревизию агента.

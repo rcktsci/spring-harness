@@ -1,9 +1,9 @@
 ## 1. Contract-first: OpenAPI + wire-контракт §5
 
-- [ ] 1.1 Расширить `src/main/resources/api/openapi.yaml`: `GET /sessions/{id}/workspace/files` (параметр `path`; ответы 200/404/413/422; коды `session-not-found`, `file-not-found`, `path-invalid`, `extension-not-allowed`, `payload-too-large` в каталоге §6). Перегенерация (openapi-generator 7.25) + stub-контроллер `WorkspaceFilesController` → 501 до пачки U.
-- [ ] 1.2 `docs/design/api-contracts.md` §5 — **rewrite wire-контракта**: `register { sessionId, basePath, client: { version, tools[] } }` (D-84, без taskId/binding), `tool` — free-form имя, `error { code, message }`-фрейм, close-коды 4401/4403/4409 с `workspace-occupied`/`superseded`/`wrong-session-kind`/`session-not-found`/`duplicate-tool-name`, heartbeat — сервер инициирует `ping`. §6 — новые коды + `tool-not-available`/`params-schema`/`tool-timeout` для WS error-фреймов. §8 — `workspace/files` перенесён из «вне MVP».
-- [ ] 1.3 Поправка D-12: `CLIENT_EXEC` workspace-type — **зарезервирован** (в graph-валидаторе остаётся, не исполняется релеем, серверный fallback). Правки `workflow-domain.md`/`glossary.md` — в task 6.4.
-- [ ] 1.4 `PARKED_CLIENT` — отсрочка: `openspec/specs/session-api/spec.md` (M2-строка «с M4 (релей)» → «зарезервировано, присвоение — вне M4»), `api-contracts.md` §2/§8, `roadmap.md` M4-объём — правки в task 6.4.
+- [x] 1.1 Расширить `src/main/resources/api/openapi.yaml`: `GET /sessions/{id}/workspace/files` (параметр `path`; ответы 200/404/413/422; коды `session-not-found`, `file-not-found`, `path-invalid`, `extension-not-allowed`, `payload-too-large` в каталоге §6). Перегенерация (openapi-generator 7.25) + stub-контроллер `WorkspaceFilesController` → 501 до пачки U.
+- [x] 1.2 `docs/design/api-contracts.md` §5 — **rewrite wire-контракта**: `register { sessionId, basePath, client: { version, tools[] } }` (D-84, без taskId/binding), `tool` — free-form имя, `error { code, message }`-фрейм, close-коды 4401/4403/4409 с `workspace-occupied`/`superseded`/`wrong-session-kind`/`session-not-found`/`duplicate-tool-name`, heartbeat — сервер инициирует `ping`. §6 — новые коды + `tool-not-available`/`params-schema`/`tool-timeout` для WS error-фреймов. §8 — `workspace/files` перенесён из «вне MVP».
+- [x] 1.3 Поправка D-12: `CLIENT_EXEC` workspace-type — **зарезервирован** (в graph-валидаторе остаётся, не исполняется релеем, серверный fallback). Правки `workflow-domain.md`/`glossary.md` — в task 6.4.
+- [x] 1.4 `PARKED_CLIENT` — отсрочка: `openspec/specs/session-api/spec.md` (M2-строка «с M4 (релей)» → «зарезервировано, присвоение — вне M4»), `api-contracts.md` §2/§8, `roadmap.md` M4-объём — правки в task 6.4.
 
 ## 2. Пачка T — Зависимости, архитектура и каркас релея
 
