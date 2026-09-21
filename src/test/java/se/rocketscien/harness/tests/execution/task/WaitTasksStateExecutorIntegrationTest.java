@@ -13,6 +13,7 @@ import se.rocketscien.harness.task.TransitionKind;
 import se.rocketscien.harness.tests.task.TaskTestFixtures;
 import se.rocketscien.harness.tests.workflow.WorkflowTestFixtures;
 
+import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -71,7 +72,7 @@ class WaitTasksStateExecutorIntegrationTest extends BaseApplicationTest {
 
         Transition closing = lastTransition(parent.id());
         assertThat(closing.kind()).isEqualTo(TransitionKind.NEXT);
-        assertThat(closing.reason().get("closedBy")).asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST)
+        assertThat(closing.reason().get("closedBy")).asInstanceOf(InstanceOfAssertFactories.LIST)
                 .containsExactlyInAnyOrder(first.id().toString(), second.id().toString());
     }
 

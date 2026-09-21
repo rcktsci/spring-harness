@@ -1,6 +1,7 @@
 package se.rocketscien.harness.tests.api;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,6 +23,8 @@ import se.rocketscien.harness.tests.workflow.WorkflowTestFixtures;
 
 import java.net.http.HttpClient;
 import java.net.http.HttpResponse;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -174,10 +177,10 @@ class WorkflowsApiTest extends BaseApplicationTest {
 
     /** Граф «двухфазного ревью» в raw-виде (эталон пачки H). */
     private static Map<String, Object> graph(Map<String, Object> agentExtra) {
-        var plan = new java.util.LinkedHashMap<>(WorkflowTestFixtures.state("plan", "AGENT", agentExtra));
+        var plan = new LinkedHashMap<>(WorkflowTestFixtures.state("plan", "AGENT", agentExtra));
         return WorkflowTestFixtures.graph(
                 List.of(
-                        java.util.Collections.unmodifiableMap(plan),
+                        Collections.unmodifiableMap(plan),
                         WorkflowTestFixtures.state("checks", "BASH_SCRIPT",
                                 Map.of("script", "make test", "timeout", "PT1M")),
                         WorkflowTestFixtures.state("done", "TERMINAL", Map.of("outcome", "SUCCESS")),
@@ -195,7 +198,7 @@ class WorkflowsApiTest extends BaseApplicationTest {
     /** Raw-граф → сгенерированная клиентская модель (Jackson 2 в test-классpath). */
     private static WorkflowGraph toClientGraph(Map<String, Object> raw) {
         try {
-            return new com.fasterxml.jackson.databind.ObjectMapper()
+            return new ObjectMapper()
                     .convertValue(raw, WorkflowGraph.class);
         } catch (Exception e) {
             throw new IllegalStateException("Граф не конвертируется в клиентскую модель", e);
@@ -204,8 +207,8 @@ class WorkflowsApiTest extends BaseApplicationTest {
 
     /** Разбор problem+json (Jackson 2 в test-классе). */
     private static final class ProblemReader {
-        private final com.fasterxml.jackson.databind.ObjectMapper mapper =
-                new com.fasterxml.jackson.databind.ObjectMapper();
+        private final ObjectMapper mapper =
+                new ObjectMapper();
 
         JsonNode read(String body) {
             try {

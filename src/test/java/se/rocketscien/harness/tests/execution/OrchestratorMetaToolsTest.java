@@ -19,6 +19,8 @@ import se.rocketscien.harness.task.TaskRegistry;
 import se.rocketscien.harness.task.TaskTreeNode;
 import se.rocketscien.harness.task.TriggerRegistry;
 import se.rocketscien.harness.workflow.WorkflowRegistry;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Duration;
 import java.util.List;
@@ -67,8 +69,8 @@ class OrchestratorMetaToolsTest extends BaseApplicationTest {
     @Autowired
     private TriggerRegistry triggers;
 
-    private final tools.jackson.databind.ObjectMapper json =
-            tools.jackson.databind.json.JsonMapper.builder().build();
+    private final ObjectMapper json =
+            JsonMapper.builder().build();
 
     @BeforeEach
     void resetStubs() {

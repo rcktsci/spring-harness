@@ -1,6 +1,8 @@
 package se.rocketscien.harness.tests.api;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.assertj.core.api.InstanceOfAssertFactories;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -8,6 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
 import se.rocketscien.harness.BaseApplicationTest;
+import se.rocketscien.harness.common.AesGcmEncryption;
 import se.rocketscien.harness.common.IdGenerator;
 import se.rocketscien.harness.common.security.WebhookSignatureVerifier;
 import se.rocketscien.harness.config.RecordingTaskWakeListener;
@@ -99,7 +102,7 @@ class WebhooksApiTest extends BaseApplicationTest {
                 .containsEntry("source", "github")
                 .doesNotContainKey("payload");
         assertThat(reason.get("payloadSummary")).asInstanceOf(
-                        org.assertj.core.api.InstanceOfAssertFactories.MAP)
+                        InstanceOfAssertFactories.MAP)
                 .containsEntry("topKeys", List.of("status"));
     }
 
@@ -118,7 +121,7 @@ class WebhooksApiTest extends BaseApplicationTest {
         Map<String, Object> reason = taskRegistry.getHistory(task.id(), null, null)
                 .items().getFirst().reason();
         assertThat(reason.get("validationErrors")).asInstanceOf(
-                        org.assertj.core.api.InstanceOfAssertFactories.LIST)
+                        InstanceOfAssertFactories.LIST)
                 .isNotEmpty();
     }
 
@@ -267,7 +270,7 @@ class WebhooksApiTest extends BaseApplicationTest {
 
     private UUID taskIdOf(String body) {
         try {
-            return UUID.fromString(new com.fasterxml.jackson.databind.ObjectMapper()
+            return UUID.fromString(new ObjectMapper()
                     .readTree(body).get("taskId").asText());
         } catch (Exception e) {
             throw new IllegalStateException("Не удалось разобрать ответ вебхука: " + body, e);
@@ -291,7 +294,7 @@ class WebhooksApiTest extends BaseApplicationTest {
                 """,
                 credentialsId, "creds-" + credentialsId,
                 environment.getRequiredProperty("wiremock.llm.url") + "/v1",
-                se.rocketscien.harness.common.AesGcmEncryption.encrypt("sk-test", LLM_KEY));
+                AesGcmEncryption.encrypt("sk-test", LLM_KEY));
         UUID modelId = idGenerator.newUuidV7();
         jdbcTemplate.update(
                 "INSERT INTO llm_model (id, credentials_id, model_id, created_at) VALUES (?, ?, ?, now())",

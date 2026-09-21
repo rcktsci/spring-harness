@@ -12,6 +12,8 @@ import se.rocketscien.harness.session.SessionStore;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import se.rocketscien.harness.BaseApplicationTest;
 import se.rocketscien.harness.common.IdGenerator;
 
@@ -106,13 +108,13 @@ class SessionAppendTest extends BaseApplicationTest {
     }
 
     @Autowired
-    private org.springframework.transaction.PlatformTransactionManager transactionManager;
+    private PlatformTransactionManager transactionManager;
 
     @Test
     void failedAppendRollsBackSeqReservation() {
         Session session = SessionTestFixtures.createSession(jdbcTemplate, sessionStore, idGenerator);
-        org.springframework.transaction.support.TransactionTemplate transactionTemplate =
-                new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+        TransactionTemplate transactionTemplate =
+                new TransactionTemplate(transactionManager);
 
         assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(status -> {
             sessionStore.appendEvent(session.id(), MessageKind.USER, null, Map.of("text", "откатится"));

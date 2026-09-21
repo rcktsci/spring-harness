@@ -39,6 +39,22 @@ harness:
     workspace-strategy: inherit
     timeout-ms: 60s
     poll-interval: 50ms
+  mcp:
+    # Один WireMock-MCP сервер: URL известен после поднятия контекста (wiremock.llm.url
+    # из LlmWireMockContextInitializer); stub'ы — per-test.
+    servers:
+      - name: demo
+        url: ${wiremock.llm.url}
+        transport: http
+        auth:
+          type: oauth-bearer
+        secret-ref: HARNESS_MCP_DEMO_TOKEN
+        endpoint: /mcp
+    auth:
+      proxy-url: ${wiremock.llm.url}/mcp-auth-proxy
+    # call-timeout > окна (10s): MCP-вызов не абортится SDK раньше парковки
+    call-timeout: 20s
+    init-timeout: 10s
   compact:
     # threshold унаследован; малый read-max-bytes — усечение read_compacted без гигантских записей.
     read-max-bytes: 64B

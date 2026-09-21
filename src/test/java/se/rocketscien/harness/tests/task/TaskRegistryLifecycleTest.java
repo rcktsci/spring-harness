@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -181,7 +182,7 @@ class TaskRegistryLifecycleTest extends BaseApplicationTest {
                 revisionId, owner, null, Map.of("module", "billing")));
 
         Task patched = taskRegistry.patch(task.id(),
-                new TaskRegistry.TaskPatch("Новое название", "Новое описание", java.util.List.of("updated")));
+                new TaskRegistry.TaskPatch("Новое название", "Новое описание", List.of("updated")));
 
         assertThat(patched.title()).isEqualTo("Новое название");
         assertThat(patched.description()).isEqualTo("Новое описание");

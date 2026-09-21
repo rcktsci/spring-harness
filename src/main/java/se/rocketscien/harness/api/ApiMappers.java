@@ -31,6 +31,7 @@ import se.rocketscien.harness.execution.TurnPayloads;
 import se.rocketscien.harness.session.MessageKind;
 import se.rocketscien.harness.session.Session;
 import se.rocketscien.harness.session.SessionEvent;
+import se.rocketscien.harness.session.SessionKind;
 import se.rocketscien.harness.session.SessionMessageEntity;
 import se.rocketscien.harness.session.SessionRuntimeStatus;
 import se.rocketscien.harness.session.SessionStore;
@@ -48,8 +49,10 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -68,26 +71,26 @@ final class ApiMappers {
                             SessionRuntimeStatus runtimeStatus) {
         SessionDto dto = new SessionDto(
                 session.id(),
-                se.rocketscien.harness.api.gen.model.SessionKind.valueOf(session.kind().name()),
+                GenEnums.sessionKind(session.kind().name()),
                 session.title(),
                 ownerUsername,
                 new AgentRef(agent.agentKey(), agent.rev()),
                 new WorkspaceBinding(WorkspaceBinding.TypeEnum.SERVER_DIR),
-                toGenRuntimeStatus(runtimeStatus),
+                GenEnums.runtimeStatus(runtimeStatus.name()),
                 session.lastSeq(),
                 utc(session.lastActivityAt()),
                 utc(session.createdAt())
         );
         if (session.lastTurnOutcome() != null) {
-            dto.setLastTurnOutcome(toGenTurnOutcome(session.lastTurnOutcome()));
+            dto.setLastTurnOutcome(GenEnums.turnOutcome(session.lastTurnOutcome().name()));
         }
         return dto;
     }
 
     static SessionStatusEvent toStatusEvent(SessionRuntimeStatus runtimeStatus, TurnOutcome lastTurnOutcome) {
-        SessionStatusEvent event = new SessionStatusEvent(toGenRuntimeStatus(runtimeStatus));
+        SessionStatusEvent event = new SessionStatusEvent(GenEnums.runtimeStatus(runtimeStatus.name()));
         if (lastTurnOutcome != null) {
-            event.setLastTurnOutcome(toGenTurnOutcome(lastTurnOutcome));
+            event.setLastTurnOutcome(GenEnums.turnOutcome(lastTurnOutcome.name()));
         }
         return event;
     }
@@ -96,7 +99,7 @@ final class ApiMappers {
         MessageDto dto = new MessageDto(
                 message.getUlid(),
                 message.getId().seq(),
-                se.rocketscien.harness.api.gen.model.MessageKind.valueOf(message.getKind().name()),
+                GenEnums.messageKind(message.getKind().name()),
                 message.getPayloadJsonb() == null ? Map.of() : message.getPayloadJsonb(),
                 utc(message.getCreatedAt())
         );
@@ -119,7 +122,7 @@ final class ApiMappers {
         MessageDto dto = new MessageDto(
                 message.ulid(),
                 message.seq(),
-                se.rocketscien.harness.api.gen.model.MessageKind.valueOf(message.kind().name()),
+                GenEnums.messageKind(message.kind().name()),
                 message.payload() == null ? Map.of() : message.payload(),
                 utc(message.createdAt())
         );
@@ -145,16 +148,6 @@ final class ApiMappers {
                 || kind == MessageKind.ASYNC_ACCEPTED) {
             dto.setCallId(callId);
         }
-    }
-
-    private static se.rocketscien.harness.api.gen.model.SessionRuntimeStatus toGenRuntimeStatus(
-            SessionRuntimeStatus status) {
-        return se.rocketscien.harness.api.gen.model.SessionRuntimeStatus.valueOf(status.name());
-    }
-
-    private static se.rocketscien.harness.api.gen.model.TurnOutcome toGenTurnOutcome(TurnOutcome outcome) {
-        return outcome == null ? null
-                : se.rocketscien.harness.api.gen.model.TurnOutcome.valueOf(outcome.name());
     }
 
     private static OffsetDateTime utc(Instant instant) {
@@ -256,7 +249,7 @@ final class ApiMappers {
                 genProjection(node.task().statusProjection()),
                 node.task().suspended()
         );
-        for (se.rocketscien.harness.task.TaskTreeNode child : node.children()) {
+        for (var child : node.children()) {
             dto.addChildrenItem(toNode(child));
         }
         return dto;
@@ -267,13 +260,13 @@ final class ApiMappers {
         SessionTreeNode node = new SessionTreeNode(
                 session.id(),
                 session.parentSessionId(),
-                se.rocketscien.harness.api.gen.model.SessionKind.valueOf(session.kind().name()),
+                GenEnums.sessionKind(session.kind().name()),
                 agent,
-                toGenRuntimeStatus(runtimeStatus),
+                GenEnums.runtimeStatus(runtimeStatus.name()),
                 session.lastSeq(),
                 utc(session.lastActivityAt())
         );
-        if (session.kind() == se.rocketscien.harness.session.SessionKind.STATE) {
+        if (session.kind() == SessionKind.STATE) {
             node.setTaskId(session.taskId());
             node.setStateCode(session.stateCode());
         }
@@ -385,11 +378,11 @@ final class ApiMappers {
     static Map<String, Object> toGraphMap(WorkflowGraph graph) {
         List<Map<String, Object>> states = new ArrayList<>();
         for (WorkflowState state : graph.getStates()) {
-            Map<String, Object> raw = new java.util.LinkedHashMap<>();
+            Map<String, Object> raw = new LinkedHashMap<>();
             raw.put("code", state.getCode());
             raw.put("type", state.getType().getValue());
             if (state.getWorkspace() != null) {
-                Map<String, Object> workspace = new java.util.LinkedHashMap<>();
+                Map<String, Object> workspace = new LinkedHashMap<>();
                 workspace.put("type", state.getWorkspace().getType().getValue());
                 if (state.getWorkspace().getMode() != null) {
                     workspace.put("mode", state.getWorkspace().getMode().getValue());
@@ -438,11 +431,11 @@ final class ApiMappers {
         return raw.get("states") instanceof List<?> states ? states : List.of();
     }
 
-    private static java.util.Optional<Map<String, Object>> schemaOf(Map<String, Object> state, String field) {
+    private static Optional<Map<String, Object>> schemaOf(Map<String, Object> state, String field) {
         if (state.get(field) instanceof Map<?, ?> schema && !schema.isEmpty()) {
-            return java.util.Optional.of((Map<String, Object>) schema);
+            return Optional.of((Map<String, Object>) schema);
         }
-        return java.util.Optional.empty();
+        return Optional.empty();
     }
 
     private static String string(Object value) {

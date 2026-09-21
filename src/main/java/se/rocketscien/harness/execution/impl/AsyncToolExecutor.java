@@ -24,6 +24,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 
 /**
  * Обёртка над нативными инструментами с окном синхронного ожидания (M3 N.1, D-60):
@@ -80,20 +81,30 @@ public class AsyncToolExecutor {
 
     public Outcome execute(UUID sessionId, String callId, String tool, Map<String, Object> arguments,
                            TurnCancellation cancellation) {
-        CompletableFuture<ToolResult> work = CompletableFuture.supplyAsync(
-                () -> nativeTools.execute(sessionId, tool, arguments, cancellation), background);
+        return executeSupply(sessionId, callId, tool,
+                () -> nativeTools.execute(sessionId, tool, arguments, cancellation), cancellation);
+    }
+
+    /**
+     * Обобщённое окно (Q.2: «окна те же» для MCP): работа передаётся supplier'ом — нативные
+     * инструменты идут через {@link #execute}, MCP-инструменты — через {@code McpToolAdapter}.
+     */
+    public Outcome executeSupply(UUID sessionId, String callId, String tool,
+                                 Supplier<ToolResult> work,
+                                 TurnCancellation cancellation) {
+        CompletableFuture<ToolResult> future = CompletableFuture.supplyAsync(work, background);
         try {
-            ToolResult result = work.get(properties.window().defaultMs().toMillis(), TimeUnit.MILLISECONDS);
+            ToolResult result = future.get(properties.window().defaultMs().toMillis(), TimeUnit.MILLISECONDS);
             return new Outcome.Resolved(result);
         } catch (TimeoutException e) {
             // Порядок журнала гарантирует sess-лок: живой Turn удерживает его, пока не
             // допишет ASYNC_ACCEPTED; поздний результат уходит строго после release
-            work.whenComplete((result, error) -> publishLate(
+            future.whenComplete((result, error) -> publishLate(
                     sessionId, callId, tool, error != null ? lostFrom(callId, tool, error) : result));
             return new Outcome.Parked(callId);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            work.whenComplete((result, error) -> publishLate(
+            future.whenComplete((result, error) -> publishLate(
                     sessionId, callId, tool, error != null ? lostFrom(callId, tool, error) : result));
             return new Outcome.Resolved(ToolResult.cancelled(callId, tool, "turn interrupted"));
         } catch (ExecutionException e) {

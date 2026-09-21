@@ -3,6 +3,7 @@ package se.rocketscien.harness.task.impl;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.support.AbstractSqlTypeValue;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 import se.rocketscien.harness.common.IdGenerator;
@@ -19,8 +20,10 @@ import se.rocketscien.harness.task.WorkflowRevisionNotFoundException;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.sql.Array;
+import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -231,9 +234,9 @@ public class TriggerRegistryImpl implements TriggerRegistry {
     }
 
     /** Capability-URL триггера: base + /api/webhooks/triggers/{id}/{HMAC} (api-contracts §4.4). */
-    private java.net.URI capabilityUrl(UUID id) {
+    private URI capabilityUrl(UUID id) {
         String token = signatureVerifier.expectedToken("trigger", id);
-        return java.net.URI.create("%s/api/webhooks/triggers/%s/%s"
+        return URI.create("%s/api/webhooks/triggers/%s/%s"
                 .formatted(webhookProperties.baseUrl(), id, token));
     }
 
@@ -270,9 +273,9 @@ public class TriggerRegistryImpl implements TriggerRegistry {
      */
     private static Object textArrayArg(List<String> values) {
         String[] array = values.toArray(String[]::new);
-        return new org.springframework.jdbc.core.support.AbstractSqlTypeValue() {
+        return new AbstractSqlTypeValue() {
             @Override
-            protected Object createTypeValue(java.sql.Connection con, int sqlType, String typeName)
+            protected Object createTypeValue(Connection con, int sqlType, String typeName)
                     throws SQLException {
                 return con.createArrayOf("text", array);
             }

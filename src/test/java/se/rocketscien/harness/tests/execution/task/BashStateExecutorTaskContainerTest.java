@@ -1,11 +1,13 @@
 package se.rocketscien.harness.tests.execution.task;
 
 import se.rocketscien.harness.BaseApplicationTest;
+import se.rocketscien.harness.common.IdGenerator;
 import se.rocketscien.harness.execution.ToolResult;
 import se.rocketscien.harness.execution.ToolStatus;
 import se.rocketscien.harness.execution.WorkspaceContainerManager;
 import se.rocketscien.harness.execution.WorkspaceTools;
 import se.rocketscien.harness.execution.impl.BashStateExecutor;
+import se.rocketscien.harness.execution.impl.TaskEngine;
 import se.rocketscien.harness.task.Task;
 import se.rocketscien.harness.task.TaskRegistry;
 import se.rocketscien.harness.task.TransitionKind;
@@ -53,13 +55,13 @@ class BashStateExecutorTaskContainerTest extends BaseApplicationTest {
     private TaskRegistry taskRegistry;
 
     @Autowired
-    private se.rocketscien.harness.execution.impl.TaskEngine taskEngine;
+    private TaskEngine taskEngine;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
-    private se.rocketscien.harness.common.IdGenerator idGenerator;
+    private IdGenerator idGenerator;
 
     @BeforeAll
     static void ensureHelperImage() {

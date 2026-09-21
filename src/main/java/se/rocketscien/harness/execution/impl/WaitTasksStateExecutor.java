@@ -16,6 +16,7 @@ import se.rocketscien.harness.task.TaskStatus;
 import se.rocketscien.harness.task.Transition;
 import se.rocketscien.harness.task.TransitionKind;
 
+import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -167,7 +168,7 @@ public class WaitTasksStateExecutor {
         UUID[] array = ids.toArray(UUID[]::new);
         return new AbstractSqlTypeValue() {
             @Override
-            protected Object createTypeValue(java.sql.Connection con, int sqlType, String typeName)
+            protected Object createTypeValue(Connection con, int sqlType, String typeName)
                     throws SQLException {
                 return con.createArrayOf("uuid", array);
             }

@@ -28,6 +28,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.Optional;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -175,18 +176,18 @@ public class TaskEngineImpl implements TaskEngine {
         return timeout == null ? null : now.plus(timeout);
     }
 
-    private java.util.Optional<Duration> kindDefault(TaskStateKind kind) {
+    private Optional<Duration> kindDefault(TaskStateKind kind) {
         TaskProperties.Transition transition = properties.transition();
         TaskProperties.KindTimeouts defaults = transition == null ? null : transition.kindTimeouts();
         if (defaults == null) {
-            return java.util.Optional.empty();
+            return Optional.empty();
         }
         return switch (kind) {
-            case BASH_SCRIPT -> java.util.Optional.ofNullable(defaults.bash());
-            case WAIT_WEBHOOK -> java.util.Optional.ofNullable(defaults.waitWebhook());
-            case WAIT_TASKS -> java.util.Optional.ofNullable(defaults.waitTasks());
-            case AGENT -> java.util.Optional.ofNullable(defaults.agent());
-            case TERMINAL -> java.util.Optional.empty();
+            case BASH_SCRIPT -> Optional.ofNullable(defaults.bash());
+            case WAIT_WEBHOOK -> Optional.ofNullable(defaults.waitWebhook());
+            case WAIT_TASKS -> Optional.ofNullable(defaults.waitTasks());
+            case AGENT -> Optional.ofNullable(defaults.agent());
+            case TERMINAL -> Optional.empty();
         };
     }
 

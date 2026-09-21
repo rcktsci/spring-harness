@@ -28,11 +28,11 @@ final class ExecutionFixtures {
     }
 
     /**
-     * Сессия на агенте с произвольным {@code permissions_jsonb} (O-пачка: оркестратор с
-     * {@code {"metaTools": true}} получает spawn_subagent в манифесте).
+     * Сессия на агенте с произвольными {@code permissions_jsonb} и {@code tools_jsonb}
+     * (P-пачка: оркестратор с {@code {"metaTools": true}}; Q-пачка: mcp-конфиг).
      */
     static Session newSessionWithAgent(JdbcTemplate jdbcTemplate, SessionStore sessionStore, IdGenerator idGenerator,
-                                       Environment environment, String permissionsJson) {
+                                       Environment environment, String permissionsJson, String toolsJson) {
         UUID userId = idGenerator.newUuidV7();
         jdbcTemplate.update(
                 "INSERT INTO app_user (id, keycloak_subject, username, display_name, created_at) VALUES (?, ?, ?, ?, now())",
@@ -62,11 +62,16 @@ final class ExecutionFixtures {
         String agentKey = "agent-" + revisionId;
         jdbcTemplate.update(
                 """
-                INSERT INTO agent (id, key, name, rev, role_prompt, llm_model_id, permissions_jsonb, created_at)
-                VALUES (?, ?, ?, 1, ?, ?, ?::jsonb, now())
+                INSERT INTO agent (id, key, name, rev, role_prompt, llm_model_id, permissions_jsonb, tools_jsonb, created_at)
+                VALUES (?, ?, ?, 1, ?, ?, ?::jsonb, ?::jsonb, now())
                 """,
-                revisionId, agentKey, "Агент исполнения", "Ты исполнитель.", modelId, permissionsJson);
+                revisionId, agentKey, "Агент исполнения", "Ты исполнитель.", modelId, permissionsJson, toolsJson);
 
         return sessionStore.createFreeSession(userId, agentKey, null, null);
+    }
+
+    static Session newSessionWithAgent(JdbcTemplate jdbcTemplate, SessionStore sessionStore, IdGenerator idGenerator,
+                                       Environment environment, String permissionsJson) {
+        return newSessionWithAgent(jdbcTemplate, sessionStore, idGenerator, environment, permissionsJson, null);
     }
 }

@@ -4,6 +4,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.Immutable;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
@@ -17,7 +18,7 @@ import java.util.UUID;
  * Задачи пинятся к конкретной ревизии ({@code task.workflow_revision_id}).
  */
 @Entity
-@org.hibernate.annotations.Immutable
+@Immutable
 @Table(name = "workflow_revision")
 public class WorkflowRevisionEntity {
 

@@ -51,6 +51,19 @@ harness:
     timeout: 60s
     encryption-keys:
       1: ${HARNESS_LLM_KEY_V1:}
+  mcp:
+    # Каталог MCP-серверов (пачка Q, D-63): пустой по умолчанию — владелец заполняет.
+    # Сервер: {name, url, transport: stdio|http|sse, auth: {type: oauth-bearer|api-key},
+    # secret-ref: HARNESS_MCP_<NAME>_TOKEN, endpoint: /mcp}.
+    servers: []
+    auth:
+      # Прокси обновления токенов (POST {server, secretRef} → {token}); токены — у прокси.
+      proxy-url: ${HARNESS_MCP_AUTH_PROXY_URL:}
+      # Таймауты прокси-вызова (Q-5).
+      connect-timeout-ms: 5000
+      read-timeout-ms: 10000
+    call-timeout: 60s
+    init-timeout: 30s
   compact:
     threshold: 0.8
     # Лимит одной записи ответа read_compacted (D-67): оригинал больше — усечён + truncated.

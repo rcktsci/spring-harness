@@ -15,6 +15,11 @@ import se.rocketscien.harness.execution.impl.AsyncToolExecutor;
 import se.rocketscien.harness.execution.impl.OrchestratorTools;
 import se.rocketscien.harness.execution.impl.ReadCompactedTool;
 import se.rocketscien.harness.execution.impl.SubagentSpawner;
+import se.rocketscien.harness.mcp.McpClientRegistry;
+import se.rocketscien.harness.mcp.McpToolAdapter;
+import se.rocketscien.harness.mcp.McpToolCallback;
+import se.rocketscien.harness.mcp.McpToolDescriptor;
+import se.rocketscien.harness.mcp.McpToolResult;
 import se.rocketscien.harness.intelligence.LlmInvoker;
 import se.rocketscien.harness.session.MessageKind;
 import se.rocketscien.harness.session.Session;
@@ -25,8 +30,10 @@ import se.rocketscien.harness.session.TurnOutcome;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
@@ -84,6 +91,8 @@ public class AgentTurnEngine {
     private final SubagentSpawner spawner;
     private final ReadCompactedTool readCompactedTool;
     private final OrchestratorTools orchestratorTools;
+    private final McpClientRegistry mcpClients;
+    private final McpToolAdapter mcpAdapter;
     private final ObjectMapper objectMapper;
     private final IdGenerator idGenerator;
     private final TaskProperties taskProperties;
@@ -116,6 +125,9 @@ public class AgentTurnEngine {
             toolCallbacks.addAll(orchestratorTools.declarations());
             toolCallbacks.add(spawner.declaration());
         }
+        // Q.3: MCP-инструменты (tools_jsonb.mcp: [{server, include?, exclude?}]) —
+        // наравне с native; неизвестный сервер в конфиге агента — runtime-error манифеста
+        toolCallbacks.addAll(mcpManifestCallbacks(agent));
         if (session.kind() == SessionKind.STATE) {
             toolCallbacks.add(transitionTool.declaration());
         }
@@ -176,7 +188,7 @@ public class AgentTurnEngine {
                 String callId = idGenerator.newUlid();
                 Map<String, Object> arguments = parseArguments(toolCall.arguments());
                 PendingCall pendingCall = new PendingCall(callId, toolCall.name(), arguments);
-                if (asyncExecutor.isAsyncCapable(toolCall.name())) {
+                if (isAsyncTool(toolCall.name())) {
                     asyncCalls.add(pendingCall);
                 } else {
                     syncCalls.add(pendingCall);
@@ -247,8 +259,14 @@ public class AgentTurnEngine {
                             null);
                     continue;
                 }
-                AsyncToolExecutor.Outcome outcome = asyncExecutor.execute(
-                        sessionId, asyncCall.callId(), asyncCall.tool(), asyncCall.arguments(), cancellation);
+                AsyncToolExecutor.Outcome outcome = mcpClients.isManagedTool(asyncCall.tool())
+                        ? asyncExecutor.executeSupply(sessionId, asyncCall.callId(), asyncCall.tool(),
+                                () -> mcpToToolResult(asyncCall.callId(), asyncCall.tool(),
+                                        asyncCall.arguments()),
+                                cancellation)
+                        : asyncExecutor.execute(
+                                sessionId, asyncCall.callId(), asyncCall.tool(), asyncCall.arguments(),
+                                cancellation);
                 SessionStore.AppendedEvent resolutionEvent;
                 if (outcome instanceof AsyncToolExecutor.Outcome.Resolved resolved) {
                     resolutionEvent = sessionStore.appendEvent(sessionId, MessageKind.TOOL_RESULT, null,
@@ -384,6 +402,16 @@ public class AgentTurnEngine {
         if (TransitionMetaTool.NAME.equals(pendingCall.tool())) {
             return executeTransition(session, state, pendingCall);
         }
+        if (mcpClients.isManagedTool(pendingCall.tool())) {
+            // Q.2: MCP-инструмент в стандартный контракт; async-capable уходит в окно
+            // выше (ветка asyncCalls)
+            try {
+                return mcpToToolResult(pendingCall.callId(), pendingCall.tool(), pendingCall.arguments());
+            } catch (Exception e) {
+                log.warn("Инструмент {} сессии {} упал: {}", pendingCall.tool(), session.id(), e.getMessage());
+                return ToolResult.error(pendingCall.callId(), pendingCall.tool(), e.getMessage());
+            }
+        }
         if (OrchestratorTools.NAMES.contains(pendingCall.tool())) {
             if (!isOrchestrator(agent)) {
                 return ToolResult.error(pendingCall.callId(), pendingCall.tool(),
@@ -429,6 +457,96 @@ public class AgentTurnEngine {
     private static boolean isOrchestrator(SessionStore.AgentRuntime agent) {
         return agent.permissions() != null
                 && Boolean.TRUE.equals(agent.permissions().get("metaTools"));
+    }
+
+    /**
+     * Async-классификация инструмента: нативные async-capable (bash, N.1) и MCP-инструменты
+     * с manifest-атрибутом сервера {@code _meta["async-capable"]} (Q.2 — окна те же).
+     */
+    private boolean isAsyncTool(String tool) {
+        if (asyncExecutor.isAsyncCapable(tool)) {
+            return true;
+        }
+        if (!mcpClients.isManagedTool(tool)) {
+            return false;
+        }
+        int dot = tool.indexOf('.');
+        return mcpClients.listTools(tool.substring(0, dot)).stream()
+                .anyMatch(descriptor -> descriptor.tool().equals(tool.substring(dot + 1))
+                        && descriptor.asyncCapable());
+    }
+
+    /** MCP-вызов → стандартный контракт ToolResult (адаптер Q.2). */
+    private ToolResult mcpToToolResult(String callId, String namespacedTool, Map<String, Object> arguments) {
+        McpToolResult result = mcpAdapter.callTool(namespacedTool, arguments);
+        return result.ok()
+                ? ToolResult.ok(callId, namespacedTool, result.output(), null, result.truncated(), null)
+                : ToolResult.error(callId, namespacedTool, result.output());
+    }
+
+    /**
+     * Манифест MCP-инструментов агента (Q.3, спека mcp-client): {@code tools_jsonb.mcp} —
+     * массив объектов {@code [{server, include?, exclude?}]} с per-server фильтрами;
+     * namespace {@code server.tool}; семантика — сначала include (пусто → все инструменты
+     * сервера), затем exclude (Q-2: белый список приоритетен, чёрный вычитает);
+     * дубликаты namespace → fail-fast {@code MCP-name-collision} (Q-3, на уровне манифеста —
+     * namespace делает коллизию недостижимой для разных серверов). Неизвестный сервер —
+     * runtime-error манифеста (Turn FAILED с SYSTEM-причиной).
+     */
+    private List<ToolCallback> mcpManifestCallbacks(SessionStore.AgentRuntime agent) {
+        Object raw = agent.tools() == null ? null : agent.tools().get("mcp");
+        if (!(raw instanceof List<?> serverConfigs) || serverConfigs.isEmpty()) {
+            return List.of();
+        }
+        List<ToolCallback> callbacks = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (Object entry : serverConfigs) {
+            if (!(entry instanceof Map<?, ?> config)) {
+                continue;
+            }
+            String server = config.get("server") instanceof String name ? name : null;
+            if (server == null || server.isBlank()) {
+                throw new IllegalStateException(
+                        "mcp-конфиг агента: запись без server (tools_jsonb.mcp[])");
+            }
+            if (!mcpClients.isKnownServer(server)) {
+                throw new IllegalStateException(
+                        "неизвестный MCP-сервер '" + server + "' (harness.mcp.servers)");
+            }
+            List<String> include = stringList(config.get("include"));
+            List<String> exclude = stringList(config.get("exclude"));
+            for (McpToolDescriptor descriptor : mcpClients.listTools(server)) {
+                String namespaced = descriptor.namespacedName();
+                // Q-2: include — белый список (пусто → все), exclude вычитает поверх
+                if (!include.isEmpty() && !(include.contains(namespaced)
+                        || include.contains(descriptor.tool()))) {
+                    continue;
+                }
+                if (exclude.contains(namespaced) || exclude.contains(descriptor.tool())) {
+                    continue;
+                }
+                if (!seen.add(namespaced)) {
+                    // Q-3: коллизия на уровне манифеста (namespace для разных серверов
+                    // уникален по построению — дубль означает повтор сервера в конфиге)
+                    throw new IllegalStateException(
+                            "MCP-name-collision: повтор инструмента " + namespaced
+                                    + " в mcp-конфиге агента");
+                }
+                callbacks.add(new McpToolCallback(
+                        mcpClients, mcpAdapter, descriptor, objectMapper));
+            }
+        }
+        return callbacks;
+    }
+
+    private static List<String> stringList(Object raw) {
+        if (!(raw instanceof List<?> list)) {
+            return List.of();
+        }
+        return list.stream()
+                .filter(String.class::isInstance)
+                .map(String.class::cast)
+                .toList();
     }
 
     /**

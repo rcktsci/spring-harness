@@ -24,6 +24,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -121,7 +122,7 @@ public class SessionEventsController {
             List<SessionMessageEntity> visible = sessionStore.renderVisible(sessionId);
             Set<UUID> authorIds = visible.stream()
                     .map(SessionMessageEntity::getAuthorUserId)
-                    .filter(java.util.Objects::nonNull)
+                    .filter(Objects::nonNull)
                     .collect(Collectors.toSet());
             Map<UUID, String> usernames = users.usernames(authorIds);
             synchronized (sendLock) {

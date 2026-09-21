@@ -1,5 +1,7 @@
 package se.rocketscien.harness.tests.api;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +22,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpResponse;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -166,7 +169,7 @@ class TriggersApiTest extends BaseApplicationTest {
         assertThat(revoked.getRevokedAt()).isNotNull();
 
         ApiException unknown = assertThrows(ApiException.class,
-                () -> triggersApi.revokeTrigger(java.util.UUID.randomUUID()));
+                () -> triggersApi.revokeTrigger(UUID.randomUUID()));
         assertThat(unknown.getCode()).isEqualTo(404);
         assertThat(problem.codeOf(unknown)).isEqualTo("trigger-not-found");
     }
@@ -183,10 +186,10 @@ class TriggersApiTest extends BaseApplicationTest {
 
     /** Разбор problem+json (Jackson 2 в test-классе). */
     private static final class ProblemReader {
-        private final com.fasterxml.jackson.databind.ObjectMapper mapper =
-                new com.fasterxml.jackson.databind.ObjectMapper();
+        private final ObjectMapper mapper =
+                new ObjectMapper();
 
-        com.fasterxml.jackson.databind.JsonNode read(String body) {
+        JsonNode read(String body) {
             try {
                 return mapper.readTree(body);
             } catch (Exception e) {

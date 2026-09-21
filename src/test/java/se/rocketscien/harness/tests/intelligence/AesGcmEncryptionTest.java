@@ -2,9 +2,11 @@ package se.rocketscien.harness.tests.intelligence;
 
 import lombok.SneakyThrows;
 
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import se.rocketscien.harness.common.AesGcmEncryption;
 
+import javax.crypto.AEADBadTagException;
 import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -27,8 +29,8 @@ class AesGcmEncryptionTest {
     void decryptWithWrongKeyFails() {
         String encrypted = AesGcmEncryption.encrypt("sk-secret", key);
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> AesGcmEncryption.decrypt(
+        Assertions.assertThatThrownBy(() -> AesGcmEncryption.decrypt(
                         encrypted, "ffffffffffffffffffffffffffffffff".getBytes(StandardCharsets.UTF_8)))
-                .isInstanceOf(javax.crypto.AEADBadTagException.class);
+                .isInstanceOf(AEADBadTagException.class);
     }
 }

@@ -5,6 +5,8 @@ import se.rocketscien.harness.common.IdGenerator;
 import se.rocketscien.harness.config.RecordingTaskWakeListener;
 import se.rocketscien.harness.execution.impl.InProcessTaskWakeBus;
 import se.rocketscien.harness.execution.impl.TaskEngine;
+import se.rocketscien.harness.execution.impl.TaskWakeHandler;
+import se.rocketscien.harness.task.InvalidCursorException;
 import se.rocketscien.harness.task.Task;
 import se.rocketscien.harness.task.TaskAlreadyTerminalException;
 import se.rocketscien.harness.task.TaskRegistry;
@@ -21,10 +23,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -62,7 +66,7 @@ class TaskEngineTransitionTest extends BaseApplicationTest {
     @Autowired
     private IdGenerator idGenerator;
 
-    private final List<AutoCloseable> subscriptions = new java.util.ArrayList<>();
+    private final List<AutoCloseable> subscriptions = new ArrayList<>();
 
     @AfterEach
     void clearSignals() throws Exception {
@@ -185,8 +189,8 @@ class TaskEngineTransitionTest extends BaseApplicationTest {
     @Test
     void terminalTransitionPublishesTerminalEvent() {
         Task task = newTwoPhaseTask();
-        List<UUID> terminals = new java.util.concurrent.CopyOnWriteArrayList<>();
-        subscriptions.add(wakeBus.subscribeTaskWake(new se.rocketscien.harness.execution.impl.TaskWakeHandler() {
+        List<UUID> terminals = new CopyOnWriteArrayList<>();
+        subscriptions.add(wakeBus.subscribeTaskWake(new TaskWakeHandler() {
             @Override
             public void onTaskWake(UUID id) {
             }
@@ -206,7 +210,7 @@ class TaskEngineTransitionTest extends BaseApplicationTest {
     @Test
     void wakePublishedAfterCommit() throws Exception {
         Task task = newTwoPhaseTask();
-        List<UUID> wakes = new java.util.concurrent.CopyOnWriteArrayList<>();
+        List<UUID> wakes = new CopyOnWriteArrayList<>();
         subscriptions.add(wakeBus.subscribeTaskWake(wakes::add));
 
         taskEngine.processTaskTransition(task.id(), "plan", "checks", TransitionKind.NEXT, Map.of());
@@ -262,7 +266,7 @@ class TaskEngineTransitionTest extends BaseApplicationTest {
     private List<Transition> historyOf(UUID taskId) {
         try {
             return taskRegistry.getHistory(taskId, null, null).items();
-        } catch (se.rocketscien.harness.task.InvalidCursorException e) {
+        } catch (InvalidCursorException e) {
             throw new IllegalStateException(e);
         }
     }

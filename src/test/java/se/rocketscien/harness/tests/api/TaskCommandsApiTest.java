@@ -2,6 +2,7 @@ package se.rocketscien.harness.tests.api;
 
 import org.awaitility.Awaitility;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,6 +13,8 @@ import se.rocketscien.harness.common.IdGenerator;
 import se.rocketscien.harness.config.RecordingTaskWakeListener;
 import se.rocketscien.harness.execution.TaskEventBroadcaster;
 import se.rocketscien.harness.execution.impl.TaskEngine;
+import se.rocketscien.harness.session.StateSessionService;
+import se.rocketscien.harness.task.TaskEvent;
 import se.rocketscien.harness.task.TaskRegistry;
 import se.rocketscien.harness.task.TransitionKind;
 import se.rocketscien.harness.testclient.ApiClient;
@@ -73,7 +76,7 @@ class TaskCommandsApiTest extends BaseApplicationTest {
     @Autowired
     private TaskEventBroadcaster broadcaster;
     @Autowired
-    private se.rocketscien.harness.session.StateSessionService stateSessions;
+    private StateSessionService stateSessions;
 
     @BeforeEach
     void setUpClients() {
@@ -137,13 +140,13 @@ class TaskCommandsApiTest extends BaseApplicationTest {
     @Test
     void suspendEmitsTaskStatusFrameIntoSseChannel() throws Exception {
         TaskDto task = createWaitTask();
-        BlockingQueue<se.rocketscien.harness.task.TaskEvent> events = new LinkedBlockingQueue<>();
+        BlockingQueue<TaskEvent> events = new LinkedBlockingQueue<>();
         try (TaskEventBroadcaster.Subscription ignored = broadcaster.subscribe(task.getId(), events::add)) {
             commandsApi.suspendTask(task.getId(), new SuspendTaskRequest().cascade(false));
 
-            se.rocketscien.harness.task.TaskEvent event = events.poll(5, TimeUnit.SECONDS);
-            assertThat(event).isInstanceOf(se.rocketscien.harness.task.TaskEvent.Status.class);
-            var status = (se.rocketscien.harness.task.TaskEvent.Status) event;
+            TaskEvent event = events.poll(5, TimeUnit.SECONDS);
+            assertThat(event).isInstanceOf(TaskEvent.Status.class);
+            var status = (TaskEvent.Status) event;
             assertThat(status.suspended()).isTrue();
             assertThat(status.statusProjection().name()).isEqualTo("WAITING");
             assertThat(status.seq()).isEqualTo(1);
@@ -292,10 +295,10 @@ class TaskCommandsApiTest extends BaseApplicationTest {
 
     /** Мелкий ридер problem+json (Jackson 2 в тест-класспассе). */
     private static final class ProblemReader {
-        private final com.fasterxml.jackson.databind.ObjectMapper mapper =
-                new com.fasterxml.jackson.databind.ObjectMapper();
+        private final ObjectMapper mapper =
+                new ObjectMapper();
 
-        com.fasterxml.jackson.databind.JsonNode read(String body) {
+        JsonNode read(String body) {
             try {
                 return mapper.readTree(body);
             } catch (Exception e) {

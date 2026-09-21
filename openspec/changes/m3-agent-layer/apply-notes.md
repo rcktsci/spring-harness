@@ -361,3 +361,173 @@ overkill для M3 (одного boolean достаточно, точка эво
   спавнит кодера (без metaTools), кодер явно зовёт `create_workflow` →
   `forbidden (no-metaTools)`, workflow не создан; у кодера ровно 4 LLM-вызова на цепочку.
 
+## Пачка Q. MCP-клиент (2026-09-21, dev-субагент GLM-5.3-Flash)
+
+### Сущностные решения пачки
+
+1. **SDK: `io.modelcontextprotocol.sdk:mcp` 2.0.0** (D-63 соблюдён буквально — MCP Java SDK
+   из экосистемы Spring AI; свой JSON-RPC клиент НЕ писался). Агрегатор тянет `mcp-core`
+   (клиент + streamable-HTTP транспорт) и `mcp-json-jackson3` (`JacksonMcpJsonMapper` поверх
+   `tools.jackson` — Jackson 3, рантайм проекта; правило «без Jackson 2 в main» не задето —
+   mcp-core несёт только jackson-annotations). Версия `2.0.0` — property `mcp-sdk.version`
+   поверх spring-ai-bom. Локальный репозиторий уже содержал артефакты — новых загрузок нет.
+
+2. **Транспорт — streamable HTTP** (`HttpClientStreamableHttpTransport`); `stdio`/`sse` —
+   точки эволюции (конфиг сервера их допускает, реестр отклоняет с явной ошибкой).
+   `resumableStreams(false)` + `openConnectionOnStartup(false)` — для простых
+   request/response-серверов (фоновый GET SSE-поток против WireMock-имитации не нужен).
+
+3. **Пакет `mcp` — технический, зависимость ОДНОНАПРАВЛЕННАЯ (execution → mcp)**: адаптер
+   возвращает mcp-локальный `McpToolResult` (не `execution.ToolResult`) — иначе возник бы
+   цикл слайсов ArchUnit (mcp ↔ execution). Преобразование в стандартный контракт — на
+   стороне движка (`mcpToToolResult`); callId/late проставляются как у нативных
+   (write-ahead / `asLate()`). Слои `mcp` в ArchUnit не именованы (как common/config) —
+   формализация не требуется (S.1 при желании добавит).
+
+4. **Ленивость (Q.1)**: ни одного соединения до первого `listTools`/`callTool`;
+   `initializedClients()` для наблюдаемости. Дедупликация имён серверов — fail-fast
+   в конструкторе реестра (`MCP-name-collision`) — контекст с дубликатами не поднимается.
+   Манифест инструментов кэшируется в холдере (подписки tools/list_changed — не в M3).
+
+5. **Auth (Q.4)**: bootstrap-токен из env `secretRef` (может отсутствовать); заголовок по
+   типу: `oauth-bearer` → `Authorization: Bearer`, `api-key` → `X-Api-Key`. 401/403
+   (детект — `McpHttpClientTransportAuthorizationException` в cause-цепочке либо «401/403»
+   в тексте) → `McpAuthRefresher.refresh` (POST прокси `{server, secretRef}` → `{token}`) →
+   пересборка клиента с новым заголовком → РОВНО один повтор; повторная авторазница →
+   `McpToolResult.error(auth-refresh-failed)`. Проксирующий вызов без автоповторов.
+
+6. **Асинхронность (Q.2)**: `_meta["async-capable"] = true` в манифесте сервера →
+   инструмент классифицируется движком как async (`isAsyncTool`) и идёт через
+   `AsyncToolExecutor.executeSupply` (обобщение окна: работа — supplier) — те же окна,
+   парковка `ASYNC_ACCEPTED`, поздний `TOOL_RESULT(late=true)`, first-final-wins (D-64).
+   MCP-вызов не прерывается TurnCancellation (транспорт не умеет) — прерванный Turn
+   оставит фоновому вызову обычную публикацию/LOST-страховку.
+
+7. **Манифест (Q.3)**: `tools_jsonb.mcp = {servers[], include[], exclude[]}`; namespace
+   `{server}.{tool}`; exclude сильнее include; include пуст → все. Неизвестный сервер —
+   runtime-error построения манифеста → Turn FAILED + SYSTEM-причина (по букве задачи).
+
+8. **Конфиги**: `harness.mcp.servers: []` (пустой дефолт), `auth.proxy-url` (env),
+   `call-timeout` (60s), `init-timeout` (30s); тест-профиль: сервер `demo` на WireMock
+   (`${wiremock.llm.url}`), proxy `${wiremock.llm.url}/mcp-auth-proxy`, call-timeout 20s
+   (строго БОЛЬШЕ окна 10s — иначе SDK-таймаут абортит вызов раньше парковки, выявлено
+   при отладке), init-timeout 10s.
+
+9. **WireMock-имитация MCP** (инструментальная, в тесты): streamable HTTP на `POST /mcp`,
+   матчинг по `$.method` (initialize / notifications/initialized → 202 / tools/list /
+   tools/call), response-template ЭХОИТ `$.id` (SDK матчит ответы по id — статический id
+   дал timeout при отладке) и `$.params.protocolVersion` (согласование версий), заголовок
+   `Mcp-Session-Id` возвращается, но необязателен для SDK. Приоритеты stub'ов (atPriority(1))
+   перекрывают дефолтный tools/call в 401-сценариях.
+
+### Файлы пачки
+
+- pom.xml (+mcp 2.0.0), `config/McpProperties` (новый), `application.yml`, `application-test.yml`.
+- `mcp/`: `McpClientRegistry`, `McpToolAdapter`, `McpAuthRefresher`, `McpToolCallback`,
+  `McpToolDescriptor`, `McpToolResult` (все новые).
+- `AgentTurnEngine` (+mcp-манифест, isAsyncTool, mcpToToolResult, диспетчер), 
+  `AsyncToolExecutor` (+executeSupply — обобщение окна на supplier).
+- Тесты: `McpToolsTest` (7: холодный старт+кэш, namespace+фильтры, sync-вызов,
+  async-парковка+late, unknown-server fail-fast, 401→refresh→200, повторный 401 →
+  auth-refresh-failed), `ConfigPropertiesBindingTest` (+mcp), `ExecutionFixtures`
+  (+tools_jsonb).
+
+### Verify пачки Q
+
+- McpToolsTest 7/7; финальный `mvn clean verify` — см. отчёт пачки.
+
+### Фикс-round пачки Q (2026-09-21)
+
+- **Q-1/GLM M-1**: `tools_jsonb.mcp` приведён к спеке — массив per-server объектов
+  `[{server, include?, exclude?}]` (было `{servers[], include[], exclude[]}`); движок
+  итерирует записи. Валидация при загрузке ревизии: API регистрации агентов в коде нет
+  (D-39 «управление ревизиями — вручную в БД»), поэтому реализовано (а) runtime-ошибка
+  манифеста при неизвестном сервере (было с Q.3, тест unknownMcpServerInAgentConfigFailsTurn)
+  и (б) стартовый аудит `McpAgentConfigAuditor` (ApplicationReadyEvent: ERROR-лог по агентам
+  с неизвестными серверами; не фатально). При появлении API регистрации — проверка
+  переносится туда как 422.
+- **Q-2**: семантика фильтров выровнена со спекой — сначала include (белый список; пусто →
+  все инструменты сервера), затем exclude вычитает поверх (в overlap включённого-и-
+  исключённого инструмент НЕ входит). Тест `excludeWinsOverIncludeOnOverlap`.
+- **Q-3**: tool-level `MCP-name-collision` — на уровне манифеста: namespace
+  `{server}.{tool}` делает коллизию между разными серверами недостижимой по построению;
+  дубль namespaced-имени (повтор сервера в конфиге агента) → fail-fast построения
+  манифеста. Зафиксировано в javadoc/apply-notes.
+- **Q-4**: `mcp-json-jackson3` транзитивно тянет json-schema-validator — НЕ нарушение D-58:
+  наш D-58 — ограниченный профиль для params/payload реестров; MCP-сервер управляет своей
+  JSON-Schema для input своих инструментов сам.
+- **Q-5**: `McpAuthRefresher` — RestClient с таймаутами из конфига
+  `harness.mcp.auth.connect-timeout-ms` (5000) / `read-timeout-ms` (10000) через
+  `JdkClientHttpRequestFactory` (без безлимитных дефолтов).
+- **GLM nit 1 (компромисс — задокументировано)**: MCP-вызов не прерывается отменой Turn'а —
+  MCP-вызов синхронный по контракту MCP, cancel родительского Turn не дёргает MCP SDK;
+  отменённый Turn оставляет фоновому вызову штатную публикацию результата (first-final-wins
+  D-64), а рестарт-скан/watcher закрывают потерянные LOST'ом.
+- **GLM nit 2**: ArchUnit-слой для `mcp` — отложен до S.1 (как `agent/`); сейчас пакет
+  технический, зависимость однонаправленная execution → mcp.
+
+## Пачка R. ACL/owner + рестарт-скан + FQDN-аудит (2026-09-21)
+
+### R.1..R.4 — верификация существующей реализации
+
+- **R.1 (D-69)**: `agent.metaTools=true` не наследуется субагентам — дочерняя сессия пинит
+  ревизию по `agentKey` спавна (`SessionStoreImpl.createChildSession`), манифест/гейт строятся
+  по её `permissions_jsonb`. Покрыто `OrchestratorMetaToolsTest#subagentOfOrchestratorCannotCallOrchestratorTools`
+  (оркестратор → coder без metaTools → `create_workflow` → `forbidden (no-metaTools)`) и
+  `SubagentSpawnTest#explicitSpawnByPlainAgentIsForbidden`.
+- **R.2**: `createChildSession` — `owner_user_id` от родителя (не ключа), `parent_session_id`
+  текущей, `depth = parent.depth + 1`; покрыто `SubagentSpawnTest#orchestratorSpawnsSubagentAndGetsFinalAnswerAsToolResult`.
+- **R.3**: рестарт-скан плоский по всем сессиям, субагентские контейнеры — тот же
+  `harness-<subSessionId>` → удаляются `removeOrphanContainers`. Добавлен тест
+  `RestartScanTest#orphanSubagentContainerRemovedWhileParentAndSiblingsLive` (сирота-ребёнок
+  удаляется; живые родитель/ребёнок остаются). **Отклонение от строки verify задания**
+  («stop родителя → контейнеры поддерева удалены»): stop НЕ удаляет контейнеры — замороженная
+  спека (`subagent-lifecycle` «Отмена поддерева», `restart-scan`) этого не требует; контейнеры
+  снимает только рестарт-скан (API удаления сессий нет).
+- **R.4**: cross-session `read_compacted` — `ref.sessionId != current` → `not-found`;
+  покрыто `ReadCompactedToolTest#unknownOrForeignIdIsNotFound`.
+
+### Фиксы ревью R (DS/GLM)
+
+- **R-1 (DS HIGH)**: `McpAgentConfigAuditor` SQL `WHERE tools_jsonb ? 'mcp'` — `?` трактуется
+  PgJDBC как плейсхолдер (`tools_jsonb $1 'mcp'`), запрос никогда не матчился. Заменено на
+  `jsonb_exists(tools_jsonb, 'mcp')`.
+- **R-2 (DS minor)**: не-`List` форма `tools_jsonb.mcp` → WARNING-лог (не silent `continue`).
+- **R-3 (DS minor)**: тест `McpToolsTest#mcpNameCollisionFailsFastOnDuplicateServerNames` —
+  два сервера с одним `name` → `IllegalStateException` `MCP-name-collision` (fail-fast
+  в конструкторе реестра); runtime-покрытие неизвестного сервера —
+  `McpToolsTest#unknownMcpServerInAgentConfigFailsTurn` (было).
+- Тест-покрытие R-1/R-2: `McpToolsTest#auditorLogsUnknownServerAndWarnsOnNonCanonicalMcpForm`
+  (неизвестный сервер → ERROR; известный — тишина; mcp-map → WARNING).
+
+### FQDN-аудит (AGENTS.md «Импорты вместо FQDN»)
+
+- Code-aware сканер (стрипает комментарии/строки/import) нашёл **53 inline-FQDN в 26 файлах**.
+- Починены все вхождения в **25 файлах** (import + короткое имя); `ApiMappers` — частично
+  (4→2, остаток — коллизия ниже): main — `ApiExceptionHandler`,
+  `SessionEventsController`, `SessionMessagesController`, `LimitedJsonSchemaValidator`,
+  `OrchestratorTools`, `WaitTasksStateExecutor`, `McpClientRegistry`, `ApiMappers`; test —
+  `AcceptanceTwoPhaseReviewTest`, `AsyncLateResultApiTest`, `TaskCommandsApiTest`,
+  `DataSourceBootstrapTest`, `AgentStateBootstrapperTest`, `AgentTransitionToolTest`,
+  `BashStateExecutorTaskContainerTest`, `TaskEngineTestFixtures`, `TaskEngineTransitionTest`,
+  `TaskWakeDispatcherStopTest`, `WaitTasksStateExecutorIntegrationTest`,
+  `WaitWebhookStateExecutorIntegrationTest`, `TurnCancellationTest`, `AesGcmEncryptionTest`,
+  `SessionAppendTest`, `StateSessionServiceTest`, `TaskRegistryLifecycleTest`, `TaskTestFixtures`
+  (+ `lombok.SneakyThrows` в 2 файлах).
+- **Осталось 2 inline-FQDN — неустранимые коллизии simple-name** (Java не импортирует два
+  одноимённых типа): `ApiMappers` (дом. `task.TaskTreeNode` vs ген. `api.gen.model.TaskTreeNode`)
+  и `SessionsController:78` (ген. `api.gen.model.SessionKind` параметр интерфейса vs дом.
+  `session.SessionKind`). Enum-конверсии в `ApiMappers` убраны инлайном `GenEnums.*`.
+- Попутно (блокировало сборку, не связано с R): снят UTF-8 BOM в 4 тестах
+  (`TaskEventsSseTest`, `ConfigPropertiesBindingTest`, `OrchestratorMetaToolsTest`,
+  `SessionPromptBuilderTest`); `SessionsApiTest` — битый импорт `java.time.ChronoUnit` →
+  `java.time.temporal.ChronoUnit`; `SessionsController` — восстановлена доменная конвертация
+  (предыдущая FQDN-правка через `GenEnums.sessionKind` возвращала gen-тип).
+
+### Verify пачки R
+
+- `mvn clean verify` — BUILD SUCCESS, **489 тестов**, 0 failures/errors/skipped
+  (+1 к предыдущему прогону пачки R — `RestartScanTest`, +2 — аудитор/коллизия MCP).
+
+
+

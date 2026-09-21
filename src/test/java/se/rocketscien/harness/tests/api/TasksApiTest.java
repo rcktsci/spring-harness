@@ -1,8 +1,14 @@
 package se.rocketscien.harness.tests.api;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -455,11 +461,11 @@ class TasksApiTest extends BaseApplicationTest {
         createTaskViaRegistry(wf, null, List.of(), "третья");
         assertThat(viaApi.getId()).isNotNull();
 
-        ch.qos.logback.classic.Logger jdbcLogger = (ch.qos.logback.classic.Logger)
-                org.slf4j.LoggerFactory.getLogger(org.springframework.jdbc.core.JdbcTemplate.class);
-        var appender = new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();
-        ch.qos.logback.classic.Level previous = jdbcLogger.getLevel();
-        jdbcLogger.setLevel(ch.qos.logback.classic.Level.DEBUG);
+        Logger jdbcLogger = (Logger)
+                LoggerFactory.getLogger(JdbcTemplate.class);
+        var appender = new ListAppender<ILoggingEvent>();
+        Level previous = jdbcLogger.getLevel();
+        jdbcLogger.setLevel(Level.DEBUG);
         appender.start();
         jdbcLogger.addAppender(appender);
         try {
@@ -522,8 +528,8 @@ class TasksApiTest extends BaseApplicationTest {
 
     /** Мелкий ридер problem+json (Jackson 2 в тест-класспассе). */
     private static final class ProblemReader {
-        private final com.fasterxml.jackson.databind.ObjectMapper mapper =
-                new com.fasterxml.jackson.databind.ObjectMapper();
+        private final ObjectMapper mapper =
+                new ObjectMapper();
 
         JsonNode read(String body) {
             try {

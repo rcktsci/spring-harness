@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import se.rocketscien.harness.BaseApplicationTest;
 import se.rocketscien.harness.common.IdGenerator;
 import se.rocketscien.harness.testclient.ApiClient;
@@ -19,6 +20,9 @@ import se.rocketscien.harness.testclient.model.UpdateSessionRequest;
 
 import java.net.http.HttpClient;
 import java.net.http.HttpResponse;
+import java.sql.Timestamp;
+import java.time.temporal.ChronoUnit;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -109,7 +113,7 @@ class SessionsApiTest extends BaseApplicationTest {
                 "{\"title\":\"с заголовком\",\"agentKey\":\"" + agentKey + "\"}");
         assertThat(raw.statusCode()).isEqualTo(201);
         assertThat(raw.headers().firstValue("Location").orElseThrow())
-                .isEqualTo("/api/v1/sessions/" + new com.fasterxml.jackson.databind.ObjectMapper()
+                .isEqualTo("/api/v1/sessions/" + new ObjectMapper()
                         .readTree(raw.body()).get("id").asText());
     }
 
@@ -223,8 +227,8 @@ class SessionsApiTest extends BaseApplicationTest {
             created.add(sessionsApi.createSession(
                     new CreateSessionRequest().title("тай-" + i).agentKey(agentKey)).getId());
         }
-        java.sql.Timestamp tie = java.sql.Timestamp.from(
-                java.time.Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS));
+        Timestamp tie = Timestamp.from(
+                Instant.now().truncatedTo(ChronoUnit.MILLIS));
         jdbcTemplate.update("UPDATE session SET last_activity_at = ? WHERE title LIKE 'тай-%'", tie);
 
         List<UUID> seen = new ArrayList<>();
@@ -381,9 +385,9 @@ class SessionsApiTest extends BaseApplicationTest {
 
     private SessionDto readSession(HttpResponse<String> response) throws Exception {
         assertThat(response.statusCode()).isEqualTo(200);
-        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        ObjectMapper mapper = new ObjectMapper();
         mapper.findAndRegisterModules();
-        return mapper.readValue(response.body(), se.rocketscien.harness.testclient.model.SessionDto.class);
+        return mapper.readValue(response.body(), SessionDto.class);
     }
 
     /** Дополнительная ревизия существующего ключа агента (иммутабельные ревизии, data-model §2). */

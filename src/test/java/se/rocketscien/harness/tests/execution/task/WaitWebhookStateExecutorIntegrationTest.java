@@ -9,6 +9,9 @@ import se.rocketscien.harness.task.TaskRegistry;
 import se.rocketscien.harness.task.TaskStatus;
 import se.rocketscien.harness.tests.workflow.WorkflowTestFixtures;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -59,7 +62,7 @@ class WaitWebhookStateExecutorIntegrationTest extends BaseApplicationTest {
                 .containsEntry("source", "github")
                 .doesNotContainKey("payload");
         assertThat(reason.get("payloadSummary")).asInstanceOf(
-                        org.assertj.core.api.InstanceOfAssertFactories.MAP)
+                        InstanceOfAssertFactories.MAP)
                 .containsEntry("topKeys", List.of("status"))
                 .containsEntry("byteSize", jsonSize(payload))
                 .doesNotContainKey("truncated");
@@ -92,7 +95,7 @@ class WaitWebhookStateExecutorIntegrationTest extends BaseApplicationTest {
         Map<String, Object> reason = taskRegistry.getHistory(task.id(), null, null)
                 .items().getFirst().reason();
         assertThat(reason.get("payloadSummary")).asInstanceOf(
-                        org.assertj.core.api.InstanceOfAssertFactories.MAP)
+                        InstanceOfAssertFactories.MAP)
                 .doesNotContainKey("topKeys")
                 .containsEntry("truncated", true)
                 .containsEntry("byteSize", byteSize);
@@ -115,7 +118,7 @@ class WaitWebhookStateExecutorIntegrationTest extends BaseApplicationTest {
         Map<String, Object> reason = taskRegistry.getHistory(task.id(), null, null).items().getFirst().reason();
         assertThat(reason).containsEntry("kind", "webhook").containsEntry("source", "ci-bot");
         assertThat(reason.get("validationErrors")).asInstanceOf(
-                        org.assertj.core.api.InstanceOfAssertFactories.LIST)
+                        InstanceOfAssertFactories.LIST)
                 .isNotEmpty();
     }
 
@@ -148,8 +151,8 @@ class WaitWebhookStateExecutorIntegrationTest extends BaseApplicationTest {
     /** Размер сериализованного payload (тестовая сторона ревью L-5; Jackson 2 test-classpath). */
     private static int jsonSize(Map<String, Object> payload) {
         try {
-            return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsBytes(payload).length;
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            return new ObjectMapper().writeValueAsBytes(payload).length;
+        } catch (JsonProcessingException e) {
             throw new IllegalStateException("payload не сериализуется для замера", e);
         }
     }

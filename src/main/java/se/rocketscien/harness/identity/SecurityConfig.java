@@ -13,6 +13,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
@@ -111,13 +112,13 @@ public class SecurityConfig {
     @Bean
     public AuthenticationEntryPoint unauthenticatedEntryPoint(ObjectMapper objectMapper) {
         return (HttpServletRequest request, HttpServletResponse response,
-                 org.springframework.security.core.AuthenticationException exception) -> writeProblemDetails(
+                 AuthenticationException exception) -> writeProblemDetails(
                 response, objectMapper, exception);
     }
 
     @SneakyThrows
     private static void writeProblemDetails(HttpServletResponse response, ObjectMapper objectMapper,
-                                            org.springframework.security.core.AuthenticationException exception) {
+                                            AuthenticationException exception) {
         ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, exception.getMessage());
         problemDetail.setTitle("Unauthorized");
         problemDetail.setProperty("code", "unauthenticated");

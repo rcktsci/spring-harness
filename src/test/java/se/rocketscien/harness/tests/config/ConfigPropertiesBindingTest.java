@@ -9,6 +9,7 @@ import se.rocketscien.harness.config.SecurityProperties;
 import se.rocketscien.harness.config.SseProperties;
 import se.rocketscien.harness.config.LlmProperties;
 import se.rocketscien.harness.config.LockProperties;
+import se.rocketscien.harness.config.McpProperties;
 import se.rocketscien.harness.config.SpawnProperties;
 import se.rocketscien.harness.config.TurnProperties;
 import se.rocketscien.harness.config.WorkflowProperties;
@@ -20,6 +21,7 @@ import org.springframework.boot.test.context.ConfigDataApplicationContextInitial
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.util.unit.DataSize;
 
 import java.time.Duration;
 
@@ -77,7 +79,7 @@ class ConfigPropertiesBindingTest {
             CompactProperties properties = context.getBean(CompactProperties.class);
             assertThat(properties.threshold()).isEqualTo(0.8);
             // Лимит read_compacted (O.4/D-67) — только конфиг
-            assertThat(properties.readMaxBytes()).isEqualTo(org.springframework.util.unit.DataSize.ofKilobytes(16));
+            assertThat(properties.readMaxBytes()).isEqualTo(DataSize.ofKilobytes(16));
         });
     }
 
@@ -94,13 +96,28 @@ class ConfigPropertiesBindingTest {
     }
 
     @Test
+    void bindsMcpDefaults() {
+        contextRunner.run(context -> {
+            McpProperties properties = context.getBean(McpProperties.class);
+            // MCP-клиент (пачка Q, D-63): каталог серверов пуст (холодный старт),
+            // токены — у прокси, таймауты — только конфиг
+            assertThat(properties.servers()).isEmpty();
+            assertThat(properties.auth().proxyUrl()).isEmpty();
+            assertThat(properties.auth().connectTimeoutMs()).isEqualTo(5000);
+            assertThat(properties.auth().readTimeoutMs()).isEqualTo(10000);
+            assertThat(properties.callTimeout()).isEqualTo(Duration.ofSeconds(60));
+            assertThat(properties.initTimeout()).isEqualTo(Duration.ofSeconds(30));
+        });
+    }
+
+    @Test
     void bindsDockerDefaults() {
         contextRunner.run(context -> {
             DockerProperties properties = context.getBean(DockerProperties.class);
             assertThat(properties.helperImage()).isEqualTo("harness-helper:local");
             assertThat(properties.workspaceRoot()).isEqualTo("workspaces/sessions");
             assertThat(properties.cpuNanos()).isEqualTo(1_000_000_000L);
-            assertThat(properties.memory()).isEqualTo(org.springframework.util.unit.DataSize.ofMegabytes(512));
+            assertThat(properties.memory()).isEqualTo(DataSize.ofMegabytes(512));
             assertThat(properties.network()).isEqualTo("none");
             assertThat(properties.pullTimeout()).isEqualTo(Duration.ofSeconds(30));
             assertThat(properties.startTimeout()).isEqualTo(Duration.ofSeconds(30));
@@ -128,9 +145,9 @@ class ConfigPropertiesBindingTest {
     void bindsLimitsDefaults() {
         contextRunner.run(context -> {
             LimitsProperties properties = context.getBean(LimitsProperties.class);
-            assertThat(properties.body()).isEqualTo(org.springframework.util.unit.DataSize.ofMegabytes(1));
-            assertThat(properties.toolOutput()).isEqualTo(org.springframework.util.unit.DataSize.ofKilobytes(256));
-            assertThat(properties.toolCaptureMargin()).isEqualTo(org.springframework.util.unit.DataSize.ofKilobytes(4));
+            assertThat(properties.body()).isEqualTo(DataSize.ofMegabytes(1));
+            assertThat(properties.toolOutput()).isEqualTo(DataSize.ofKilobytes(256));
+            assertThat(properties.toolCaptureMargin()).isEqualTo(DataSize.ofKilobytes(4));
             assertThat(properties.bashTimeout()).isEqualTo(Duration.ofSeconds(30));
             assertThat(properties.bashTimeoutCap()).isEqualTo(Duration.ofMinutes(5));
             assertThat(properties.page()).isEqualTo(100);
@@ -231,7 +248,8 @@ class ConfigPropertiesBindingTest {
             WebhookProperties.class,
             AsyncProperties.class,
             LateResultProperties.class,
-            SpawnProperties.class
+            SpawnProperties.class,
+            McpProperties.class
     })
     static class PropertiesRegistrar {
     }

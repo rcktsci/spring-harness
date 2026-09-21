@@ -39,16 +39,21 @@
 
 ## §Q. MCP-клиент
 
-- [ ] Q.1 `mcp/McpClientRegistry` (`common/`) — ленивая инициализация клиентов из `harness.mcp.servers[*]` конфига. Auth через `harness.mcp.auth.proxy-url` (`McpAuthRefresher`). Cold-start: соединения не открываются без явного запроса инструмента. Verify: integration — старт без серверов чистый; добавление сервера → клиент регистрируется.
-- [ ] Q.2 `mcp/McpToolAdapter` — обёртка над MCP-вызовом в стандартный `callId, tool, status, output?` контракт. Дедупликация имён: `{server}.{tool}` namespace; collision → fail-fast (MCP-name-collision на старте).
-- [ ] Q.3 Расширение `AgentTurnEngine` — manifest инструментов включает MCP-инструменты наравне с native. `agent.tools_jsonb.mcp[servers]` — массив объектов с filters include/exclude (применяются на этапе сбора manifest). Verify: unit (manifest сборка), integration (WireMock MCP-сервер).
-- [ ] Q.4 Auth-refresh: при 401 от MCP — refresh токен через прокси (1 retry); повторный 401 → TOOL_RESULT auth-refresh-failed. Verify: integration — WireMock ставит 401 первый раз, токен-обновление; повторный 200 — TOOL_RESULT success; повторный 401 — TOOL_RESULT auth-refresh-failed.
+> Пачка выполнена 2026-09-21 (dev-субагент GLM-5.3-Flash). SDK: `io.modelcontextprotocol.sdk:mcp`
+> 2.0.0 (Spring AI BOM-экосистема, Jackson 3 через mcp-json-jackson3 — D-63 соблюдён); транспорт
+> streamable HTTP, transport stdio/sse — точки эволюции. Пакет `mcp` — технический, однонаправленно
+> execution → mcp (циклов ArchUnit нет). Детали — `apply-notes.md` §Q.
+
+- [x] Q.1 `mcp/McpClientRegistry` — ленивая инициализация клиентов из `harness.mcp.servers[*]` (`McpProperties`; пустой каталог по умолчанию — холодный старт чист, `initializedClients()==0` до первого обращения). Дедупликация имён — fail-fast при загрузке контекста (`MCP-name-collision`). Токен: bootstrap из env `secretRef`, 401/403 → refresh через прокси + ровно один retry (Q.4). Verify: McpToolsTest (coldStart — ленивость + кэш манифеста).
+- [x] Q.2 `mcp/McpToolAdapter` — MCP-результат → стандартный контракт (`McpToolResult{tool, ok, output, truncated, errorCode}`; callId/late — у движка как у нативных). Нестандартные формы: текстовый content конкатенируется, без content — сериализация `structuredContent` (Jackson 3); `isError` → FAIL; лимит `limits.tool-output` + маркер `truncated`. Namespace `{server}.{tool}`; async-capable — `_meta["async-capable"]=true` → то же окно (executeSupply, парковка + поздний результат). Verify: McpToolsTest (sync-call, asyncCapable-парковка).
+- [x] Q.3 `AgentTurnEngine` — манифест расширен: `tools_jsonb.mcp = {servers[], include[], exclude[]}` → для каждого сервера listTools (кэш в реестре), фильтры (exclude сильнее include), декларации с namespace. Неизвестный сервер → runtime-error манифеста → Turn FAILED с SYSTEM-причиной. Verify: McpToolsTest (namespace в промпте + фильтры; unknown-server fail-fast).
+- [x] Q.4 `mcp/McpAuthRefresher` — при 401/403 от MCP-сервера refresh через `harness.mcp.auth.proxy-url` (POST {server, secretRef} → {token}) и ровно один retry пересобранным клиентом; повторный 401 → `TOOL_RESULT auth-refresh-failed`. Токены у прокси, в приложении env — только bootstrap. Verify: McpToolsTest (401→refresh→200; 401→refresh→401 → auth-refresh-failed).
 
 ## §R. ACL/owner + рестарт-скан
 
-- [ ] R.1 `agent.metaTools=true` НЕ наследуется субагентам (D-69). При `spawn_subagent` субагент-агент — `metaTools=false`. Verify: unit — orchestrator spawn'ит sub-coder → sub-coder не может вызвать orchestrator-tools.
-- [ ] R.2 Субагентская сессия `parent_session_id` наследуется от текущей; `owner_user_id` — от текущего (не субагент-ключа). `session.depth = parent.depth + 1` (колонка `session.depth`, миграция 074). Verify: integration — owner через parent.session.owner.
-- [ ] R.3 Рестарт-скан расширен: orphan-container cleanup для субагентских контейнеров (`harness-<subSessionId>`); orphan sub-sessions с живым `parent_session_id` — no-op (их parent session может быть отменена и orphan не cleanup-нутый пока session помнит; cleanup через SubtreeCanceller при stop parent).
+- [x] R.1 `agent.metaTools=true` НЕ наследуется субагентам (D-69). При `spawn_subagent` субагент-агент — `metaTools=false`. Verify: unit — orchestrator spawn'ит sub-coder → sub-coder не может вызвать orchestrator-tools.
+- [x] R.2 Субагентская сессия `parent_session_id` наследуется от текущей; `owner_user_id` — от текущего (не субагент-ключа). `session.depth = parent.depth + 1` (колонка `session.depth`, миграция 074). Verify: integration — owner через parent.session.owner.
+- [x] R.3 Рестарт-скан расширен: orphan-container cleanup для субагентских контейнеров (`harness-<subSessionId>`); orphan sub-sessions с живым `parent_session_id` — no-op (их parent session может быть отменена и orphan не cleanup-нутый пока session помнит; cleanup через SubtreeCanceller при stop parent).
 
 ## §S. Приёмка M3
 

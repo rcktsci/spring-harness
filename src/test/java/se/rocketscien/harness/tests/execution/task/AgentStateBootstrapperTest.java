@@ -1,17 +1,20 @@
 package se.rocketscien.harness.tests.execution.task;
 
+import lombok.SneakyThrows;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
 import se.rocketscien.harness.BaseApplicationTest;
+import se.rocketscien.harness.common.AesGcmEncryption;
 import se.rocketscien.harness.common.IdGenerator;
 import se.rocketscien.harness.execution.impl.AgentStateBootstrapper;
 import se.rocketscien.harness.session.SessionKind;
 import se.rocketscien.harness.session.StateSessionService;
 import se.rocketscien.harness.tests.workflow.WorkflowTestFixtures;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -33,7 +36,7 @@ class AgentStateBootstrapperTest extends BaseApplicationTest {
     private static final String PATH = "/v1/chat/completions";
 
     /** Тот же ключ, что harness.llm.encryption-keys.1 в application-test.yml. */
-    private static final byte[] LLM_KEY = "0123456789abcdef0123456789abcdef".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    private static final byte[] LLM_KEY = "0123456789abcdef0123456789abcdef".getBytes(StandardCharsets.UTF_8);
 
     @Autowired
     private AgentStateBootstrapper bootstrapper;
@@ -156,9 +159,9 @@ class AgentStateBootstrapperTest extends BaseApplicationTest {
                 graph, "plan", "plan", "AGENT", "RUNNING", false);
     }
 
-    @lombok.SneakyThrows
+    @SneakyThrows
     private static String encrypt(String value) {
-        return se.rocketscien.harness.common.AesGcmEncryption.encrypt(value, LLM_KEY);
+        return AesGcmEncryption.encrypt(value, LLM_KEY);
     }
 
     private static String textChunk(String content) {

@@ -13,6 +13,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
 import se.rocketscien.harness.common.AesGcmEncryption;
 import se.rocketscien.harness.common.IdGenerator;
+import se.rocketscien.harness.config.KeycloakContextInitializer;
 import se.rocketscien.harness.testclient.ApiClient;
 
 import java.net.URI;
@@ -103,7 +104,7 @@ final class ApiFixtures {
                 + "&username=" + URLEncoder.encode(username, StandardCharsets.UTF_8)
                 + "&password=" + URLEncoder.encode(password, StandardCharsets.UTF_8);
         HttpRequest request = HttpRequest.newBuilder(URI.create(
-                        se.rocketscien.harness.config.KeycloakContextInitializer.authServerUrl()
+                        KeycloakContextInitializer.authServerUrl()
                                 + "/realms/harness/protocol/openid-connect/token"))
                 .header("Content-Type", "application/x-www-form-urlencoded")
                 .POST(HttpRequest.BodyPublishers.ofString(form))
@@ -126,7 +127,7 @@ final class ApiFixtures {
                 .keyID("foreign-" + Instant.now().toEpochMilli())
                 .generate();
         JWTClaimsSet claims = new JWTClaimsSet.Builder()
-                .issuer(se.rocketscien.harness.config.KeycloakContextInitializer.authServerUrl() + "/realms/harness")
+                .issuer(KeycloakContextInitializer.authServerUrl() + "/realms/harness")
                 .subject("intruder")
                 .audience(List.of("harness"))
                 .issueTime(Date.from(Instant.now()))

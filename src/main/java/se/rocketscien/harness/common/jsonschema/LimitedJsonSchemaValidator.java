@@ -1,5 +1,6 @@
 package se.rocketscien.harness.common.jsonschema;
 
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -121,7 +122,7 @@ public final class LimitedJsonSchemaValidator {
                 || instance instanceof Long
                 || instance instanceof Short
                 || instance instanceof Byte
-                || instance instanceof java.math.BigInteger
+                || instance instanceof BigInteger
                 || (instance instanceof Double value && isWhole(value))
                 || (instance instanceof Float value && isWhole(value));
     }

@@ -11,6 +11,7 @@ import se.rocketscien.harness.common.IdGenerator;
 import se.rocketscien.harness.session.MessageKind;
 import se.rocketscien.harness.session.SessionStore;
 import se.rocketscien.harness.testclient.ApiClient;
+import se.rocketscien.harness.testclient.ApiException;
 import se.rocketscien.harness.testclient.api.SessionMessagesApi;
 import se.rocketscien.harness.testclient.api.SessionsApi;
 import se.rocketscien.harness.testclient.model.CreateSessionRequest;
@@ -30,6 +31,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.awaitility.Awaitility.await;
 import static se.rocketscien.harness.tests.api.ApiFixtures.apiClient;
 import static se.rocketscien.harness.tests.api.ApiFixtures.insertAgentChain;
@@ -147,8 +149,8 @@ class MessagesApiTest extends BaseApplicationTest {
 
     @Test
     void sendMessageToUnknownSessionReturns404() {
-        org.junit.jupiter.api.Assertions.assertThrows(
-                se.rocketscien.harness.testclient.ApiException.class,
+        assertThrows(
+                ApiException.class,
                 () -> new SessionMessagesApi(aliceClient)
                         .sendMessage(UUID.randomUUID(), new SendMessageRequest().text("в никуда")));
     }
@@ -196,8 +198,8 @@ class MessagesApiTest extends BaseApplicationTest {
 
     @Test
     void listMessagesOfUnknownSessionReturns404() {
-        org.junit.jupiter.api.Assertions.assertThrows(
-                se.rocketscien.harness.testclient.ApiException.class,
+        assertThrows(
+                ApiException.class,
                 () -> new SessionMessagesApi(aliceClient).listMessages(UUID.randomUUID(), 0L, null));
     }
 

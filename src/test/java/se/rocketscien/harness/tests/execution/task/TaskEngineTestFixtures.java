@@ -9,6 +9,8 @@ import tools.jackson.databind.json.JsonMapper;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -27,14 +29,14 @@ public final class TaskEngineTestFixtures {
 
     /** BASH-граф: run(BASH_SCRIPT, script-заглушка, timeout или null) → done/failed (+TIMEOUT). */
     public static Map<String, Object> bashGraph(String timeout) {
-        var run = new java.util.HashMap<>(WorkflowTestFixtures.state(
+        var run = new HashMap<>(WorkflowTestFixtures.state(
                 "run", "BASH_SCRIPT", Map.of("script", "true")));
         if (timeout != null) {
             run.put("timeout", timeout);
         }
         return WorkflowTestFixtures.graph(
                 List.of(
-                        java.util.Collections.unmodifiableMap(run),
+                        Collections.unmodifiableMap(run),
                         WorkflowTestFixtures.state("done", "TERMINAL", Map.of("outcome", "SUCCESS")),
                         WorkflowTestFixtures.state("failed", "TERMINAL", Map.of("outcome", "FAILED"))
                 ),

@@ -15,6 +15,7 @@ import tools.jackson.databind.json.JsonMapper;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -82,7 +83,7 @@ public class StateSessionServiceImpl implements StateSessionService {
         if (taskIds == null || taskIds.isEmpty()) {
             return List.of();
         }
-        String placeholders = String.join(", ", java.util.Collections.nCopies(taskIds.size(), "?"));
+        String placeholders = String.join(", ", Collections.nCopies(taskIds.size(), "?"));
         return jdbcTemplate.queryForList(
                 "SELECT id FROM session WHERE kind = 'STATE' AND task_id IN (" + placeholders + ")",
                 UUID.class, taskIds.toArray());

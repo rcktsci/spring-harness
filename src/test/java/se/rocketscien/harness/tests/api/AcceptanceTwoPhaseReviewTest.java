@@ -1,5 +1,6 @@
 package se.rocketscien.harness.tests.api;
 
+import com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -9,6 +10,7 @@ import se.rocketscien.harness.BaseApplicationTest;
 import se.rocketscien.harness.common.IdGenerator;
 import se.rocketscien.harness.execution.impl.TaskWakeDispatcher;
 import se.rocketscien.harness.testclient.ApiClient;
+import se.rocketscien.harness.testclient.ApiException;
 import se.rocketscien.harness.testclient.api.SessionMessagesApi;
 import se.rocketscien.harness.testclient.api.TasksApi;
 import se.rocketscien.harness.testclient.model.CreateTaskRequest;
@@ -298,7 +300,7 @@ class AcceptanceTwoPhaseReviewTest extends BaseApplicationTest {
     // --- шаги сценария и ожидания ---------------------------------------------
 
     /** USER-сообщение в STATE-сессию по REST (живой Keycloak JWT, владелец задачи). */
-    private void raiseUser(UUID sessionId, String text) throws se.rocketscien.harness.testclient.ApiException {
+    private void raiseUser(UUID sessionId, String text) throws ApiException {
         SendMessageAccepted accepted = messagesApi.sendMessage(sessionId, new SendMessageRequest().text(text));
         assertThat(accepted.getSeq()).as("USER дописан в журнал").isPositive();
     }
@@ -368,7 +370,7 @@ class AcceptanceTwoPhaseReviewTest extends BaseApplicationTest {
         return JSON.writeValueAsString(value).replace("\"", "\\\"");
     }
 
-    private static com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder sse(
+    private static ResponseDefinitionBuilder sse(
             String... events) {
         StringBuilder body = new StringBuilder();
         for (String event : events) {

@@ -30,7 +30,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static se.rocketscien.harness.tests.api.ApiFixtures.keycloakToken;
@@ -79,7 +81,7 @@ class TaskEventsSseTest extends BaseApplicationTest {
     void firstFrameIsRetryAndSnapshotThenLiveTransitionFrames() throws Exception {
         UUID taskId = newWaitWebhookTask();
 
-        HttpResponse<java.util.stream.Stream<String>> response = openStream(taskId, "0", null);
+        HttpResponse<Stream<String>> response = openStream(taskId, "0", null);
 
         taskEngine.processTaskTransition(taskId, "wait", "done", TransitionKind.NEXT,
                 Map.of("text", "вебхук пришёл"));
@@ -132,7 +134,7 @@ class TaskEventsSseTest extends BaseApplicationTest {
         UUID parentId = newWaitTasksParent();
         UUID childId = newChildWebhookTask(parentId);
 
-        HttpResponse<java.util.stream.Stream<String>> response = openStream(parentId, "0", null);
+        HttpResponse<Stream<String>> response = openStream(parentId, "0", null);
 
         taskEngine.processTaskTransition(childId, "wait", "done", TransitionKind.NEXT,
                 Map.of("text", "ребёнок завершён"));
@@ -152,7 +154,7 @@ class TaskEventsSseTest extends BaseApplicationTest {
         UUID taskId = newWaitWebhookTask();
         UUID authorId = ApiFixtures.insertAppUser(jdbcTemplate);
 
-        HttpResponse<java.util.stream.Stream<String>> response = openStream(taskId, "0", null);
+        HttpResponse<Stream<String>> response = openStream(taskId, "0", null);
         taskRegistry.addComment(taskId, authorId, "посмотрите сюда");
 
         List<String> lines = readLines(response, 2);
@@ -166,7 +168,7 @@ class TaskEventsSseTest extends BaseApplicationTest {
 
     @Test
     void streamOfUnknownTaskReturns404ProblemJson() throws Exception {
-        HttpResponse<java.util.stream.Stream<String>> response = openStream(UUID.randomUUID(), "0", null);
+        HttpResponse<Stream<String>> response = openStream(UUID.randomUUID(), "0", null);
         assertThat(response.statusCode()).isEqualTo(404);
         String body = response.body().collect(Collectors.joining());
         assertThat(body).contains("\"code\":\"task-not-found\"");
@@ -223,7 +225,7 @@ class TaskEventsSseTest extends BaseApplicationTest {
 
     // --- SSE-клиент ----------------------------------------------------------
 
-    private HttpResponse<java.util.stream.Stream<String>> openStream(UUID taskId, String since,
+    private HttpResponse<Stream<String>> openStream(UUID taskId, String since,
                                                                      Long lastEventId) throws Exception {
         StringBuilder url = new StringBuilder(localServerUrl() + "/api/v1/tasks/" + taskId + "/events");
         if (since != null) {
@@ -239,19 +241,19 @@ class TaskEventsSseTest extends BaseApplicationTest {
     }
 
     /** Читает строки, пока не завершится {@code eventCount}-й кадр event: (пустая строка — конец кадра). */
-    private List<String> readLines(HttpResponse<java.util.stream.Stream<String>> response, int eventCount) {
+    private List<String> readLines(HttpResponse<Stream<String>> response, int eventCount) {
         return readLinesUntilInternal(response, lines -> countEvents(lines) >= eventCount, READ_TIMEOUT,
                 eventCount + " событий");
     }
 
-    private List<String> readLinesUntil(HttpResponse<java.util.stream.Stream<String>> response,
+    private List<String> readLinesUntil(HttpResponse<Stream<String>> response,
                                         String eventName, Duration timeout) {
         return readLinesUntilInternal(response, lines -> indexOfEvent(lines, eventName) >= 0, timeout,
                 "кадр " + eventName);
     }
 
-    private List<String> readLinesUntilInternal(HttpResponse<java.util.stream.Stream<String>> response,
-                                                java.util.function.Predicate<List<String>> enough,
+    private List<String> readLinesUntilInternal(HttpResponse<Stream<String>> response,
+                                                Predicate<List<String>> enough,
                                                 Duration timeout, String what) {
         List<String> collected = new ArrayList<>();
         CompletableFuture<List<String>> future = CompletableFuture.supplyAsync(() -> {

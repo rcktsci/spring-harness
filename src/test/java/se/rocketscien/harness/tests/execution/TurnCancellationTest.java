@@ -8,6 +8,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import se.rocketscien.harness.execution.TurnManager;
 import se.rocketscien.harness.execution.WorkspaceContainerManager;
 
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -102,7 +103,7 @@ class TurnCancellationTest extends BaseApplicationTest {
         int journalSize = journalKinds(session.id()).size();
         turnManager.requestStop(session.id());
         turnManager.requestStop(session.id());
-        org.assertj.core.api.Assertions.assertThatCode(() ->
+        Assertions.assertThatCode(() ->
                 await().atMost(Duration.ofSeconds(2)).until(() -> true)).doesNotThrowAnyException();
         assertThat(journalKinds(session.id())).hasSize(journalSize);
         assertThat(sessionStore.findSession(session.id()).orElseThrow().lastTurnOutcome())

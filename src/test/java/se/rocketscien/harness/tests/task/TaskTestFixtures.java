@@ -8,6 +8,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -104,7 +105,7 @@ public final class TaskTestFixtures {
         start.put("paramsSchema", paramsSchema);
         return WorkflowTestFixtures.graph(
                 List.of(
-                        java.util.Collections.unmodifiableMap(start),
+                        Collections.unmodifiableMap(start),
                         WorkflowTestFixtures.state("done", "TERMINAL", Map.of("outcome", "SUCCESS"))
                 ),
                 List.of(WorkflowTestFixtures.transition("start", "done", "NEXT"))

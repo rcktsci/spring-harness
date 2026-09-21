@@ -7,9 +7,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
 import se.rocketscien.harness.BaseApplicationTest;
+import se.rocketscien.harness.common.AesGcmEncryption;
 import se.rocketscien.harness.common.IdGenerator;
 import se.rocketscien.harness.session.StateSessionService;
 import se.rocketscien.harness.task.TaskRegistry;
+import se.rocketscien.harness.tests.task.TaskTestFixtures;
 import se.rocketscien.harness.tests.workflow.WorkflowTestFixtures;
 
 import java.nio.charset.StandardCharsets;
@@ -56,7 +58,7 @@ class TaskWakeDispatcherStopTest extends BaseApplicationTest {
                         + " VALUES (?, ?, ?, ?, 1, now())",
                 credentialsId, "creds-" + credentialsId,
                 environment.getRequiredProperty("wiremock.llm.url") + "/v1",
-                se.rocketscien.harness.common.AesGcmEncryption.encrypt(
+                AesGcmEncryption.encrypt(
                         "sk-test", "0123456789abcdef0123456789abcdef".getBytes(StandardCharsets.UTF_8)));
         UUID modelId = idGenerator.newUuidV7();
         jdbcTemplate.update(
@@ -118,7 +120,7 @@ class TaskWakeDispatcherStopTest extends BaseApplicationTest {
                 List.of(
                         WorkflowTestFixtures.transition(stateCode, "done", "NEXT"),
                         WorkflowTestFixtures.transition(stateCode, "failed", "ERROR")));
-        UUID revisionId = se.rocketscien.harness.tests.task.TaskTestFixtures.insertRevision(
+        UUID revisionId = TaskTestFixtures.insertRevision(
                 jdbcTemplate, idGenerator, graph, stateCode);
         UUID owner = WorkflowTestFixtures.insertAppUser(jdbcTemplate, idGenerator);
         return taskRegistry.createTask(new TaskRegistry.CreateTaskCommand(

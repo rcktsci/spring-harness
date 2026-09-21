@@ -12,6 +12,7 @@ import se.rocketscien.harness.session.MessageKind;
 import se.rocketscien.harness.session.SessionMessageEntity;
 import se.rocketscien.harness.session.SessionMessageId;
 import se.rocketscien.harness.session.SessionStore;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Instant;
 import java.util.List;
@@ -28,7 +29,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SessionPromptBuilderTest {
 
     private final SessionPromptBuilder builder =
-            new SessionPromptBuilder(tools.jackson.databind.json.JsonMapper.builder().build());
+            new SessionPromptBuilder(JsonMapper.builder().build());
     private final UUID sessionId = UUID.randomUUID();
 
     @Test

@@ -10,6 +10,7 @@ import se.rocketscien.harness.api.gen.model.WorkflowDto;
 import se.rocketscien.harness.api.gen.model.WorkflowPage;
 import se.rocketscien.harness.api.gen.model.WorkflowRevisionDto;
 import se.rocketscien.harness.config.LimitsProperties;
+import se.rocketscien.harness.workflow.InvalidCursorException;
 import se.rocketscien.harness.workflow.WorkflowRegistry;
 import se.rocketscien.harness.workflow.WorkflowRegistry.WorkflowRevision;
 
@@ -39,7 +40,7 @@ public class WorkflowsController implements WorkflowsApi {
         try {
             result = workflows.list(new WorkflowRegistry.WorkflowSearchCriteria(
                     cursor, clampLimit(limit)));
-        } catch (se.rocketscien.harness.workflow.InvalidCursorException e) {
+        } catch (InvalidCursorException e) {
             throw cursorInvalid();
         }
         WorkflowPage page = new WorkflowPage(result.items().stream()

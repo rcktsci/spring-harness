@@ -127,6 +127,36 @@ class RestartScanTest extends BaseApplicationTest {
         containers.removeContainer(liveSession.id());
     }
 
+    @Test
+    void orphanSubagentContainerRemovedWhileParentAndSiblingsLive() {
+        // R.3: субагентские контейнеры harness-<subSessionId> — тот же рестарт-скан (плоский
+        // по session.id); осиротевший контейнер ребёнка удаляется, живые родитель/ребёнок — нет
+        Session parent = newSession();
+        containers.ensureContainer(parent.id());
+        String agentKey = jdbcTemplate.queryForObject(
+                "SELECT a.key FROM session s JOIN agent a ON a.id = s.agent_revision_id WHERE s.id = ?",
+                String.class, parent.id());
+        Session liveChild = sessionStore.createChildSession(parent.id(), agentKey, "Живой субагент");
+        Session orphanChild = sessionStore.createChildSession(parent.id(), agentKey, "Осиротевший субагент");
+        containers.ensureContainer(liveChild.id());
+        containers.ensureContainer(orphanChild.id());
+
+        // Ребёнок осиротел (строки session нет) — родитель и второй ребёнок живы
+        jdbcTemplate.update("DELETE FROM session WHERE id = ?", orphanChild.id());
+
+        restartScanRunner.restartScan();
+
+        assertThat(containers.isRunning(orphanChild.id()))
+                .as("контейнер осиротевшего субагента удалён").isFalse();
+        assertThat(containers.isRunning(liveChild.id()))
+                .as("контейнер живого субагента остаётся").isTrue();
+        assertThat(containers.isRunning(parent.id()))
+                .as("контейнер живого родителя остаётся").isTrue();
+
+        containers.removeContainer(liveChild.id());
+        containers.removeContainer(parent.id());
+    }
+
     private Session newSession() {
         return ExecutionFixtures.newSession(jdbcTemplate, sessionStore, idGenerator, environment);
     }

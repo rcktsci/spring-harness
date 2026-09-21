@@ -1,11 +1,15 @@
 package se.rocketscien.harness.tests.execution.task;
 
+import com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder;
+import com.github.tomakehurst.wiremock.stubbing.Scenario;
+import lombok.SneakyThrows;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
 import se.rocketscien.harness.BaseApplicationTest;
+import se.rocketscien.harness.common.AesGcmEncryption;
 import se.rocketscien.harness.common.IdGenerator;
 import se.rocketscien.harness.execution.TurnManager;
 import se.rocketscien.harness.session.MessageKind;
@@ -17,6 +21,7 @@ import se.rocketscien.harness.tests.workflow.WorkflowTestFixtures;
 import se.rocketscien.harness.tests.execution.DockerTestSupport;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -42,10 +47,10 @@ class AgentTransitionToolTest extends BaseApplicationTest {
 
     /** Тот же ключ, что harness.llm.encryption-keys.1 в application-test.yml. */
     private static final byte[] LLM_KEY =
-            "0123456789abcdef0123456789abcdef".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            "0123456789abcdef0123456789abcdef".getBytes(StandardCharsets.UTF_8);
 
     /** Сценарий WireMock: bootstrap-ход (STARTED) → USER-ход с transition → финальный текст. */
-    private static final String ST_BOOTSTRAP = com.github.tomakehurst.wiremock.stubbing.Scenario.STARTED;
+    private static final String ST_BOOTSTRAP = Scenario.STARTED;
     private static final String ST_AWAIT_USER = "await-user";
     private static final String ST_FINAL = "final-answer";
     /** Расширенная цепочка J-1: bootstrap-текст → долгий bash → transition → финал. */
@@ -320,7 +325,7 @@ class AgentTransitionToolTest extends BaseApplicationTest {
      * @param userTurnResponse ответ LLM на первый раунд USER-хода (null — ход будет без LLM-вызова)
      */
     private Session bootstrapTurn(UUID taskId,
-                                  com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder userTurnResponse) {
+                                  ResponseDefinitionBuilder userTurnResponse) {
         stubFor(ST_BOOTSTRAP, sse(textChunk("готов"), usageChunk()));
         if (userTurnResponse != null) {
             stubFor(ST_AWAIT_USER, userTurnResponse);
@@ -335,7 +340,7 @@ class AgentTransitionToolTest extends BaseApplicationTest {
     }
 
     /** Ответ-переход для USER-хода (финальный текст — следующий раунд из ST_FINAL). */
-    private static com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder transitionAnswer(
+    private static ResponseDefinitionBuilder transitionAnswer(
             String reason) {
         return sse(toolCallEvent("call-1", transitionJson("checks", reason), 0));
     }
@@ -356,7 +361,7 @@ class AgentTransitionToolTest extends BaseApplicationTest {
         return seq;
     }
 
-    private void stubFor(String state, com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder response) {
+    private void stubFor(String state, ResponseDefinitionBuilder response) {
         var builder = post(urlEqualTo(PATH)).inScenario("turn").whenScenarioStateIs(state)
                 .willReturn(response);
         if (!ST_FINAL.equals(state)) {
@@ -446,12 +451,12 @@ class AgentTransitionToolTest extends BaseApplicationTest {
                 graph, "plan", "plan", "AGENT", "RUNNING", false);
     }
 
-    @lombok.SneakyThrows
+    @SneakyThrows
     private static String encrypt(String value) {
-        return se.rocketscien.harness.common.AesGcmEncryption.encrypt(value, LLM_KEY);
+        return AesGcmEncryption.encrypt(value, LLM_KEY);
     }
 
-    private static com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder sse(
+    private static ResponseDefinitionBuilder sse(
             String... events) {
         StringBuilder body = new StringBuilder();
         for (String event : events) {

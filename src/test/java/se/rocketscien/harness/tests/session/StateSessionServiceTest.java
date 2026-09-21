@@ -13,6 +13,7 @@ import se.rocketscien.harness.task.Task;
 import se.rocketscien.harness.task.TaskRegistry;
 import se.rocketscien.harness.tests.task.TaskTestFixtures;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -113,11 +114,11 @@ class StateSessionServiceTest extends BaseApplicationTest {
                 ready.await(5, TimeUnit.SECONDS);
                 return stateSessions.findOrCreate(task.id(), "plan", pinRevision());
             };
-            List<Future<Session>> results = new java.util.ArrayList<>();
+            List<Future<Session>> results = new ArrayList<>();
             for (int i = 0; i < competitors; i++) {
                 results.add(pool.submit(attempt));
             }
-            List<Session> sessions = new java.util.ArrayList<>();
+            List<Session> sessions = new ArrayList<>();
             for (Future<Session> result : results) {
                 sessions.add(result.get(15, TimeUnit.SECONDS));
             }

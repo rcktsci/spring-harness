@@ -1,5 +1,6 @@
 package se.rocketscien.harness.tests.api;
 
+import com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder;
 import com.github.tomakehurst.wiremock.client.WireMock;
 import com.github.tomakehurst.wiremock.stubbing.Scenario;
 import org.junit.jupiter.api.BeforeEach;
@@ -145,7 +146,7 @@ class AsyncLateResultApiTest extends BaseApplicationTest {
                 + "\"choices\":[{\"index\":0,\"delta\":{\"content\":\"" + content + "\"},\"finish_reason\":null}]}";
     }
 
-    private static com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder sse(String body) {
+    private static ResponseDefinitionBuilder sse(String body) {
         return WireMock.aResponse()
                 .withStatus(200)
                 .withHeader("Content-Type", "text/event-stream")

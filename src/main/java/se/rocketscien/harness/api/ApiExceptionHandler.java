@@ -1,8 +1,10 @@
 package se.rocketscien.harness.api;
 
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.ConstraintViolationException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.MessageSourceResolvable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
@@ -151,8 +153,8 @@ public class ApiExceptionHandler {
     }
 
     /** Параметровые ограничения (@Min на @RequestParam) через @Validated-прокси интерфейса. */
-    @ExceptionHandler(jakarta.validation.ConstraintViolationException.class)
-    public void constraintViolation(jakarta.validation.ConstraintViolationException exception,
+    @ExceptionHandler(ConstraintViolationException.class)
+    public void constraintViolation(ConstraintViolationException exception,
                                     HttpServletResponse response) throws IOException {
         List<ApiValidationException.ValidationError> errors = exception.getConstraintViolations().stream()
                 .map(violation -> new ApiValidationException.ValidationError(
@@ -256,7 +258,7 @@ public class ApiExceptionHandler {
                 fieldError.getDefaultMessage() == null ? "Значение невалидно" : fieldError.getDefaultMessage());
     }
 
-    private String parameterPointer(org.springframework.context.MessageSourceResolvable error) {
+    private String parameterPointer(MessageSourceResolvable error) {
         String[] codes = error.getCodes();
         for (String code : codes == null ? new String[0] : codes) {
             int dot = code.lastIndexOf('.');

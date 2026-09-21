@@ -28,6 +28,7 @@ import se.rocketscien.harness.task.Task;
 import se.rocketscien.harness.task.TaskRegistry;
 import se.rocketscien.harness.task.TaskStateKind;
 import se.rocketscien.harness.task.TaskStatus;
+import se.rocketscien.harness.task.TaskTreeNode;
 import se.rocketscien.harness.task.WorkflowRevisionNotFoundException;
 import se.rocketscien.harness.workflow.WorkflowRegistry;
 import se.rocketscien.harness.workflow.WorkflowRegistry.RevisionSummary;
@@ -265,7 +266,7 @@ public class TasksController implements TasksApi {
 
     @Override
     public ResponseEntity<TaskTreePage> getTaskTree(UUID id, Integer depth) {
-        se.rocketscien.harness.task.TaskTreeNode root = tasks.getTree(id, depth);
+        TaskTreeNode root = tasks.getTree(id, depth);
         return ResponseEntity.ok(new TaskTreePage(List.of(ApiMappers.toNode(root))));
     }
 

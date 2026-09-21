@@ -20,6 +20,7 @@ import se.rocketscien.harness.session.SessionStore;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -78,7 +79,7 @@ public class SessionMessagesController implements SessionMessagesApi {
 
         Set<UUID> authorIds = page.stream()
                 .map(SessionMessageEntity::getAuthorUserId)
-                .filter(java.util.Objects::nonNull)
+                .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
         Map<UUID, String> usernames = users.usernames(authorIds);
 

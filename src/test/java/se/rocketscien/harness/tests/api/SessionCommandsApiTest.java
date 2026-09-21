@@ -8,6 +8,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import se.rocketscien.harness.BaseApplicationTest;
 import se.rocketscien.harness.common.IdGenerator;
 import se.rocketscien.harness.testclient.ApiClient;
+import se.rocketscien.harness.testclient.ApiException;
 import se.rocketscien.harness.testclient.api.SessionCommandsApi;
 import se.rocketscien.harness.testclient.api.SessionsApi;
 import se.rocketscien.harness.testclient.model.CreateSessionRequest;
@@ -85,7 +86,7 @@ class SessionCommandsApiTest extends BaseApplicationTest {
 
     @Test
     void compactUnknownSessionReturns404() {
-        assertThrows(se.rocketscien.harness.testclient.ApiException.class,
+        assertThrows(ApiException.class,
                 () -> new SessionCommandsApi(aliceClient).compactSession(UUID.randomUUID()));
     }
 
@@ -106,7 +107,7 @@ class SessionCommandsApiTest extends BaseApplicationTest {
 
     @Test
     void stopUnknownSessionReturns404() {
-        assertThrows(se.rocketscien.harness.testclient.ApiException.class,
+        assertThrows(ApiException.class,
                 () -> new SessionCommandsApi(aliceClient).stopSession(UUID.randomUUID()));
     }
 }
