@@ -15,9 +15,9 @@
 
 ## 3. Пачка U — Workspace-download + canonical-гвард
 
-- [ ] 3.1 `api/WorkspaceFilesController` (реализация сгенерированного интерфейса): резолв относительно `workspaces/sessions/{sessionId}`, гвард, safe-лист, pre-stat 413, streaming.
-- [ ] 3.2 `WorkspacePathGuard` (в `api` или `common`): посегментный symlink-чек + canonical-резолв + containment + `NOFOLLOW_LINKS` на финальный компонент. Unit-тесты: `..`-эскейп, symlink-наружу, symlink-внутри (запрещён — NOFOLLOW), каталог, абсолютный путь, case-insensitive расширения.
-- [ ] 3.3 Интеграционные тесты на SERVER-сессии: живой файл, 404/422/413/422-extension; каталог-фикстуры в тестовом workspace.
+- [x] 3.1 `api/WorkspaceFilesController` (реализация сгенерированного интерфейса): резолв относительно `workspaces/sessions/{sessionId}`, гвард, safe-лист, pre-stat 413, streaming.
+- [x] 3.2 `WorkspacePathGuard` (в `api` или `common`): посегментный symlink-чек + canonical-резолв + containment + `NOFOLLOW_LINKS` на финальный компонент. Unit-тесты: `..`-эскейп, symlink-наружу, symlink-внутри (запрещён — NOFOLLOW), каталог, абсолютный путь, case-insensitive расширения.
+- [x] 3.3 Интеграционные тесты на SERVER-сессии: живой файл, 404/422/413/422-extension; каталог-фикстуры в тестовом workspace.
 
 ## 4. Пачка V — client-tool-bridge и маршрутизация
 

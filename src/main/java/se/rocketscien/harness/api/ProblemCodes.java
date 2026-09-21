@@ -31,7 +31,6 @@ final class ProblemCodes {
     static final String FILE_NOT_FOUND = ProblemCode.FILE_NOT_FOUND.getValue();
     static final String PATH_INVALID = ProblemCode.PATH_INVALID.getValue();
     static final String EXTENSION_NOT_ALLOWED = ProblemCode.EXTENSION_NOT_ALLOWED.getValue();
-    static final String NOT_IMPLEMENTED = ProblemCode.NOT_IMPLEMENTED.getValue();
 
     private ProblemCodes() {
     }

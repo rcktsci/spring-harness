@@ -197,10 +197,27 @@ public class ApiExceptionHandler {
                 exception.getMessage(), null);
     }
 
-    /** Метод контракта ещё не реализован (stub пачки 1; §6 — переходный not-implemented). */
-    @ExceptionHandler(ApiNotImplementedException.class)
-    public void notImplemented(ApiNotImplementedException exception, HttpServletResponse response) throws IOException {
-        problemWriter.write(response, HttpStatus.NOT_IMPLEMENTED, ProblemCodes.NOT_IMPLEMENTED,
+    /** Canonical-гвард отклонил путь скачивания (§8: 422 path-invalid). */
+    @ExceptionHandler(WorkspacePathInvalidException.class)
+    public void workspacePathInvalid(WorkspacePathInvalidException exception,
+                                     HttpServletResponse response) throws IOException {
+        problemWriter.write(response, HttpStatus.UNPROCESSABLE_ENTITY, ProblemCodes.PATH_INVALID,
+                exception.getMessage(), null);
+    }
+
+    /** Расширение вне safe-листа скачивания (§8: 422 extension-not-allowed). */
+    @ExceptionHandler(ExtensionNotAllowedException.class)
+    public void extensionNotAllowed(ExtensionNotAllowedException exception,
+                                    HttpServletResponse response) throws IOException {
+        problemWriter.write(response, HttpStatus.UNPROCESSABLE_ENTITY, ProblemCodes.EXTENSION_NOT_ALLOWED,
+                exception.getMessage(), null);
+    }
+
+    /** Файл назначения отсутствует в workspace сессии (§8: 404 file-not-found). */
+    @ExceptionHandler(WorkspaceFileNotFoundException.class)
+    public void workspaceFileNotFound(WorkspaceFileNotFoundException exception,
+                                      HttpServletResponse response) throws IOException {
+        problemWriter.write(response, HttpStatus.NOT_FOUND, ProblemCodes.FILE_NOT_FOUND,
                 exception.getMessage(), null);
     }
 

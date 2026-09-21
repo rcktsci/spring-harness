@@ -81,6 +81,10 @@ harness:
     # Образ собирается DockerTestSupport'ом из docker/Dockerfile до первого docker-теста.
     helper-image: harness-helper:test
     workspace-root: ${java.io.tmpdir}/harness-it-workspaces
+  workspace:
+    download:
+      # Малый лимит: 413-сценарий проверяется крошечным файлом (спека workspace-download).
+      max-bytes: 1KB
 
 spring:
   liquibase:
