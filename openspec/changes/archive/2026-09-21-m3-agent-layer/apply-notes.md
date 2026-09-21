@@ -529,5 +529,95 @@ overkill для M3 (одного boolean достаточно, точка эво
 - `mvn clean verify` — BUILD SUCCESS, **489 тестов**, 0 failures/errors/skipped
   (+1 к предыдущему прогону пачки R — `RestartScanTest`, +2 — аудитор/коллизия MCP).
 
+## Пачка S. Приёмка M3 (2026-09-21)
+
+### S.1 — ArchUnit-расширения
+
+- `ArchitectureRulesTest`: в слои добавлены `agent` (агентский рантайм — как `execution.impl`:
+  зависит от контрактов `execution`/`session`, от него никто не зависит) и `mcp` (технический,
+  однонаправленный `execution → mcp`, `mayNotAccessAnyLayer`); `execution` допущен к `mcp`.
+- `.impl`-правило параметризовано по `agent`/`mcp`; `noDomainModuleDependsOnApi` и граф циклов
+  (`DOMAIN_CLASSES`) распространены на оба пакета. Циклов нет (agent → execution → mcp — DAG).
+- Негативный тест `agentImplViolationIsCaught` + фикстуры `agent/impl/ArchUnitAgentImplFixture`
+  (test-classpath) и `api/ArchUnitAgentImplViolator` доказывают, что `api → agent.impl` ловится
+  (паттерн M.1). Позитивные правила на `target/classes` фикстуру не видят.
+- Прогон: `ArchitectureRulesTest` — 16/16 (было 15: +2 параметра agent/mcp, +1 негативный).
+
+### S.2 — `AcceptanceMakeBillingTest` (критерий M3)
+
+Детерминированный e2e на живом Keycloak (alice) + WireMock-LLM + реальном helper-контейнере.
+Оркестратор `make-billing` (`permissions_jsonb.metaTools=true`), FREE-сессия по REST.
+
+- **Фаза 1** (USER «Сделай биллинг»): оркестратор metaTool'ами `create_workflow` (корневой граф
+  `stage1`/`stage2` `WAIT_TASKS` TAGGED + AGENT-разборщик `review` → done/failed) и `create_task`
+  создаёт корневую задачу.
+- **Фаза 2**: 6× `create_subtask` (analytics, contract-first, impl-1, impl-2, tests, e2e) —
+  parent = реальный id root, теги stage1/stage2; подзадачи входят в AGENT-состояния, для каждой
+  бутстрапится STATE-сессия.
+- **Фаза 3**: `set_dependency` (tests ← impl-1, батч-печка) + `spawn_subagent` (analyst, depth 1).
+- **Стейдж-барьеры**: stage1 (ALL_SUCCESS/TAGGED(stage1)) закрывается NEXT после analytics+contract;
+  impl-2 завершается FAILED → stage2 закрывается ERROR → AGENT-сессия разборщика (`review`) →
+  разборщик переводит задачу `done`; финал root — SUCCESS.
+- **Async** (D-60/D-65): подзадача `tests` вызывает `bash` в helper-контейнере (`sleep 12` >
+  окно 10 c) → `ASYNC_ACCEPTED`/`PARKED_ASYNC` → поздний `TOOL_RESULT late=true` (output
+  `tests-ok`) → wake нового Turn → USER-ход с `transition`.
+- **Проверки**: 9 переходов (root 3 + подзадачи 6), kind-ы рёбер (`NEXT`/`ERROR`), failed-ids в
+  reason ERROR-ребра, SSE-снапшот корневой задачи (`stage2 → review → done` + первый
+  `task.status`), ребро `task_dependency`, поздний результат и артефакт `tests.txt` в workspace
+  STATE-сессии, owner-наследование и depth=1 у сессии аналитика.
+
+Отклонения/упрощения S.2 (сознательные, для детерминизма):
+
+- **Скрипты агентов = WireMock-сценарии** (per-agent): живая LLM недоступна; stubs эмулируют
+  ответы модели, включая чтение tool-результатов. Оркестратор вызывает metaTools реальными
+  ходами 3-х USER-фаз; id root/подзадач тест подставляет в аргументы между фазами (без
+  шаблонов WireMock) — детерминированно и без зависимости от формата tool-ответов.
+- **Рабочие workflow-ревизии подзадач — фикстура среды** (как ревизии агентов/LLM-модель):
+  оркестратор создаёт только корневой workflow; сделано ради компактности сценария
+  (оркестраторский путь `create_workflow` проверен на корневом графе, `OrchestratorMetaToolsTest`
+  покрывает остальные). `OrchestratorTools`-реализация не менялась.
+- **USER-сообщения в STATE-сессии** дописываются тестом между ходами (как M2-приёмка) — иначе
+  `transition` заблокирован гейтом D-59 (`instructionSource=USER`).
+- **`set_dependency`** проверяет метаинструмент и атомарное ребро `task_dependency`; у барьеров
+  scope = `TAGGED` (workflow-domain §3 — «барьеры на группах подзадач»), поэтому ребро не
+  участвует в закрытии стейджей (BLOCKED_STATUS в модели отсутствует — зависимости влияют
+  только на `WAIT_TASKS`-scope `BLOCKED_BY`).
+- **Стабилизация чужого флаки-теста**: `AsyncToolExecutorTest` публикует поздний результат из
+  фонового virtual-thread, а стабы-списки (`StubSessionStore.appended`, `StubTurnManager.started`)
+  были `ArrayList` — гонка чтения в `containsExactly` изредка роняла `mvn verify` под нагрузкой.
+  Заменены на `CopyOnWriteArrayList` (правка только тест-стаба, прод-путь не задет).
+
+### S.3 — docs sync + ADR
+
+- `docs/design/decisions.md`: добавлены **D-60…D-70** (формат решение → альтернативы → почему;
+  D-47…D-59 не дублировались, нумерация продолжена). D-70 — частичный supersede D-41.
+- `docs/design/workflow-domain.md` §6: доступ оркестраторских инструментов через
+  `permissions_jsonb.metaTools` (D-62/D-70), гейт/`forbidden (no-metaTools)`, relation к D-59/D-69.
+- `docs/design/agent-tools.md` §2/§2b/§3/§4: `spawn_subagent` — только `metaTools=true`;
+  §2b-сигнатуры синхронизированы с реализацией (`start_state?`, `description?`, батч
+  `set_dependency`, `{triggerId,url}`); `allowedTools`/`workspaceScope` помечены «вне M3» (§T.1),
+  `metaTools` — M3-поле; `tools_jsonb.mcp` = `[{server, include?, exclude?}]`.
+- `docs/design/api-contracts.md` §4.1: doc-clarification `TaskDto.owner`/`author` = username уже
+  внесена фикс-раундом P (P-2) — сверено, правок не потребовалось.
+- `AGENTS.md`: M3 завершён (D-60…D-70, слои ArchUnit `agent`/`mcp`, 493 теста), следующий шаг — M4.
+
+### S.4 — Verify
+
+- `mvn clean verify` — BUILD SUCCESS, **493 теста**, 0 failures/errors/skipped
+  (489 пачки R + S.1 `+3` [2 параметра + негативный] + S.2 `+1`; флаки `AsyncToolExecutorTest`
+  стабилизирован `CopyOnWriteArrayList`).
+- Docker-контейнеры (Postgres/Keycloak/helper) — на месте; async-bash реально исполнялся.
+
+### S.5 — Архив
+
+- `openspec archive m3-agent-layer --yes` → спеки `async-instruments`, `subagent-lifecycle`,
+  `orchestrator-meta-tools`, `mcp-client`, `agent-turn`, `session-api` в `openspec/specs/`.
+
+### Критерий M3 — выполнен
+
+Сценарий «Сделай биллинг» (оркестратор режет на подзадачи через metaTools, стейджи `WAIT_TASKS`,
+провал подзадачи → ERROR в сессию-разборщик → SUCCESS) проходит на живом Keycloak + WireMock-LLM +
+реальном helper-контейнере (async-bash с поздним результатом).
+
 
 

@@ -26,13 +26,13 @@ import se.rocketscien.harness.session.TurnOutcome;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -262,7 +262,8 @@ class AsyncToolExecutorTest {
 
         private final UUID sessionId = UUID.randomUUID();
         private final boolean toolResultPresent;
-        private final List<Appended> appended = new ArrayList<>();
+        /** Публикация позднего результата — фон: список читается из другого потока, copy-on-write. */
+        private final List<Appended> appended = new CopyOnWriteArrayList<>();
 
         StubSessionStore(boolean toolResultPresent) {
             this.toolResultPresent = toolResultPresent;
@@ -408,7 +409,8 @@ class AsyncToolExecutorTest {
 
     private static final class StubTurnManager implements TurnManager {
 
-        private final List<UUID> started = new ArrayList<>();
+        /** Wake зовётся из фонового потока публикации — copy-on-write (гонка флаки). */
+        private final List<UUID> started = new CopyOnWriteArrayList<>();
 
         List<UUID> started() {
             return started;

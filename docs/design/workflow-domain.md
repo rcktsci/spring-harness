@@ -67,6 +67,8 @@ transitions[]:
 
 `create_workflow` / `edit_workflow` (правка = новая ревизия), `create_task` (пин ревизии, params), `create_subtask`, `set_dependency` (blocked_by), `configure_trigger` (вебхук → задача по workflow). Сценарий «простая сессия» без задачи — обычная FREE-сессия с любым агентом.
 
+**Доступ** (M3, D-62/D-70): инструменты оркестратора внедряются в манифест только агентам с `permissions_jsonb.metaTools = true` (оркестратор). Для них D-59-гейт `instructionSource = USER` НЕ применяется — инструменты доступны в любом ходе (в т.ч. TOOL_RESULT-продолжении и реакции на WAIT_TASKS); без флага инструменты скрыты, явный вызов → `TOOL_RESULT forbidden (no-metaTools)`. D-70 частично supersede D-41: metaTools-гейт возвращается для оркестраторских инструментов; `transition` остаётся под D-59 в прежней силе, обычные агенты — под D-41. flag — per-agent-revision (D-31): субагентам не наследуется (D-69).
+
 ## 7. Вебхуки (stateless, capability-URL)
 
 - Эндпоинты (см. `api-contracts.md` §4.4): `POST /api/webhooks/tasks/{taskId}/{token}?source=…` и `POST /api/webhooks/triggers/{triggerId}/{token}`, где `token = HMAC(server_secret, kind + ':' + entityId)`.

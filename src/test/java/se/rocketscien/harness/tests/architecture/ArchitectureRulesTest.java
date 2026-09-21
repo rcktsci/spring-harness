@@ -6,6 +6,8 @@ import com.tngtech.archunit.lang.ArchRule;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import se.rocketscien.harness.agent.impl.ArchUnitAgentImplFixture;
+import se.rocketscien.harness.api.ArchUnitAgentImplViolator;
 import se.rocketscien.harness.api.ArchUnitForeignImplViolator;
 import se.rocketscien.harness.session.ArchUnitLayerViolator;
 import se.rocketscien.harness.task.TaskRegistry;
@@ -45,6 +47,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * ({@code ArchUnitForeignImplViolator}, {@code ArchUnitLayerViolator}, пара
  * {@code CycleFixtureA/B}) живут только в test-classpath и проверяются отдельными
  * импортами — позитивные правила на main-классах их не видят.</p>
+ *
+ * <p>M3 S.1: в слои добавлены {@code agent} (агентский рантайм — как {@code execution.impl}:
+ * зависит от контрактов execution/session, от него никто) и {@code mcp} (технический
+ * однонаправленный {@code execution → mcp}); {@code .impl}-правило и циклы распространены
+ * на оба пакета; негативный тест {@code agentImplViolationIsCaught} фиксирует, что
+ * {@code api → agent.impl} ловится ({@code mcp.impl} в main не существует — правило
+ * параметризовано вакуумно).</p>
  */
 class ArchitectureRulesTest {
 
@@ -56,6 +65,8 @@ class ArchitectureRulesTest {
     private static final String SESSION = BASE + ".session..";
     private static final String IDENTITY = BASE + ".identity..";
     private static final String INTELLIGENCE = BASE + ".intelligence..";
+    private static final String AGENT = BASE + ".agent..";
+    private static final String MCP = BASE + ".mcp..";
 
     private static final JavaClasses MAIN_CLASSES = new ClassFileImporter()
             .importPaths(Paths.get("target", "classes"));
@@ -63,7 +74,8 @@ class ArchitectureRulesTest {
     /** Доменные пакеты для проверки циклов: common/config — технические, из графа исключены. */
     private static final JavaClasses DOMAIN_CLASSES = new ClassFileImporter().importPackages(
             BASE + ".api", BASE + ".execution", BASE + ".task", BASE + ".workflow",
-            BASE + ".session", BASE + ".identity", BASE + ".intelligence");
+            BASE + ".session", BASE + ".identity", BASE + ".intelligence",
+            BASE + ".agent", BASE + ".mcp");
 
     private static final ArchRule MODULE_LAYERING = layeredArchitecture()
             .consideringOnlyDependenciesInLayers()
@@ -75,16 +87,23 @@ class ArchitectureRulesTest {
             .layer("session").definedBy(SESSION)
             .layer("identity").definedBy(IDENTITY)
             .layer("intelligence").definedBy(INTELLIGENCE)
+            .layer("agent").definedBy(AGENT)
+            .layer("mcp").definedBy(MCP)
             .whereLayer("api").mayOnlyAccessLayers("execution", "intelligence", "session", "identity", "task", "workflow")
-            .whereLayer("execution").mayOnlyAccessLayers("session", "identity", "task", "workflow", "intelligence")
+            .whereLayer("execution").mayOnlyAccessLayers("session", "identity", "task", "workflow", "intelligence", "mcp")
             .whereLayer("task").mayOnlyAccessLayers("identity")
             .whereLayer("workflow").mayOnlyAccessLayers("identity")
             .whereLayer("session").mayOnlyAccessLayers("identity")
             .whereLayer("identity").mayNotAccessAnyLayer()
+            .whereLayer("agent").mayOnlyAccessLayers("execution", "session", "identity", "task", "workflow",
+                    "intelligence", "mcp")
+            .whereLayer("mcp").mayNotAccessAnyLayer()
             .whereLayer("api").mayNotBeAccessedByAnyLayer()
             .as("Слои модулей: api → {execution, intelligence, session, identity, task(M2), workflow(M2)}; "
-                    + "execution → {session, identity, task, workflow, intelligence}; "
-                    + "session → identity; identity изолирована; от api никто не зависит");
+                    + "execution → {session, identity, task, workflow, intelligence, mcp(M3)}; "
+                    + "agent(M3) → execution-контракты (как execution.impl); mcp(M3) — технический, "
+                    + "однонаправленный execution → mcp; session → identity; identity изолирована; "
+                    + "от api никто не зависит");
 
     @Test
     void moduleLayeringIsRespected() {
@@ -94,7 +113,7 @@ class ArchitectureRulesTest {
     @Test
     void noDomainModuleDependsOnApi() {
         noClasses()
-                .that().resideInAnyPackage(EXECUTION, TASK, WORKFLOW, SESSION, IDENTITY, INTELLIGENCE)
+                .that().resideInAnyPackage(EXECUTION, TASK, WORKFLOW, SESSION, IDENTITY, INTELLIGENCE, AGENT, MCP)
                 .should().dependOnClassesThat().resideInAPackage(API)
                 .because("api — верхний слой, доменные модули о нём не знают")
                 .as("Ни один модуль не зависит от api")
@@ -112,10 +131,10 @@ class ArchitectureRulesTest {
     }
 
     @ParameterizedTest(name = "чужой .impl не импортируется: {0}")
-    @ValueSource(strings = {"session", "execution", "intelligence", "identity", "task", "workflow"})
+    @ValueSource(strings = {"session", "execution", "intelligence", "identity", "task", "workflow", "agent", "mcp"})
     void foreignImplPackageIsHiddenBehindContract(String module) {
         List<String> importers = new ArrayList<>(List.of(
-                API, EXECUTION, TASK, WORKFLOW, SESSION, IDENTITY, INTELLIGENCE));
+                API, EXECUTION, TASK, WORKFLOW, SESSION, IDENTITY, INTELLIGENCE, AGENT, MCP));
         importers.remove(BASE + "." + module + "..");
         noClasses()
                 .that().resideInAnyPackage(importers.toArray(new String[0]))
@@ -140,7 +159,7 @@ class ArchitectureRulesTest {
     @Test
     void foreignImplViolationIsCaught() {
         List<String> importers = new ArrayList<>(List.of(
-                API, EXECUTION, WORKFLOW, SESSION, IDENTITY, INTELLIGENCE));
+                API, EXECUTION, WORKFLOW, SESSION, IDENTITY, INTELLIGENCE, AGENT, MCP));
         ArchRule rule = noClasses()
                 .that().resideInAnyPackage(importers.toArray(new String[0]))
                 .should().dependOnClassesThat().resideInAPackage(BASE + ".task.impl..")
@@ -153,6 +172,25 @@ class ArchitectureRulesTest {
                 .hasMessageContaining("Имплементации модуля task скрыты за контрактом")
                 .hasMessageContaining("ArchUnitForeignImplViolator")
                 .hasMessageContaining("TaskRegistryImpl");
+    }
+
+    /** S.1: нарушение «чужой .impl» (api → agent.impl) роняет параметризованное правило. */
+    @Test
+    void agentImplViolationIsCaught() {
+        List<String> importers = new ArrayList<>(List.of(
+                API, EXECUTION, TASK, WORKFLOW, SESSION, IDENTITY, INTELLIGENCE, MCP));
+        ArchRule rule = noClasses()
+                .that().resideInAnyPackage(importers.toArray(new String[0]))
+                .should().dependOnClassesThat().resideInAPackage(BASE + ".agent.impl..")
+                .because("чужой .impl — внутренность модуля")
+                .as("Имплементации модуля agent скрыты за контрактом");
+
+        assertThatThrownBy(() -> rule.check(new ClassFileImporter().importClasses(
+                ArchUnitAgentImplViolator.class, ArchUnitAgentImplFixture.class)))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("Имплементации модуля agent скрыты за контрактом")
+                .hasMessageContaining("ArchUnitAgentImplViolator")
+                .hasMessageContaining("ArchUnitAgentImplFixture");
     }
 
     /** Нарушение слоёв (session → task) роняет MODULE_LAYERING. */

@@ -57,10 +57,28 @@
 
 ## §S. Приёмка M3
 
-- [ ] S.1 ArchUnit-расширения (после M2: `api → {task, workflow}` уже есть; M3 — `agent` пакет появится, добавить в allowed-layers + foreignImpl правило). Verify: violation-фикстуры ловятся.
-- [ ] S.2 `AcceptanceMakeBillingTest` — e2e M3-критерий: orchestrator-сессия `make-billing` → USER «Сделай биллинг» → orchestrator `create_task`/`create_subtask`/`set_dependency`/WAIT_TASKS-стейджи (analytics, contract, impl-1, impl-2, tests, e2e); одна из подзадач FAILED → ERROR в parent разборщик; SUCCESS. Тест с живым Keycloak + WireMock-LLM + реальным helper-контейнером. Проверки: ~6-10 переходов; снапшоты событий; финал SUCCESS.
-- [ ] S.3 `mvn clean verify` финальный прогон; `apply-notes.md` секция «Пачка M3»; ADR D-60…D-70 в `docs/design/decisions.md` (включая **D-70**: metaTools-гейт для оркестратора частично supersede D-41 — D-41 для обычных metaTools остаётся; формат: решение → альтернативы → почему; избегать дубля с D-59); синхронизация `docs/design/agent-tools.md` §2/§4 с M3-решениями (доступность `spawn_subagent` = только `metaTools=true`; `allowedTools`/`workspaceScope` — вне M3); sync `docs/design/workflow-domain.md` §6 + `docs/design/api-contracts.md` §4.1 (`TaskDto.owner` = username, как SessionDto §2 — D-41) в секции «M.3 (apply-notes)»; `AGENTS.md` — M3 завершён, следующий M4 (clients+relay).
-- [ ] S.4 `openspec archive m3-agent-layer --yes` → спеки в `openspec/specs/{async-instruments,subagent-lifecycle,orchestrator-meta-tools,mcp-client,agent-turn,session-api}/spec.md`. Commit + push.
+> Пачка выполнена 2026-09-21 (dev-субагент). Разбиение по факту: S.1 ArchUnit, S.2 acceptance,
+> S.3 docs+ADR, S.4 verify+apply-notes, S.5 архив. Детали — `apply-notes.md` §S.
+
+- [x] S.1 ArchUnit-расширения: слои `agent` (агентский рантайм) и `mcp` (технический,
+  однонаправленный `execution → mcp`) в allowed-layers + слои/циклы/`noDomainModuleDependsOnApi`;
+  `.impl`-правило параметризовано `agent`/`mcp`; негативный тест `api → agent.impl` ловится
+  (фикстуры test-classpath). Verify: ArchitectureRulesTest 16/16.
+- [x] S.2 `AcceptanceMakeBillingTest` — e2e M3-критерий: orchestrator-сессия `make-billing`
+  (`metaTools=true`) → USER «Сделай биллинг» → оркестратор `create_workflow`/`create_task`/
+  `create_subtask`×6/`set_dependency`/`spawn_subagent`; стейджи `WAIT_TASKS` TAGGED(stage1)/TAGGED(stage2);
+  `impl-2` FAILED → ERROR в AGENT-разборщика → SUCCESS. Async: `tests` — реальный bash в helper-контейнере
+  превышает окно → поздний `TOOL_RESULT late`. Проверки: 9 переходов, SSE-снапшот, owned-depth spawn,
+  ребро зависимости, артефакт workspace. Verify: тест зелёный.
+- [x] S.3 docs sync + ADR: D-60…D-70 в `docs/design/decisions.md`; `workflow-domain.md` §6
+  (metaTools D-62/D-70); `agent-tools.md` §2/§2b/§3/§4 (spawn только `metaTools=true`;
+  `allowedTools`/`workspaceScope` — вне M3; `tools_jsonb.mcp` форма); `api-contracts.md` §4.1
+  (TaskDto.owner = username — сверено, уже P-2); `AGENTS.md` — M3 завершён, следующий M4.
+- [x] S.4 `mvn clean verify` финальный прогон — BUILD SUCCESS, 493 теста; `apply-notes.md` секция
+  «Пачка S» (acceptance summary + критерий M3 выполнен + число тестов + отклонения).
+- [x] S.5 `openspec archive m3-agent-layer --yes` → спеки в
+  `openspec/specs/{async-instruments,subagent-lifecycle,orchestrator-meta-tools,mcp-client,agent-turn,session-api}/spec.md`.
+  Commit + push (оркестратор).
 
 ## §T. Отложено (N/I — не выполняется в M3)
 

@@ -55,9 +55,10 @@
 
 ## Текущее состояние
 
-- Дизайн-базис завершён (D-01…D-59). **M1 «Ядро сессий» завершён и заархивирован** (2026-09-18-m1-session-core). **M2 «Workflow-движок» завершён** (openspec/changes/m2-workflow-engine, пачки D/H/I/J/K/L/M): реестры workflow/task, движок состояний (BASH/WAIT_WEBHOOK/WAIT_TASKS, EVENT+POLL-wake, таймаут-скан), STATE-сессии с резюмом, мета-инструмент `transition` (гейт D-59), REST/SSE/вебхуки/триггеры на замороженной спеке (генерация 7.25), приёмочный e2e «двухфазное ревью с возвратом»; D-47…D-59 — в docs/design/decisions.md. 439 тестов зелёных. Архивирование change (N.1) — не выполнено.
-- Contract-first отработан на M1+M2: спека заморожена (ревью-цикл) → генерация 7.25 → контроллеры на сгенерированных интерфейсах → e2e через сгенерированный клиент.
-- Следующий шаг: **M3 Агентский слой** — @Tool + MCP + async-инструменты (объём: docs/design/roadmap.md, контракты в openspec/specs/; D-42 — порядок клиентов гибкий).
+- Дизайн-базис завершён (D-01…D-70). **M1 «Ядро сессий» завершён и заархивирован** (2026-09-18-m1-session-core). **M2 «Workflow-движок» завершён** (openspec/changes/archive/2026-09-20-m2-workflow-engine): реестры workflow/task, движок состояний, STATE-сессии, `transition` (D-59), REST/SSE/вебхуки/триггеры, приёмочный e2e; D-47…D-59.
+- **M3 «Агентский слой» завершён** (openspec/changes/archive/…-m3-agent-layer, пачки N/O/P/Q/R/S): async-инструменты (окно → `ASYNC_ACCEPTED` → поздний `TOOL_RESULT late`, рестарт-скан + `AsyncTimeoutWatcher`), `spawn_subagent` + `read_compacted` + каскадная отмена поддерева, оркестратор-metaTools (`permissions_jsonb.metaTools`, гейт D-70), MCP-клиент (SDK 2.0.0, namespace `server.tool`), приёмочный e2e «Сделай биллинг»; D-60…D-70 — в docs/design/decisions.md. Архитектурные слои ArchUnit расширены `agent`/`mcp`. **493 теста** зелёных (`mvn clean verify`).
+- Contract-first отработан на M1+M2+M3: спека заморожена (ревью-цикл) → генерация 7.25 → контроллеры на сгенерированных интерфейсах → e2e через сгенерированный клиент.
+- Следующий шаг: **M4 «Клиенты и релей»** — attach-CLI полный (tree/inject/stop/compact, задачи), CLIENT_EXEC-релей (WS-протокол, PARKED_CLIENT), скачивание workspace-файлов (объём: docs/design/roadmap.md, контракты в openspec/specs/; D-42 — порядок клиентов гибкий).
 ## Ключевые документы
 
 - [docs/glossary.md](docs/glossary.md) — глоссарий: термины, типы, инварианты.
