@@ -144,6 +144,8 @@ root-сессии; сессии задач (STATE, ролевой агент) �
 Повторный `register` с того же соединения — idempotent success. Takeover: тот же principal
 на живой сессии → старое закрывается 4409 `superseded`, новое получает `registered`;
 `unregister` — CAS по connection-identity, протухший сокет не вытесняет новое (D-78).
+Нераспознаваемая декларация (аномальный `inputSchema` и пр.) — протокольный отказ:
+close 4403 `protocol`.
 
 ### 5.3 Маршрутизация tool-фреймов
 
@@ -159,6 +161,9 @@ root-сессии; сессии задач (STATE, ролевой агент) �
 Tool-уровневые отказы отдаются агенту как `TOOL_RESULT ERROR <code>` (§6): `tool-not-available`
 (инструмент не резолвится), `params-schema` (`args` не прошли `inputSchema` — клиент не
 дёргается), `tool-timeout` (нет ответа за `harness.relay.tool-call-timeout`).
+`tool.result.exitCode` — информативное поле: non-zero exit **не** ошибка инструмента (та же
+семантика, что у native `bash`, agent-tools §5) — финальный `TOOL_RESULT` получает статус OK;
+`ERROR` — только для протокольной ошибки/таймаута/LOST.
 
 ### 5.4 Heartbeat и разрыв
 

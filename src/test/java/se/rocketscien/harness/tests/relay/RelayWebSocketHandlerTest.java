@@ -180,11 +180,15 @@ class RelayWebSocketHandlerTest {
         when(sessionStore.findSession(first)).thenReturn(Optional.of(target(first, SessionKind.FREE, null)));
         when(sessionStore.findSession(second)).thenReturn(Optional.of(target(second, SessionKind.FREE, null)));
 
-        register(handler, session, first, "[]");
-        register(handler, session, second, "[]");
+        register(handler, session, first, "[{\"name\":\"a\"}]");
+        register(handler, session, second, "[{\"name\":\"b\"}]");
 
         assertThat(registry.findForSession(first)).isEmpty();
         assertThat(registry.findForSession(second)).contains(connection);
+        // V-1: клиентский оверлей покинутой сессии тоже снят, новой — наполнен.
+        assertThat(handler.clientRegistry().isClientSession(first)).isFalse();
+        assertThat(handler.clientRegistry().isClientSession(second)).isTrue();
+        assertThat(handler.clientRegistry().resolve(second, "b")).isPresent();
     }
 
     @Test
@@ -207,7 +211,9 @@ class RelayWebSocketHandlerTest {
     private TestHandler handler(Duration heartbeatInterval) {
         RelayProperties properties = new RelayProperties(heartbeatInterval, Duration.ofMinutes(5),
                 Duration.ofSeconds(10), DataSize.ofKilobytes(512), List.of("*"));
-        return new TestHandler(sessionStore, registry, properties, connection);
+        ClientToolRegistry clientRegistry = new ClientToolRegistry(sessionStore, registry,
+                new ClientToolAdapter(JsonMapper.builder().build()), properties);
+        return new TestHandler(sessionStore, registry, clientRegistry, properties, connection);
     }
 
     private WebSocketSession authenticatedSession(TestHandler handler) {
@@ -257,13 +263,18 @@ class RelayWebSocketHandlerTest {
     private static final class TestHandler extends RelayWebSocketHandler {
 
         private final RelayConnection connection;
+        private final ClientToolRegistry clientRegistry;
 
         private TestHandler(SessionStore sessionStore, RelayConnectionRegistry registry,
-                            RelayProperties properties, RelayConnection connection) {
-            super(sessionStore, registry, new ClientToolRegistry(sessionStore, registry,
-                            new ClientToolAdapter(JsonMapper.builder().build()), properties),
-                    properties, JsonMapper.builder().build());
+                            ClientToolRegistry clientRegistry, RelayProperties properties,
+                            RelayConnection connection) {
+            super(sessionStore, registry, clientRegistry, properties, JsonMapper.builder().build());
             this.connection = connection;
+            this.clientRegistry = clientRegistry;
+        }
+
+        private ClientToolRegistry clientRegistry() {
+            return clientRegistry;
         }
 
         @Override
@@ -291,8 +302,9 @@ class RelayWebSocketHandlerTest {
         }
 
         @Override
-        public void sendText(String frame) {
+        public boolean sendText(String frame) {
             sent.add(frame);
+            return true;
         }
 
         @Override

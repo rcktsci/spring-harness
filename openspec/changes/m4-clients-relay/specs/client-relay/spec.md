@@ -27,7 +27,7 @@ WS-эндпоинт `/api/v1/relay` SHALL принимать соединени�
 
 ### Requirement: Регистрация на сессию с декларацией инструментов
 
-Клиент SHALL зарегистрироваться фреймом `register { sessionId, basePath, client: { version, tools[] } }`. `basePath` — локальный корень клиента (информативно, для логов/UI). `tools[]` — декларация клиентских инструментов (см. `client-tool-bridge`). Регистрация на несуществующую сессию → `error session-not-found` (close 4409). Регистрация на STATE-сессию задачи → `error wrong-session-kind` (close 4409): релею доступны только FREE root-сессии. Успех → `registered { sessionId }` и маршрутизация последующих `tool.call` этому клиенту. Повторный `register` с того же соединения — idempotent success.
+Клиент SHALL зарегистрироваться фреймом `register { sessionId, basePath, client: { version, tools[] } }`. `basePath` — локальный корень клиента (информативно, для логов/UI). `tools[]` — декларация клиентских инструментов (см. `client-tool-bridge`). Регистрация на несуществующую сессию → `error session-not-found` (close 4409). Регистрация на STATE-сессию задачи → `error wrong-session-kind` (close 4409): релею доступны только FREE root-сессии. Успех → `registered { sessionId }` и маршрутизация последующих `tool.call` этому клиенту. Повторный `register` с того же соединения — idempotent success. Нераспознаваемая декларация (аномальный `inputSchema`) → close 4403 `protocol`.
 
 #### Scenario: успешная регистрация
 
@@ -65,7 +65,7 @@ WS-эндпоинт `/api/v1/relay` SHALL принимать соединени�
 
 ### Requirement: Двунаправленная маршрутизация tool-фреймов
 
-Сервер SHALL пересылать агентские вызовы клиенту фреймом `tool.call { callId, sessionId, tool, args }` (где `tool` — free-form имя из декларации) и принимать ответы `tool.result { callId, output, exitCode }` (идемпотентно по `callId` — первый финальный результат выигрывает) и опциональные `tool.progress { callId, chunk }`. `tool.cancel { callId }` SHALL отправляться при отмене Turn'а (stop) — клиент прерывает локальное исполнение; повторный `tool.result` после cancel игнорируется. Незавершённый `tool.call` при разрыве соединения закрывается синтетическим `TOOL_RESULT LOST` «потеряно при отключении исполнителя». Журнал финального результата пишется только Turn-потоком под `sess`-локом (та же модель, что у async/MCP — D-64); WS-поток только complete'ит future по callId.
+Сервер SHALL пересылать агентские вызовы клиенту фреймом `tool.call { callId, sessionId, tool, args }` (где `tool` — free-form имя из декларации) и принимать ответы `tool.result { callId, output, exitCode }` (идемпотентно по `callId` — первый финальный результат выигрывает) и опциональные `tool.progress { callId, chunk }`. `exitCode` — информативное поле: non-zero exit **не** ошибка инструмента (та же семантика, что у native `bash`); финальный `TOOL_RESULT` получает статус OK. `tool.cancel { callId }` SHALL отправляться при отмене Turn'а (stop) — клиент прерывает локальное исполнение; повторный `tool.result` после cancel игнорируется. Незавершённый `tool.call` при разрыве соединения закрывается синтетическим `TOOL_RESULT LOST` «потеряно при отключении исполнителя». Журнал финального результата пишется только Turn-потоком под `sess`-локом (та же модель, что у async/MCP — D-64); WS-поток только complete'ит future по callId.
 
 #### Scenario: вызов и результат
 

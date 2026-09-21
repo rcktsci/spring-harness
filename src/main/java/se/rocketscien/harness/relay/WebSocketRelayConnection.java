@@ -29,11 +29,16 @@ public class WebSocketRelayConnection implements RelayConnection {
     }
 
     @Override
-    public void sendText(String frame) {
+    public boolean sendText(String frame) {
         try {
+            if (!session.isOpen()) {
+                return false;
+            }
             session.sendMessage(new TextMessage(frame));
+            return true;
         } catch (Exception e) {
             log.debug("Кадр релея не отправлен (соединение закрыто/переполнено): {}", e.getMessage());
+            return false;
         }
     }
 

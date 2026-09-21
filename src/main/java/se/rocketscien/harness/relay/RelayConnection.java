@@ -11,8 +11,13 @@ public interface RelayConnection {
     /** Имя аутентифицированного principal — опора takeover-политики реестра (D-78). */
     String principal();
 
-    /** Отправка текстового JSON-кадра (исходящие сериализуются декоратором, D-83). */
-    void sendText(String frame);
+    /**
+     * Отправка текстового JSON-кадра (исходящие сериализуются декоратором, D-83).
+     *
+     * @return {@code false}, если кадр не доставлен (соединение закрыто/переполнено) — вызывающий
+     *         может завершить ожидание немедленно (V-7), а не ждать полного timeout'а
+     */
+    boolean sendText(String frame);
 
     /** Закрытие соединения WS-close-кодом (4401/4403/4409, heartbeat-разрыв). */
     void close(int statusCode, String reason);

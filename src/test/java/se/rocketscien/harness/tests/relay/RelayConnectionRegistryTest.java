@@ -94,7 +94,8 @@ class RelayConnectionRegistryTest {
         }
 
         @Override
-        public void sendText(String frame) {
+        public boolean sendText(String frame) {
+            return true;
         }
 
         @Override

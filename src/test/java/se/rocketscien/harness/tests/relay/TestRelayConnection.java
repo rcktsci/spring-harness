@@ -57,15 +57,16 @@ public final class TestRelayConnection implements RelayConnection {
     }
 
     @Override
-    public void sendText(String frame) {
+    public boolean sendText(String frame) {
         sent.add(frame);
         if (!respond || registry == null || !frame.contains("\"type\":\"tool.call\"")) {
-            return;
+            return true;
         }
         Matcher matcher = CALL_ID.matcher(frame);
         if (matcher.find()) {
             registry.completeResult(matcher.group(1), responseOutput, responseExitCode);
         }
+        return true;
     }
 
     @Override

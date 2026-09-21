@@ -109,6 +109,26 @@ class ClientToolTurnWireMockTest extends BaseApplicationTest {
         }
     }
 
+    /** V-4: реальный spawn-путь (SubagentSpawner → createChildSession) — ребёнок видит оверлей root. */
+    @Test
+    void spawnedChildSeesClientOverlayViaParentChain() {
+        Session root = newSession();
+        TestRelayConnection connection = attachOverlay(root, List.of(jiraDescriptor()));
+        try {
+            String agentKey = jdbcTemplate.queryForObject(
+                    "SELECT a.key FROM agent a JOIN session s ON s.agent_revision_id = a.id WHERE s.id = ?",
+                    String.class, root.id());
+            Session child = sessionStore.createChildSession(root.id(), agentKey, "Субагент");
+
+            assertThat(child.parentSessionId()).isEqualTo(root.id());
+            assertThat(clientToolRegistry.isClientSession(child.id())).isTrue();
+            assertThat(clientToolRegistry.resolve(child.id(), "jira.list_issues")).isPresent();
+            assertThat(clientToolRegistry.manifest(child.id())).hasSize(1);
+        } finally {
+            detach(root, connection);
+        }
+    }
+
     private TestRelayConnection attachEmptyOverlay(Session session) {
         return attachOverlay(session, List.of());
     }

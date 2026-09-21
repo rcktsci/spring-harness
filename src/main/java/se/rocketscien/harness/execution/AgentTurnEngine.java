@@ -142,8 +142,9 @@ public class AgentTurnEngine {
         if (session.kind() == SessionKind.STATE) {
             toolCallbacks.add(transitionTool.declaration());
         }
-        // Stale-окно (D-84): имена клиентских инструментов выхвачены на старте Turn'а — disconnect
-        // внутри Turn'а оставляет их в манифесте; вызов → tool-not-available (не нативный серверный).
+        // V-6: `clientToolset` уже покрывает «сессия CLIENT»; набор имён — узкая страховка на окно
+        // между сборкой манифеста и disconnect'ом внутри Turn'а: имя было в манифесте, но соединения
+        // уже нет → tool-not-available (не нативный серверный путь, D-84).
         Set<String> clientToolNames = clientManifest.stream()
                 .map(callback -> callback.getToolDefinition().name())
                 .collect(Collectors.toSet());

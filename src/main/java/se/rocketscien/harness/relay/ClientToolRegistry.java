@@ -9,7 +9,6 @@ import se.rocketscien.harness.config.RelayProperties;
 import se.rocketscien.harness.execution.ClientToolBridge;
 import se.rocketscien.harness.execution.ToolDescriptor;
 import se.rocketscien.harness.execution.ToolResult;
-import se.rocketscien.harness.execution.ToolStatus;
 import se.rocketscien.harness.session.Session;
 import se.rocketscien.harness.session.SessionStore;
 
@@ -24,6 +23,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Runtime-оверлей клиентских инструментов (M4, D-80/D-84), реализует SPI
@@ -86,12 +86,14 @@ public class ClientToolRegistry implements ClientToolBridge {
 
     /** Финальный результат клиентского вызова из WS-потока; повторный результат — no-op (D-81). */
     public void completeResult(String callId, String output, Integer exitCode) {
+        pruneTombstones();
         PendingCall pendingCall = pending.get(callId);
         if (pendingCall == null) {
             log.debug("Реле: tool.result по неизвестному/завершённому callId {} — игнор", callId);
             return;
         }
         pendingCall.future().complete(toResult(pendingCall, output, exitCode));
+        pendingCall.markCompleted();
     }
 
     @Override
@@ -114,6 +116,7 @@ public class ClientToolRegistry implements ClientToolBridge {
 
     @Override
     public ToolResult invoke(UUID sessionId, String callId, String toolName, Map<String, Object> args) {
+        pruneTombstones();
         UUID rootSessionId = resolveSession(sessionId).orElse(null);
         if (rootSessionId == null) {
             return ToolResult.error(callId, toolName, TOOL_NOT_AVAILABLE);
@@ -133,13 +136,18 @@ public class ClientToolRegistry implements ClientToolBridge {
         CompletableFuture<ToolResult> future = new CompletableFuture<>();
         PendingCall pendingCall = new PendingCall(callId, rootSessionId, connection, toolName, future);
         pending.put(callId, pendingCall);
-        connection.sendText(adapter.toolCallFrame(callId, sessionId, toolName, args));
+        // V-7: недоставленный кадр (закрытое/переполненное соединение) — немедленный LOST, не ждём timeout.
+        if (!connection.sendText(adapter.toolCallFrame(callId, sessionId, toolName, args))) {
+            pending.remove(callId);
+            return ToolResult.lost(callId, toolName, "не доставлено: соединение закрыто");
+        }
         try {
             return future.get(relayProperties.toolCallTimeout().toMillis(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             ToolResult timeout = ToolResult.error(callId, toolName, "tool-timeout");
             // tombstone: поздний tool.result по этому callId станет no-op
             future.complete(timeout);
+            pendingCall.markCompleted();
             return timeout;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -172,10 +180,22 @@ public class ClientToolRegistry implements ClientToolBridge {
         return overlay.tools().stream().filter(descriptor -> toolName.equals(descriptor.name())).findFirst();
     }
 
+    /**
+     * Клиентский результат (V-2): {@code exitCode} — информативное поле, non-zero ≠ ошибка
+     * инструмента (та же семантика, что у native bash — agent-tools §5); статус всегда OK.
+     * ERROR оставлен протокольным ошибкам/таймауту/LOST.
+     */
     private static ToolResult toResult(PendingCall pendingCall, String output, Integer exitCode) {
-        boolean ok = exitCode == null || exitCode == 0;
-        return new ToolResult(pendingCall.callId(), pendingCall.tool(), ok ? ToolStatus.OK : ToolStatus.ERROR,
-                output, exitCode, null, null, null);
+        return ToolResult.ok(pendingCall.callId(), pendingCall.tool(), output, exitCode, null, null);
+    }
+
+    /** Tombstone (завершённые future) живут не дольше окна {@code tool-call-timeout} (V-5). */
+    private void pruneTombstones() {
+        long ttl = relayProperties.toolCallTimeout().toMillis();
+        long now = System.currentTimeMillis();
+        pending.values().removeIf(pendingCall -> pendingCall.future().isDone()
+                && pendingCall.completedAt().get() > 0
+                && now - pendingCall.completedAt().get() > ttl);
     }
 
     private static String formatErrors(List<JsonSchemaError> errors) {
@@ -189,6 +209,15 @@ public class ClientToolRegistry implements ClientToolBridge {
     }
 
     private record PendingCall(String callId, UUID rootSessionId, RelayConnection connection, String tool,
-                               CompletableFuture<ToolResult> future) {
+                               CompletableFuture<ToolResult> future, AtomicLong completedAt) {
+
+        private PendingCall(String callId, UUID rootSessionId, RelayConnection connection, String tool,
+                            CompletableFuture<ToolResult> future) {
+            this(callId, rootSessionId, connection, tool, future, new AtomicLong());
+        }
+
+        private void markCompleted() {
+            completedAt.compareAndSet(0L, System.currentTimeMillis());
+        }
     }
 }

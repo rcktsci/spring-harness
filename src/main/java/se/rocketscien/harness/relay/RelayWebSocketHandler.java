@@ -175,17 +175,28 @@ public class RelayWebSocketHandler extends TextWebSocketHandler {
             reject(state, session, "duplicate-tool-name", "Дублирующиеся имена инструментов");
             return;
         }
+        List<ToolDescriptor> descriptors;
+        try {
+            descriptors = parseToolDescriptors(tools);
+        } catch (Exception e) {
+            // V-3: аномальный inputSchema — протокольный отказ (close 4403), а не abrupt close.
+            log.warn("Реле: декларация инструментов не распарсена — close 4403: {}", e.getMessage());
+            close(session, RelayCloseCodes.PROTOCOL_ERROR, "protocol");
+            return;
+        }
         if (registry.register(sessionId, state.connection) == RelayConnectionRegistry.RegisterOutcome.OCCUPIED) {
             reject(state, session, "workspace-occupied", "Сессия занята другим пользователем");
             return;
         }
-        // T-8: смена сессии тем же соединением — снять прежний ключ (CAS), чтобы не оставлять stale.
+        // T-8/V-1: смена сессии тем же соединением — снять прежние ключи (реестр соединений +
+        // клиентский оверлей) CAS-ом по identity, чтобы не оставлять stale CLIENT на покинутой сессии.
         UUID previousSessionId = state.registeredSessionId;
         if (previousSessionId != null && !previousSessionId.equals(sessionId)) {
             registry.unregister(previousSessionId, state.connection);
+            clientToolRegistry.detach(previousSessionId, state.connection);
         }
         state.registeredSessionId = sessionId;
-        clientToolRegistry.attach(sessionId, state.connection, parseToolDescriptors(tools));
+        clientToolRegistry.attach(sessionId, state.connection, descriptors);
         int toolCount = tools.isArray() ? tools.size() : 0;
         withMdc(sessionId.toString(), state.principal,
                 () -> log.info("Реле: регистрация на сессии — инструментов={}", toolCount));
