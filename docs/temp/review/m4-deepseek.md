@@ -170,3 +170,110 @@
 **REJECT — 19 находок (4 HIGH: H-1 D-79 vs workspace-binding/приёмка, H-2 регресс R-1 `cancel_requested`, H-3 manifest≠resolver/native-фолбэк, H-4 `PARKED_CLIENT` перетирается и теряется; 10 MEDIUM: M-1…M-10; 6 MINOR/NIT).**
 
 Блокеры заморозки: **H-1** (архитектурная модель маршрутизации — D-79 или D-12, не оба), **H-2** (совместимость отмены M3), **H-3** (резолв инструментов CLIENT), **H-4** (жизненный цикл `PARKED_CLIENT`), **M-2/M-4** (гонки реестра и финалов), **M-5** (grace/ERROR), **M-6** (binding/OpenAPI), **M-8** (symlink-гвард). После правок требуется повторный проход и re-approve.
+
+---
+
+# Re-approval m4-clients-relay (2026-09-22, после 726c741)
+
+> Проверены: `openspec/changes/m4-clients-relay/{proposal.md, design.md, tasks.md, specs/{client-relay,client-tool-bridge,workspace-download,agent-turn}/spec.md}`; `docs/temp/review/m4-judge.md`; M1–M3-канон (`openspec/specs/*`, `docs/design/*`, код). `openspec validate m4-clients-relay --strict` → **exit 0**. Сборки не запускались.
+> Группа `specs/session-api/` удалена из change (подтверждено: в каталоге её нет). Grey-проверка диффа: заявленные J-1…J-10 внесены.
+
+## Статусы находок round-1
+
+| # | Sev | Статус | Проверка (артефакт) |
+|---|---|---|---|
+| H-1 | HIGH | **закрыто** | D-84 (design:23–29) + `register { sessionId, … }` (proposal:7, client-relay:30) + «task-сессии — SERVER автоматически» (client-tool-bridge:25). Проверено по коду: STATE-сессия задачи создаётся с `parent_session_id = NULL` (`StateSessionServiceImpl.java:43–49,136–166`), поэтому в parent-цепочке нет connection → действительно SERVER; sub-session (spawn) FREE с parent → CLIENT. D-12 явно superseded. Резидуалы — R-1/R-2/R-5 ниже |
+| H-2 | HIGH | **закрыто** | agent-turn MODIFIED «Отмена Turn'а (stop)» (spec:26–30) сохранил R-1-абзац (персистентный флаг, `tryStart` no-op, сброс только явным resume); сценарий «сообщение после отмены» — «явный resume сбросил флаг» (:47–50). Регресс кода `TurnManagerImpl.java:59–66` устранён |
+| H-3 | HIGH | **закрыто** | client-tool-bridge «Гейт нативных файловых на уровне резолвера» (spec:42–59) + tasks 4.3; native-файловые **не резолвятся** в CLIENT, async-классификация — только серверные колбэки, клиентский `bash` → релей. Резидуал — R-5 (формулировка agent-turn) |
+| H-4 | HIGH | **закрыто** | `PARKED_CLIENT` выведен из M4 (design:15, proposal:39, tasks:41); `runtimeStatus`-контур не трогается. Doc-drift — R-4 |
+| M-1 | MEDIUM | **закрыто** | `spring-boot-starter-websocket` в Impact (proposal:30) + task 2.1; тезис «новых артефактов нет» убран |
+| M-2 | MEDIUM | **закрыто** | D-78 (design:67–73): takeover тем же principal (`superseded`), иной — `workspace-occupied`, CAS-unregister по identity; task 2.4; client-relay «Takeover и идемпотентность» (spec:47–64) |
+| M-3 | MEDIUM | **закрыто** | D-83 (design:75–81) + client-relay spec:92 + task 2.5: `ConcurrentWebSocketSessionDecorator` на исходящие |
+| M-4 | MEDIUM | **закрыто** | D-81 (design:39–45): completion-map `callId → CompletableFuture`, tombstone; журнал — только Turn-поток под `sess`-локом, WS-поток только complete; task 4.2 |
+| M-5 | MEDIUM | **закрыто** | grace-таймеры/ERROR выведены (design:15,96; proposal:39); разрыв → LOST + оверлей очищен. Резидуал — R-2 |
+| M-6 | MEDIUM | **закрыто** | binding/logicalKey/task-side убраны: `register { sessionId }` (client-relay:30); `session-api` delta удалён; task 1.3 — D-12 supersede. Резидуал — R-1 |
+| M-7 | MEDIUM | **закрыто** | J-8/design:94 + workspace-download spec:11: download — только серверный workspace; приёмка роуминга без download (tasks:38) |
+| M-8 | MEDIUM | **закрыто** | D-72 (design:55–61) + workspace-download «Canonical-path-гвард»/«Pre-stat» (spec:33–50,66–78): pre-stat 413 до заголовков, посегментный symlink-чек + NOFOLLOW; task 3.2. Резидуал — R-7 |
+| M-9 | MEDIUM | **частично** | D-85 (design:83–87) + task 2.2: relay → execution и SPI; но формулировка направления противоречива и поверхность SPI не определена — **R-3** |
+| M-10 | MEDIUM | **не закрыто** | Wire-контракт §5 по-прежнему отложен в task 1.2/1.1 (в ревьюируемых артефактах его нет) — **R-8** |
+
+**Итог по round-1:** 4/4 HIGH и 9/10 MEDIUM закрыты материально; M-9 закрыт частично, M-10 не закрыт. Ни одного регресса к M1–M3 канону по отмене/рестарт-скану/runtimeStatus не осталось.
+
+## Новые находки / остаточные
+
+### R-1 (MINOR). `CLIENT_EXEC` остаётся в graph-валидаторе, но релеем не используется — молчаливое серверное исполнение; design и tasks расходятся
+- **Пункт:** design.md:29 («убирает … CLIENT_EXEC-валидацию графа») vs tasks.md:5 («`WORKSPACE_TYPES` остаётся, артефакты не трогаются»); `WorkflowGraphSchemaValidator.java:52` (`WORKSPACE_TYPES = SERVER_DIR, CLIENT_EXEC`); glossary:84, workflow-domain:17–18.
+- **Проблема:** после D-84 состояние с `workspace:{type:CLIENT_EXEC}` не валидируется как используемое, но и не отклоняется: `BashStateExecutor.resolveCwd` для не-SERVER_DIR возвращает null → скрипт/агент молча исполняется **на сервере**, хотя glossary/workflow-domain обещают клиента. Внутренне противоречиво (design «убирает валидацию» vs task «не трогаем») и создаёт пользовательскую ловушку.
+- **Предложение:** в task 1.3 явно: `CLIENT_EXEC` — reserved/unimplemented; либо отклонять `422 graph-invalid` при использовании, либо добавить пометку в glossary/workflow-domain «зарезервировано, не исполняется». Согласовать формулировку design:29.
+
+### R-2 (MINOR). Поведение нативных серверных инструментов при disconnect CLIENT-сессии не зафиксировано явно
+- **Пункт:** design.md:29 («toolset = есть ли connection в parent-цепочке»); client-tool-bridge spec:25,63; tasks.md:38 (приёмка 6.2); m4-judge.md J-5 («дальнейшие вызовы клиентских инструментов → tool-not-available»).
+- **Проблема:** по «connection-presence» при разрыве toolset становится SERVER → нативные серверные инструменты снова доступны (client-tool-bridge:25), тогда как J-5/исходная формулировка владельца подразумевали «toolset остаётся CLIENT». Приёмка 6.2 «disconnect → … `tool-not-available` на следующие вызовы» не различает «клиентский инструмент» и «bash»: если тест дёрнет `bash` после disconnect, поведение будет серверным. Нужно выбрать sticky-CLIENT vs connection-derived и явно записать.
+- **Предложение:** зафиксировать: после разрыва CLIENT-сессия — SERVER (нативные доступны) **или** остаётся CLIENT с пустым оверлеем; уточнить приёмку 6.2 («вызов клиентского инструмента → tool-not-available»). Это меняет ранее явное решение из round-1 proposal:9 — нужен ADR/строка в D-84.
+
+### R-3 (MINOR). Направление `relay` в ArchUnit и поверхность SPI заданы противоречиво
+- **Пункт:** design.md:85 («`relay` … доступный из `api`/`execution`» + «`execution ↛ relay`»), tasks.md:10 («`api`/`execution` → `relay` → `{session, common, execution}`; `execution ↛ relay`»).
+- **Проблема:** «`api`/`execution` → `relay`» и «`execution ↛ relay`» — взаимоисключающие. Плюс SPI назван `ToolCallback`: это spring-ai-тип, но движку нужны per-session `declarations(sessionId)` (манифест), `isClient(sessionId)` (гейт native-файловых) и `invoke(...)` — `ToolCallback` этого не выражает. `AgentTurnEngine.run` собирает callbacks сам (`AgentTurnEngine.java:118–133`) — точку расширения надо определить.
+- **Предложение:** канон — `api → relay`, `relay → execution`; `execution ↛ relay` (инъекция интерфейса из `execution`, реализация в `relay`). Зафиксировать интерфейс SPI (имя, методы) в D-85/task 2.2, убрать противоречие «api/execution → relay».
+
+### R-4 (MINOR). Отсрочка `PARKED_CLIENT` не отражена в главной спеке/roadmap/api-contracts
+- **Пункт:** `openspec/specs/session-api/spec.md:26` («`PARKED_CLIENT` — с M4 (релей)»); `docs/design/api-contracts.md:40` (§2) и `:139` (§8); `docs/design/roadmap.md:24` (объём M4 = «…PARKED_CLIENT»); удалённый `specs/session-api/spec.md`; tasks.md:40.
+- **Проблема:** J-5 убрал delta session-api «изменений требований нет», но M4 **отменяет** ранее обещанное присвоение `PARKED_CLIENT` — это изменение требования/обещания. После архива M4 синканные спеки/roadmap продолжат утверждать «PARKED_CLIENT — с M4», что станет ложью. task 6.4 обновляет roadmap лишь «server-side + CLI отменён», без `PARKED_CLIENT`.
+- **Предложение:** либо вернуть маленькую MODIFIED-delta session-api («`PARKED_CLIENT` остаётся зарезервированным, присвоение — вне M4»), либо явно добавить правку `session-api/spec.md`+`api-contracts §2/§8`+`roadmap` в task 6.4.
+
+### R-5 (NIT). `agent-turn` ADDED не согласован с D-84 (parent-chain и resolver-gate)
+- **Пункт:** specs/agent-turn/spec.md:7 («(1) серверный колбэк — native workspace-tools, …; (2) клиентский оверлей … **этой** сессии»).
+- **Проблема:** в CLIENT native-файловые исключены резолвером (client-tool-bridge:42–44), а оверлей виден sub-сессиям по parent-цепочке — формулировка «этой сессии» и включение native в п.1 не отражают это; gate принадлежит другой capability (перенос ownership M3 M-5).
+- **Предложение:** в agent-turn — п.1 «серверные колбэки (в CLIENT native-файловые исключены — см. client-tool-bridge)», п.2 «оверлей активного соединения сессии или её предка».
+
+### R-6 (NIT). Сценарий «disconnect очищает оверлей» противоречит принятому stale-манифесту
+- **Пункт:** specs/client-tool-bridge/spec.md:67–68 vs design.md:91.
+- **Проблема:** спека: инструменты «пропадают из манифестов затронутых сессий (до reconnect)»; design принимает, что манифест, собранный на Turn, остаётся до конца Turn'а.
+- **Предложение:** «пропадают из **следующих** манифестов (Turn'ов)».
+
+### R-7 (NIT). Threat-model canonical-гварда называет только SSO-пользователя, но workspace пишет агент
+- **Пункт:** design.md:61,93; workspace-download spec:35; D-72:59.
+- **Проблема:** остаточный TOCTOU существует прежде всего против **агента/LLM** (произвольный bash в контейнере с примонтированным workspace → подмена промежуточного сегмента на symlink между чеком и open). Потребителя «аутентифицированный SSO-пользователь» недостаточно для обоснования принятия риска.
+- **Предложение:** дополнить обоснование (агент — доверенный исполнитель владельца; либо закрыть промежуточные сегменты через `openat`/`O_NOFOLLOW` посегментно).
+
+### R-8 (NIT). Wire-контракт §5 не входит в артефакты ревью (M-10 round-1)
+- **Пункт:** tasks.md:4 (task 1.2 — rewrite §5 в фазе apply); api-contracts.md:101–115 (M1-редакция).
+- **Проблема:** для contract-first заморозка проходит без ошибок-фрейма, полей `welcome`, маппинга close-кодов и направления heartbeat — их фиксация отложена в apply.
+- **Предложение:** включить черновик §5 в change (или отдельным ревьюируемым артефактом) до заморозки.
+
+### R-9 (NIT, справочно). Мелкие недоопределения
+- Регистрация на **FREE-подсессию** (spawn-ребёнок) не покрыта: спека говорит «только FREE root» (:30), но код/ошибка для FREE-ребёнка не названы.
+- tombstones «до конца соединения» (:41) — неограниченный рост на долгой сессии; стоит ограничить окном/счётчиком.
+- `duplicate-tool-name` проверяется только внутри декларации; коллизия имени с серверным MCP/metaTool молча разрешается «сервер первым» (:44) — зафиксировать как намеренное.
+- `architecture.md:28` (`ClientRelayWorkspaceTools`) и `client-cli.md` — task 6.4 упоминает синк, но удаление конкретного типа/пометку supersede стоит назвать явно.
+
+## Трассировка tasks → specs
+
+| Спека | Покрытие задачами | Статус |
+|---|---|---|
+| client-relay (handshake/register/takeover/routing/heartbeat/registry) | 1.2, 2.4, 2.5, 4.2, 5.1 | ✅ |
+| client-tool-bridge (декларация/видимость/gate/overlay/валидация) | 4.1–4.5, 5.1 | ✅ (ownership-нюанс R-5) |
+| workspace-download (endpoint/guard/safe-list/pre-stat) | 3.1–3.3, 1.1 | ✅ |
+| agent-turn (resolver/tool.cancel/restart-scan) | 4.3, 5.2, 5.3 | ✅ (R-5/R-6) |
+| session-api | — (delta удалён) | ⚠️ R-4 (обещание PARKED_CLIENT) |
+| api-contracts §5/§6/§8 | 1.2 | ⚠️ R-8 (в фазе apply) |
+| ADR D-72…D-85, доки-синк | 6.3, 6.4 | ✅ (R-4) |
+
+## Проверка по чек-листу промпта
+
+| # | Пункт | Статус |
+|---|---|---|
+| 1 | Модель по сессии вместо (taskId,binding) | ✅ D-84; STATE-сессии задач `parent_session_id = NULL` (проверено кодом) |
+| 2 | Резолвер-гейт нативных файловых | ✅ client-tool-bridge:42–44 + tasks 4.3 |
+| 3 | Takeover CAS | ✅ D-78 + spec:47–64 + task 2.4 |
+| 4 | Pre-stat 413 | ✅ workspace-download:66–78 + task 3.1 |
+| 5 | relay → execution SPI | ⚠️ R-3 (противоречивая формулировка/поверхность SPI) |
+| 6 | session-api delta убран | ✅ удалён; ⚠️ R-4 (не отражена отсрочка PARKED_CLIENT) |
+| 7 | Новые противоречия с M1–M3 | ✅ нет по H-2/H-4/restart-scan/runtimeStatus; ⚠️ R-1/R-2 (внутренние) |
+| 8 | Полнота трассировки tasks→specs | ✅ все 3 новые capability + agent-turn покрыты; ⚠️ session-api/§5 (R-4/R-8) |
+
+## Вердикт re-approval
+
+**APPROVE — 0 блокеров.** Все 4 HIGH и 9/10 MEDIUM round-1 закрыты материально; M-9 (SPI/ArchUnit) и M-10 (wire §5) — закрыты частично и вынесены в остаточные. Регрессов к M1–M3 канону (R-1 `cancel_requested`, restart-scan, runtimeStatus, SubtreeCanceller) не осталось; `openspec validate --strict` зелёный; трассировка tasks→specs полная.
+
+Остаточные (не блокируют заморозку, обязательны к учёту в apply-фазе / apply-notes): **R-1…R-8 (MINOR/NIT)**, из них приоритетны **R-3** (противоречие ArchUnit/SPI — правится одной строкой в D-85/task 2.2), **R-4** (отсрочка `PARKED_CLIENT` в session-api/roadmap/api-contracts §2), **R-2** (поведение на disconnect: sticky CLIENT vs SERVER). Рекомендация: зафиксировать R-1/R-2/R-3/R-4 текстом в тех же артефактах до старта пачки T, чтобы не переносить двусмысленность в код.

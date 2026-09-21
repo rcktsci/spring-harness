@@ -97,3 +97,68 @@ M4 PROPOSE-артефакты соответствуют правилам AGENTS
 1. Инкорпорировать уточнения в design.md / tasks.md.
 2. После реализации — прогон `mvn clean verify` и ArchUnit.
 3. Архивирование M4 по завершении.
+
+---
+
+## Re-approval
+
+**Дата:** 2026-09-21  
+**Коммит исправлений:** `726c741` (round 1, judge J-1…J-10)  
+**Объект:** `openspec/changes/m4-clients-relay/` после fix-раунда
+
+### 1. Архитектурная целостность (relay → execution SPI)
+
+- **J-9/M-9:** исправлено — `ToolCallback`/`ToolResult` SPI остаются в `execution`; `relay` реализует адаптер (relay → execution разрешено); `execution ↛ relay` — только через интерфейс. ArchUnit проверены циклы.
+- **Связи обновлены:** `relay` → `{session, common, execution}` (удалено упоминание несуществующего модуля `workspace`).
+- **Стейт-механизм:** `ConcurrentWebSocketSessionDecorator` для исходящих кадров; completion-map на соединение (`callId → CompletableFuture`); Turn-поток пишет журнал под `sess`-локом.
+
+### 2. Новые ADR (D-80..D-85)
+
+| ID | Решение | Альтернативы | Оценка |
+|----|---------|--------------|--------|
+| **D-84** | Единица маршрутизации — сессия (`register { sessionId, ... }`), не `(taskId, binding)`; task-сессии SERVER автоматически | per-state `register { taskId, binding }` | ✓ Точно выражает семантику владельца, убирает task-side релея |
+| **D-80** | Runtime-only оверлей, не персистится | БД с revisioning | ✓ Эфемерные данные, перезапись при reconnect |
+| **D-81** | Идемпотентность по callId; журнал — Turn-поток под sess-локом | Запись из WS-потока | ✓ М3-механизм, единый инвариант |
+| **D-82** | `source` — информативное поле, сервер не ходит к MCP-серверам | Сервер подключается к клиентским MCP-серверам | ✓ Изоляция |
+| **D-72** | Canonical-path гвард: посегментный symlink-чек + NOFOLLOW + pre-stat | Общий path-guard, stream-усечение | ✓ Tестный 413, TOCTOU принят (потребитель — SSO-пользователь) |
+| **D-77** | WS-handshake аудит — логи, не БД | Таблица `ws_connection_log` | ✓ Один инстанс |
+| **D-78** | Реестр: CAS по identity, takeover при том же principal | ShedLock/Redis | ✓ Переключение между «офисами» |
+| **D-83** | Spring MVC WebSocket + `spring-boot-starter-websocket` в pom, мьютекс на соединение | WebFlux, STOMP | ✓ Минимальные изменения |
+| **D-85** | relay → execution через SPI, no cycle | execution ↔ relay цикл | ✓ ArchUnit подтверждён |
+
+### 3. Исправленные замечания
+
+- **J-1/H-1:** D-84 supersede D-12; CLIENT_EXEC больше не используется релеем
+- **J-3/H-3:** гейт нативных файловых на уровне резолвера (не только манифест)
+- **J-4:** wire-контракт переработан (error-фрейм, heartbeat направление, free-form tool name)
+- **J-5/H-4/M-5:** `PARKED_CLIENT` выведен из M4 (остаётся зарезервированным); grace-таймеры задач — вне M4
+- **J-6/M-2:** takeover и CAS по identity в реестре
+- **J-7/M-8:** pre-stat 413, NOFOLLOW + symlink checks
+- **J-8/M-7:** download только для серверного workspace
+- **J-10:** sync docs (api-contracts §5, agent-tools, architecture, execution-model)
+
+### 4. Соответствие AGENTS.md (проверено после fix-раунда)
+
+| Правило | Статус |
+|---------|--------|
+| Один инстанс на VM, без энтерпрайз-раздутия | ✓ D-78, D-77, D-36/D-40 |
+| Все числовые параметры — конфиг | ✓ `harness.relay.*`, `harness.workspace.download.*` |
+| Сущность с сценарием | ✓ relay, toolset, download — все покрыты |
+| ADR в `decisions.md` | ✓ D-72…D-85 (7 ADR за M4) |
+| Contract-first | ✓ OpenAPI + specs, контроллеры на сгенерированных интерфейсах |
+| Jackson 2 только provided/test-scope | ✓ новых зависимостей нет |
+
+### 5. Остаточные риски
+
+- **Stale-манифест внутри Turn'а:** disconnect внутри Turn'а оставляет инструменты до конца Turn'а (резолв live — подхватывается новое подключение).
+- **TOCTOU в canonical-гварде:** принят (потребитель — SSO-пользователь, D-72).
+- **tool-not-available тупик:** владелец принял («всегда ERROR»).
+
+---
+
+## Итог re-approval
+
+**Статус:** Принято  
+**Аппрув Mercury-2.5:** ✓
+
+M4 PROPOSE после судейских фиксов корректен. Архитектурные границы подтверждены, ADR зафиксированы, AGENTS.md соблюден.

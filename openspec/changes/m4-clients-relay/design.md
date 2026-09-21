@@ -26,7 +26,9 @@ M3 закрыл MCP-клиент и мета-инструменты оркест
 
 **Альтернативы**: каноническая per-state модель `register { taskId, binding }` (изначально в api-contracts §5) — противоречит модели владельца («подключаюсь к новой сессии с оркестратором… если он завёл задачу — там только серверные тулы»); per-agent permissions_jsonb — отвергнуто владельцем ранее.
 
-**Почему**: точно выражает семантику владельца без отдельного правила для задач: toolset = «есть ли connection в parent-цепочке». Убирает из проекта всю task-side часть релея (binding, logicalKey, workspaceBindings в TaskDto, CLIENT_EXEC-валидацию графа).
+**Почему**: точно выражает семантику владельца без отдельного правила для задач: toolset = «есть ли connection в parent-цепочке». Отключение клиента → connection пропадает → toolset снова SERVER (нативные серверные инструменты доступны; клиентский оверлей пуст). Убирает из проекта всю task-side часть релея (binding, logicalKey, workspaceBindings в TaskDto).
+
+**`CLIENT_EXEC` в graph-валидаторе**: остаётся **зарезервированным** значением (`WORKSPACE_TYPES` не трогается) — не отклоняется валидатором и не исполняется релеем; задача с `workspace:{type:CLIENT_EXEC}` исполняется серверно (BashStateExecutor fallback). Фиксируется в `workflow-domain.md`/`glossary.md` правкой task 6.4.
 
 ### D-80: Клиентский оверлей — runtime-only, не персистится
 
@@ -82,7 +84,7 @@ M3 закрыл MCP-клиент и мета-инструменты оркест
 
 ### D-85: Архитектура — relay → execution через SPI
 
-**Решение**: `ToolCallback`/`ToolResult` остаются в `execution`; `relay` реализует клиентский адаптер (relay → execution разрешено). `execution ↛ relay` — обращение только через интерфейс, связывание — Spring. ArchUnit: `relay` — технический слой, доступный из `api`/`execution`; сам может `{session, common, execution}`.
+**Решение**: канон направлений — `api → relay`, `relay → execution`; `execution ↛ relay` (обращение только через интерфейс, реализованный в `relay`, связывание — Spring). SPI — интерфейс `ClientToolBridge` в `execution`: `boolean isClientSession(sessionId)` (гейт нативных файловых), `Optional<ToolDescriptor> resolve(sessionId, toolName)` (манифест), `ToolResult invoke(sessionId, callId, toolName, args)` (вызов в релей). `ClientToolAdapter` в `relay` реализует `ToolCallback` и делегирует в `ClientToolBridge`. ArchUnit: `relay` — технический слой; `api` и `execution` могут зависеть от `relay` на уровне конфигурации/Wiring, но доменные классы `execution` используют только интерфейс `ClientToolBridge` из собственного пакета.
 
 **Альтернативы**: цикл execution ↔ relay — запрещён `noCyclesBetweenModules`; релей внутри execution — смешение WS-инфраструктуры и домена.
 

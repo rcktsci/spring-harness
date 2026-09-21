@@ -4,7 +4,7 @@
 
 ### Requirement: Резолв инструментов с клиентским оверлеем (M4)
 
-При исполнении tool-call SHALL применяться порядок резолва: (1) серверный колбэк — native workspace-tools, metaTools (`transition`, `spawn_subagent`, `read_compacted`, orchestrator-metaTools), MCP-инструменты; (2) клиентский оверлей (`client-tool-bridge`) активного соединения **этой** сессии; (3) отсутствие резолва → `TOOL_RESULT ERROR tool-not-available`. Сборка манифеста инструментов для рендера модели SHALL включать клиентские инструменты активного оверлея с их `description`/`inputSchema`, если toolset сессии — CLIENT (root-сессия с подключённым клиентом + её sub-сессии). Нативные файловые инструменты в CLIENT-toolset в манифест не включаются.
+При исполнении tool-call SHALL применяться порядок резолва: (1) серверный колбэк — native workspace-tools (в CLIENT-toolset нативные файловые исключены — см. `client-tool-bridge`), metaTools (`transition`, `spawn_subagent`, `read_compacted`, orchestrator-metaTools), MCP-инструменты; (2) клиентский оверлей активного соединения этой сессии или её предка по parent-цепочке; (3) отсутствие резолва → `TOOL_RESULT ERROR tool-not-available`. Сборка манифеста инструментов для рендера модели SHALL включать клиентские инструменты активного оверлея с их `description`/`inputSchema`, если toolset сессии — CLIENT (root-сессия с подключённым клиентом + её sub-сессии). Нативные файловые инструменты в CLIENT-toolset в манифест не включаются.
 
 #### Scenario: модель видит клиентский инструмент
 
