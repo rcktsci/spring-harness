@@ -114,6 +114,22 @@ harness:
     timeout: 0s
     # Размер backlog событий задачи на SSE-поток (задача J.4; бэкфилл реконнекта за курсором).
     task-backlog: 512
+  relay:
+    # WS-релей /api/v1/relay (api-contracts §5, D-83): heartbeat инициирует сервер,
+    # разрыв по 2×heartbeat-interval без pong.
+    heartbeat-interval: 15s
+    # Верхний таймаут ожидания tool.result (пачка W): превышение → TOOL_RESULT ERROR tool-timeout.
+    tool-call-timeout: 5m
+    # Пределы ConcurrentWebSocketSessionDecorator (сериализация исходящих кадров, D-83).
+    send-time-limit: 10s
+    buffer-size-limit: 512KB
+  workspace:
+    download:
+      # Скачивание серверного workspace-файла (api-contracts §8, D-72): pre-stat 413 до отдачи.
+      max-bytes: 10MB
+      # Safe-лист расширений (сравнение case-insensitive); вне листа → 422 extension-not-allowed.
+      allow-extensions: [txt, md, json, yaml, yml, xml, html, css, js, ts, java, kt, py, sql, sh,
+                         properties, log, csv, toml]
   limits:
     body: 1MB
     tool-output: 256KB

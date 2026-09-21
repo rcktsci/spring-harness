@@ -10,11 +10,13 @@ import se.rocketscien.harness.config.SseProperties;
 import se.rocketscien.harness.config.LlmProperties;
 import se.rocketscien.harness.config.LockProperties;
 import se.rocketscien.harness.config.McpProperties;
+import se.rocketscien.harness.config.RelayProperties;
 import se.rocketscien.harness.config.SpawnProperties;
 import se.rocketscien.harness.config.TurnProperties;
 import se.rocketscien.harness.config.WorkflowProperties;
 import se.rocketscien.harness.config.TaskProperties;
 import se.rocketscien.harness.config.WebhookProperties;
+import se.rocketscien.harness.config.WorkspaceDownloadProperties;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
@@ -233,6 +235,30 @@ class ConfigPropertiesBindingTest {
         });
     }
 
+    @Test
+    void bindsRelayDefaults() {
+        contextRunner.run(context -> {
+            RelayProperties properties = context.getBean(RelayProperties.class);
+            // M4 T.3: heartbeat-интервал, таймаут tool.call и пределы декоратора — только конфиг
+            assertThat(properties.heartbeatInterval()).isEqualTo(Duration.ofSeconds(15));
+            assertThat(properties.toolCallTimeout()).isEqualTo(Duration.ofMinutes(5));
+            assertThat(properties.sendTimeLimit()).isEqualTo(Duration.ofSeconds(10));
+            assertThat(properties.bufferSizeLimit()).isEqualTo(DataSize.ofKilobytes(512));
+        });
+    }
+
+    @Test
+    void bindsWorkspaceDownloadDefaults() {
+        contextRunner.run(context -> {
+            WorkspaceDownloadProperties properties = context.getBean(WorkspaceDownloadProperties.class);
+            // M4 T.3: лимит размера и safe-лист расширений (api-contracts §8, D-72)
+            assertThat(properties.maxBytes()).isEqualTo(DataSize.ofMegabytes(10));
+            assertThat(properties.allowExtensions())
+                    .contains("txt", "md", "json", "yaml", "yml", "java", "kt", "py", "sql", "toml")
+                    .doesNotContain("jar", "exe", "png", "zip");
+        });
+    }
+
     @Configuration
     @EnableConfigurationProperties({
             SecurityProperties.class,
@@ -249,7 +275,9 @@ class ConfigPropertiesBindingTest {
             AsyncProperties.class,
             LateResultProperties.class,
             SpawnProperties.class,
-            McpProperties.class
+            McpProperties.class,
+            RelayProperties.class,
+            WorkspaceDownloadProperties.class
     })
     static class PropertiesRegistrar {
     }

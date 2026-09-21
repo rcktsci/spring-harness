@@ -9,6 +9,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 import se.rocketscien.harness.agent.impl.ArchUnitAgentImplFixture;
 import se.rocketscien.harness.api.ArchUnitAgentImplViolator;
 import se.rocketscien.harness.api.ArchUnitForeignImplViolator;
+import se.rocketscien.harness.execution.ArchUnitRelayBridgeViolator;
+import se.rocketscien.harness.relay.ArchUnitRelayFixture;
 import se.rocketscien.harness.session.ArchUnitLayerViolator;
 import se.rocketscien.harness.task.TaskRegistry;
 import se.rocketscien.harness.task.impl.TaskRegistryImpl;
@@ -54,6 +56,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * на оба пакета; негативный тест {@code agentImplViolationIsCaught} фиксирует, что
  * {@code api → agent.impl} ловится ({@code mcp.impl} в main не существует — правило
  * параметризовано вакуумно).</p>
+ *
+ * <p>M4 T.2: в слои добавлен {@code relay} (технический слой релея): {@code api → relay},
+ * {@code relay → {execution, session}}; {@code execution ↛ relay} — доменные классы
+ * {@code execution} используют только SPI {@code ClientToolBridge} собственного пакета (D-85).
+ * {@code .impl}-правило и циклы распространены на {@code relay}; негативный тест
+ * {@code relayViolationIsCaught} фиксирует, что {@code execution → relay} ловится.</p>
  */
 class ArchitectureRulesTest {
 
@@ -67,6 +75,7 @@ class ArchitectureRulesTest {
     private static final String INTELLIGENCE = BASE + ".intelligence..";
     private static final String AGENT = BASE + ".agent..";
     private static final String MCP = BASE + ".mcp..";
+    private static final String RELAY = BASE + ".relay..";
 
     private static final JavaClasses MAIN_CLASSES = new ClassFileImporter()
             .importPaths(Paths.get("target", "classes"));
@@ -75,7 +84,7 @@ class ArchitectureRulesTest {
     private static final JavaClasses DOMAIN_CLASSES = new ClassFileImporter().importPackages(
             BASE + ".api", BASE + ".execution", BASE + ".task", BASE + ".workflow",
             BASE + ".session", BASE + ".identity", BASE + ".intelligence",
-            BASE + ".agent", BASE + ".mcp");
+            BASE + ".agent", BASE + ".mcp", BASE + ".relay");
 
     private static final ArchRule MODULE_LAYERING = layeredArchitecture()
             .consideringOnlyDependenciesInLayers()
@@ -89,7 +98,9 @@ class ArchitectureRulesTest {
             .layer("intelligence").definedBy(INTELLIGENCE)
             .layer("agent").definedBy(AGENT)
             .layer("mcp").definedBy(MCP)
-            .whereLayer("api").mayOnlyAccessLayers("execution", "intelligence", "session", "identity", "task", "workflow")
+            .layer("relay").definedBy(RELAY)
+            .whereLayer("api").mayOnlyAccessLayers("execution", "intelligence", "session", "identity", "task", "workflow",
+                    "relay")
             .whereLayer("execution").mayOnlyAccessLayers("session", "identity", "task", "workflow", "intelligence", "mcp")
             .whereLayer("task").mayOnlyAccessLayers("identity")
             .whereLayer("workflow").mayOnlyAccessLayers("identity")
@@ -98,12 +109,13 @@ class ArchitectureRulesTest {
             .whereLayer("agent").mayOnlyAccessLayers("execution", "session", "identity", "task", "workflow",
                     "intelligence", "mcp")
             .whereLayer("mcp").mayNotAccessAnyLayer()
+            .whereLayer("relay").mayOnlyAccessLayers("execution", "session")
             .whereLayer("api").mayNotBeAccessedByAnyLayer()
-            .as("Слои модулей: api → {execution, intelligence, session, identity, task(M2), workflow(M2)}; "
-                    + "execution → {session, identity, task, workflow, intelligence, mcp(M3)}; "
-                    + "agent(M3) → execution-контракты (как execution.impl); mcp(M3) — технический, "
-                    + "однонаправленный execution → mcp; session → identity; identity изолирована; "
-                    + "от api никто не зависит");
+            .as("Слои модулей: api → {execution, intelligence, session, identity, task(M2), workflow(M2), relay(M4)}; "
+                    + "execution → {session, identity, task, workflow, intelligence, mcp(M3)} (без relay — D-85: "
+                    + "только SPI ClientToolBridge); agent(M3) → execution-контракты; mcp(M3) — технический, "
+                    + "однонаправленный execution → mcp; relay(M4) → {execution(D-85), session(валидация "
+                    + "регистрации)}; session → identity; identity изолирована; от api никто не зависит");
 
     @Test
     void moduleLayeringIsRespected() {
@@ -113,7 +125,8 @@ class ArchitectureRulesTest {
     @Test
     void noDomainModuleDependsOnApi() {
         noClasses()
-                .that().resideInAnyPackage(EXECUTION, TASK, WORKFLOW, SESSION, IDENTITY, INTELLIGENCE, AGENT, MCP)
+                .that().resideInAnyPackage(EXECUTION, TASK, WORKFLOW, SESSION, IDENTITY, INTELLIGENCE, AGENT, MCP,
+                        RELAY)
                 .should().dependOnClassesThat().resideInAPackage(API)
                 .because("api — верхний слой, доменные модули о нём не знают")
                 .as("Ни один модуль не зависит от api")
@@ -131,10 +144,11 @@ class ArchitectureRulesTest {
     }
 
     @ParameterizedTest(name = "чужой .impl не импортируется: {0}")
-    @ValueSource(strings = {"session", "execution", "intelligence", "identity", "task", "workflow", "agent", "mcp"})
+    @ValueSource(strings = {"session", "execution", "intelligence", "identity", "task", "workflow", "agent", "mcp",
+            "relay"})
     void foreignImplPackageIsHiddenBehindContract(String module) {
         List<String> importers = new ArrayList<>(List.of(
-                API, EXECUTION, TASK, WORKFLOW, SESSION, IDENTITY, INTELLIGENCE, AGENT, MCP));
+                API, EXECUTION, TASK, WORKFLOW, SESSION, IDENTITY, INTELLIGENCE, AGENT, MCP, RELAY));
         importers.remove(BASE + "." + module + "..");
         noClasses()
                 .that().resideInAnyPackage(importers.toArray(new String[0]))
@@ -159,7 +173,7 @@ class ArchitectureRulesTest {
     @Test
     void foreignImplViolationIsCaught() {
         List<String> importers = new ArrayList<>(List.of(
-                API, EXECUTION, WORKFLOW, SESSION, IDENTITY, INTELLIGENCE, AGENT, MCP));
+                API, EXECUTION, WORKFLOW, SESSION, IDENTITY, INTELLIGENCE, AGENT, MCP, RELAY));
         ArchRule rule = noClasses()
                 .that().resideInAnyPackage(importers.toArray(new String[0]))
                 .should().dependOnClassesThat().resideInAPackage(BASE + ".task.impl..")
@@ -178,7 +192,7 @@ class ArchitectureRulesTest {
     @Test
     void agentImplViolationIsCaught() {
         List<String> importers = new ArrayList<>(List.of(
-                API, EXECUTION, TASK, WORKFLOW, SESSION, IDENTITY, INTELLIGENCE, MCP));
+                API, EXECUTION, TASK, WORKFLOW, SESSION, IDENTITY, INTELLIGENCE, MCP, RELAY));
         ArchRule rule = noClasses()
                 .that().resideInAnyPackage(importers.toArray(new String[0]))
                 .should().dependOnClassesThat().resideInAPackage(BASE + ".agent.impl..")
@@ -191,6 +205,23 @@ class ArchitectureRulesTest {
                 .hasMessageContaining("Имплементации модуля agent скрыты за контрактом")
                 .hasMessageContaining("ArchUnitAgentImplViolator")
                 .hasMessageContaining("ArchUnitAgentImplFixture");
+    }
+
+    /** T.2/D-85: доменная зависимость execution → relay запрещена (только SPI ClientToolBridge). */
+    @Test
+    void relayViolationIsCaught() {
+        ArchRule rule = noClasses()
+                .that().resideInAPackage(EXECUTION)
+                .should().dependOnClassesThat().resideInAPackage(RELAY)
+                .because("execution общается с релеем только через SPI ClientToolBridge из своего пакета (D-85)")
+                .as("execution не зависит от relay");
+
+        assertThatThrownBy(() -> rule.check(new ClassFileImporter().importClasses(
+                ArchUnitRelayBridgeViolator.class, ArchUnitRelayFixture.class)))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("execution не зависит от relay")
+                .hasMessageContaining("ArchUnitRelayBridgeViolator")
+                .hasMessageContaining("ArchUnitRelayFixture");
     }
 
     /** Нарушение слоёв (session → task) роняет MODULE_LAYERING. */

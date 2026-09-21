@@ -150,6 +150,12 @@
             <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
         </dependency>
 
+        <!-- WEBSOCKET (M4, D-83): WS-релей /api/v1/relay на сервлет-стеке. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
+
         <!-- EXECUTION (docker-java) -->
         <dependency>
             <groupId>com.github.docker-java</groupId>

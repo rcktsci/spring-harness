@@ -43,6 +43,24 @@ import java.io.IOException;
 @EnableWebSecurity
 public class SecurityConfig {
 
+    /**
+     * Релей (api-contracts §5, D-83): апгрейд WS не блокируется HTTP-аутентификацией — Bearer-JWT
+     * проверяется на handshake ({@code relay.RelayHandshakeInterceptor}) тем же {@link JwtDecoder},
+     * чтобы отказать клиенту WS-close {@code 4401}, а не HTTP {@code 401} до апгрейда. Цепочка
+     * совпадает только с {@code /api/v1/relay}; остальное {@code /api/v1/**} — Bearer ниже.
+     */
+    @Bean
+    @Order(0)
+    @SneakyThrows
+    public SecurityFilterChain relayFilterChain(HttpSecurity http) {
+        http
+                .securityMatcher("/api/v1/relay")
+                .csrf(AbstractHttpConfigurer::disable)
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
+        return http.build();
+    }
+
     /** Вебхуки — без JWT и без Bearer-резолвера (GLM M-1); доступ — capability-токен в пути. */
     @Bean
     @Order(1)

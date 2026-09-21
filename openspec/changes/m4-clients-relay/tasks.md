@@ -7,11 +7,11 @@
 
 ## 2. Пачка T — Зависимости, архитектура и каркас релея
 
-- [ ] 2.1 `pom.xml` — добавить `spring-boot-starter-websocket` (Boot-managed).
-- [ ] 2.2 ArchUnit: канон направлений — `api → relay`, `relay → execution`; `execution ↛ relay` (доменные классы `execution` используют только интерфейс `ClientToolBridge` из собственного пакета; реализация — в `relay`, Spring-связывание). SPI `ClientToolBridge` (в `execution`): `isClientSession(sessionId)`, `resolve(sessionId, toolName) → Optional<ToolDescriptor>`, `invoke(sessionId, callId, toolName, args) → ToolResult`. `noCycles`, `noDomainModuleDependsOnApi` распространить на `relay`. Негативные фикстуры + тест `relayViolationIsCaught`.
-- [ ] 2.3 `config/RelayProperties` (`heartbeat-interval` 15s, `tool-call-timeout` 5m) + `WorkspaceDownloadProperties` (`max-bytes` 10MB, `allow-extensions`) + `ConfigPropertiesBindingTest`.
-- [ ] 2.4 `relay/RelayConnectionRegistry` — `ConcurrentHashMap<sessionId, RelayConnection>`: register с takeover (тот же principal — старое в 4409 `superseded`; иной — `workspace-occupied`), idempotent re-register с того же соединения, `unregister` CAS по connection-identity (D-78).
-- [ ] 2.5 `relay/RelayWebSocketHandler` — handshake-стейт-машина (4401 / `hello`→`welcome` / 4403 до hello / `protocol-mismatch`); dispatch фреймов; `ConcurrentWebSocketSessionDecorator` на исходящие; heartbeat-планировщик (ping, разрыв по 2×interval).
+- [x] 2.1 `pom.xml` — добавить `spring-boot-starter-websocket` (Boot-managed).
+- [x] 2.2 ArchUnit: канон направлений — `api → relay`, `relay → execution`; `execution ↛ relay` (доменные классы `execution` используют только интерфейс `ClientToolBridge` из собственного пакета; реализация — в `relay`, Spring-связывание). SPI `ClientToolBridge` (в `execution`): `isClientSession(sessionId)`, `resolve(sessionId, toolName) → Optional<ToolDescriptor>`, `invoke(sessionId, callId, toolName, args) → ToolResult`. `noCycles`, `noDomainModuleDependsOnApi` распространить на `relay`. Негативные фикстуры + тест `relayViolationIsCaught`.
+- [x] 2.3 `config/RelayProperties` (`heartbeat-interval` 15s, `tool-call-timeout` 5m) + `WorkspaceDownloadProperties` (`max-bytes` 10MB, `allow-extensions`) + `ConfigPropertiesBindingTest`.
+- [x] 2.4 `relay/RelayConnectionRegistry` — `ConcurrentHashMap<sessionId, RelayConnection>`: register с takeover (тот же principal — старое в 4409 `superseded`; иной — `workspace-occupied`), idempotent re-register с того же соединения, `unregister` CAS по connection-identity (D-78).
+- [x] 2.5 `relay/RelayWebSocketHandler` — handshake-стейт-машина (4401 / `hello`→`welcome` / 4403 до hello / `protocol-mismatch`); dispatch фреймов; `ConcurrentWebSocketSessionDecorator` на исходящие; heartbeat-планировщик (ping, разрыв по 2×interval).
 
 ## 3. Пачка U — Workspace-download + canonical-гвард
 
