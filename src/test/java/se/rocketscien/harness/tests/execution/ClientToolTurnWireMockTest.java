@@ -129,6 +129,50 @@ class ClientToolTurnWireMockTest extends BaseApplicationTest {
         }
     }
 
+    /** W (5.1): разрыв соединения с in-flight tool.call — журнальный TOOL_RESULT LOST. */
+    @Test
+    void disconnectDuringInFlightClientCallIsJournaledAsLost() {
+        Session session = newSession();
+        TestRelayConnection connection = attachOverlay(session, List.of(jiraDescriptor()));
+        connection.silent();
+        try {
+            stubToolCallThenFinal("client-disconnect", "call-lost", "jira.list_issues", "{\"project\":\"A\"}");
+            startTurn(session);
+            await().atMost(Duration.ofSeconds(30)).until(() -> connection.sentToolCall("jira.list_issues"));
+
+            clientToolRegistry.detach(session.id(), connection);
+            relayConnectionRegistry.unregister(session.id(), connection);
+
+            awaitOutcome(session.id(), TurnOutcome.COMPLETED);
+            assertThat(journalField(session.id(), "TOOL_RESULT", "status")).isEqualTo("LOST");
+            assertThat(journalField(session.id(), "TOOL_RESULT", "output")).contains("потеряно при отключении");
+        } finally {
+            detach(session, connection);
+        }
+    }
+
+    /** W (5.2): stop во время in-flight tool.call — клиенту tool.cancel, журнал CANCELLED. */
+    @Test
+    void stopDuringInFlightClientCallSendsCancelAndJournalsCancelled() {
+        Session session = newSession();
+        TestRelayConnection connection = attachOverlay(session, List.of(jiraDescriptor()));
+        connection.silent();
+        try {
+            stubToolCallThenFinal("client-stop", "call-stop", "jira.list_issues", "{\"project\":\"A\"}");
+            startTurn(session);
+            await().atMost(Duration.ofSeconds(30)).until(() -> connection.sentToolCall("jira.list_issues"));
+
+            turnManager.requestStop(session.id());
+
+            await().atMost(Duration.ofSeconds(30)).untilAsserted(() ->
+                    assertThat(connection.sent()).anyMatch(frame -> frame.contains("\"type\":\"tool.cancel\"")));
+            awaitOutcome(session.id(), TurnOutcome.CANCELLED);
+            assertThat(journalField(session.id(), "TOOL_RESULT", "status")).isEqualTo("CANCELLED");
+        } finally {
+            detach(session, connection);
+        }
+    }
+
     private TestRelayConnection attachEmptyOverlay(Session session) {
         return attachOverlay(session, List.of());
     }
@@ -146,10 +190,14 @@ class ClientToolTurnWireMockTest extends BaseApplicationTest {
     }
 
     private void runTurn(Session session) {
+        startTurn(session);
+        awaitOutcome(session.id(), TurnOutcome.COMPLETED);
+    }
+
+    private void startTurn(Session session) {
         sessionStore.appendEvent(session.id(), MessageKind.USER,
                 session.ownerUserId(), Map.of("text", "выполни задачу"));
         turnManager.tryStart(session.id());
-        awaitOutcome(session.id(), TurnOutcome.COMPLETED);
     }
 
     private static ToolDescriptor jiraDescriptor() {

@@ -48,6 +48,7 @@ public class ClientToolRegistry implements ClientToolBridge {
 
     private static final String TOOL_NOT_AVAILABLE = "tool-not-available";
     private static final String LOST_ON_DISCONNECT = "потеряно при отключении исполнителя";
+    private static final String CANCELLED_REASON = "отменено пользователем";
 
     private final SessionStore sessionStore;
     private final RelayConnectionRegistry connections;
@@ -59,6 +60,9 @@ public class ClientToolRegistry implements ClientToolBridge {
 
     /** In-flight вызовы (callId → future); запись живёт до disconnect как tombstone (D-81). */
     private final Map<String, PendingCall> pending = new ConcurrentHashMap<>();
+
+    /** Отмена, пришедшая до публикации вызова (гонка stop с invoke): consume'ится в invoke (W). */
+    private final Set<String> cancelledBeforeDispatch = ConcurrentHashMap.newKeySet();
 
     /** Наполнение оверлея при успешной регистрации (lifecycle = соединение, D-80). */
     public void attach(UUID sessionId, RelayConnection connection, List<ToolDescriptor> tools) {
@@ -74,14 +78,20 @@ public class ClientToolRegistry implements ClientToolBridge {
     public void detach(UUID sessionId, RelayConnection connection) {
         overlays.computeIfPresent(sessionId, (key, overlay) ->
                 overlay.connection() == connection ? null : overlay);
+        int[] closed = {0};
         pending.values().removeIf(pendingCall -> {
             if (pendingCall.connection() != connection) {
                 return false;
             }
             pendingCall.future().complete(
                     ToolResult.lost(pendingCall.callId(), pendingCall.tool(), LOST_ON_DISCONNECT));
+            closed[0]++;
             return true;
         });
+        if (closed[0] > 0) {
+            log.info("Реле: разрыв соединения сессии {} — in-flight вызовов закрыто LOST: {}",
+                    sessionId, closed[0]);
+        }
     }
 
     /** Финальный результат клиентского вызова из WS-потока; повторный результат — no-op (D-81). */
@@ -93,6 +103,28 @@ public class ClientToolRegistry implements ClientToolBridge {
             return;
         }
         pendingCall.future().complete(toResult(pendingCall, output, exitCode));
+        pendingCall.markCompleted();
+    }
+
+    /**
+     * Отмена in-flight вызова (W): клиенту {@code tool.cancel}, ожидающему Turn-потоку —
+     * синтетический CANCELLED. Если вызов ещё не опубликован (гонка stop с invoke) — флаг
+     * {@code cancelledBeforeDispatch} заставляет invoke вернуть CANCELLED без отправки tool.call.
+     */
+    @Override
+    public void cancel(UUID sessionId, String callId) {
+        PendingCall pendingCall = pending.get(callId);
+        if (pendingCall == null) {
+            cancelledBeforeDispatch.add(callId);
+            return;
+        }
+        dispatchCancel(pendingCall);
+    }
+
+    private void dispatchCancel(PendingCall pendingCall) {
+        pendingCall.connection().sendText(adapter.toolCancelFrame(pendingCall.callId()));
+        pendingCall.future().complete(
+                ToolResult.cancelled(pendingCall.callId(), pendingCall.tool(), CANCELLED_REASON));
         pendingCall.markCompleted();
     }
 
@@ -136,6 +168,16 @@ public class ClientToolRegistry implements ClientToolBridge {
         CompletableFuture<ToolResult> future = new CompletableFuture<>();
         PendingCall pendingCall = new PendingCall(callId, rootSessionId, connection, toolName, future);
         pending.put(callId, pendingCall);
+        // W: stop пришёл до публикации вызова — CANCELLED без отправки tool.call.
+        if (cancelledBeforeDispatch.remove(callId)) {
+            pending.remove(callId);
+            return ToolResult.cancelled(callId, toolName, CANCELLED_REASON);
+        }
+        // W: cancel выиграл гонку с публикацией (dispatchCancel уже завершил future) — tool.call не дублируем.
+        if (future.isDone()) {
+            pending.remove(callId);
+            return future.getNow(ToolResult.cancelled(callId, toolName, CANCELLED_REASON));
+        }
         // V-7: недоставленный кадр (закрытое/переполненное соединение) — немедленный LOST, не ждём timeout.
         if (!connection.sendText(adapter.toolCallFrame(callId, sessionId, toolName, args))) {
             pending.remove(callId);

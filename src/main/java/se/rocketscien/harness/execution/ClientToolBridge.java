@@ -33,4 +33,10 @@ public interface ClientToolBridge {
     Optional<ToolDescriptor> resolve(UUID sessionId, String toolName);
 
     ToolResult invoke(UUID sessionId, String callId, String toolName, Map<String, Object> args);
+
+    /**
+     * Отмена in-flight клиентского вызова (stop / каскад поддерева, D-59): клиенту уходит
+     * {@code tool.cancel { callId }}, ожидающий Turn-поток получает синтетический CANCELLED.
+     */
+    void cancel(UUID sessionId, String callId);
 }

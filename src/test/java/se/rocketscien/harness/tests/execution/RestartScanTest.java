@@ -92,6 +92,25 @@ class RestartScanTest extends BaseApplicationTest {
     }
 
     @Test
+    void pendingClientToolCallClosedWithLostOnRestart() {
+        // W (5.3): клиентский вызов идёт тем же журнальным паттерном TOOL_CALL/TOOL_RESULT —
+        // рестарт-скан (in-memory реестр соединений пуст) закрывает его LOST «перезапуск».
+        Session session = newSession();
+        llmWireMock.stubFor(post(urlEqualTo(PATH))
+                .willReturn(sse(TurnEngineWireMockTest.textChunk("восстановился"))));
+        sessionStore.appendEvent(session.id(), MessageKind.TOOL_CALL, null, Map.of(
+                "callId", "call-client-1", "toolCallId", "call-llm-client", "tool", "jira.list_issues",
+                "arguments", Map.of("project", "ABC")));
+
+        restartScanRunner.restartScan();
+
+        assertThat(journalField(session.id(), "TOOL_RESULT", "status")).isEqualTo("LOST");
+        assertThat(journalField(session.id(), "TOOL_RESULT", "output")).contains("перезапуск");
+        assertThat(journalField(session.id(), "TOOL_RESULT", "tool")).isEqualTo("jira.list_issues");
+        awaitOutcome(session.id(), TurnOutcome.COMPLETED);
+    }
+
+    @Test
     void pendingToolCallUnderLiveLockIsNotTouched() {
         Session session = newSession();
         sessionStore.appendEvent(session.id(), MessageKind.TOOL_CALL, null, Map.of(

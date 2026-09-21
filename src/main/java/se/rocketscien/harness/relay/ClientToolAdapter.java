@@ -50,6 +50,14 @@ public class ClientToolAdapter {
         return objectMapper.writeValueAsString(frame);
     }
 
+    /** Кадр {@code tool.cancel { callId }} — отмена in-flight вызова на стороне клиента (§5.3). */
+    public String toolCancelFrame(String callId) {
+        Map<String, Object> frame = new LinkedHashMap<>();
+        frame.put("type", "tool.cancel");
+        frame.put("callId", callId);
+        return objectMapper.writeValueAsString(frame);
+    }
+
     private static final class Declaration implements ToolCallback {
 
         private final ToolDescriptor descriptor;

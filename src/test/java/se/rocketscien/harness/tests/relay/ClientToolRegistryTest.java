@@ -187,6 +187,36 @@ class ClientToolRegistryTest {
         assertThat(registry.isClientSession(root)).isFalse();
     }
 
+    @Test
+    void cancelCompletesInFlightCallAsCancelledAndNotifiesClient() throws Exception {
+        registry.attach(root, connection, List.of(descriptor()));
+        connection.silent();
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            Future<ToolResult> future = pool.submit(() ->
+                    registry.invoke(root, "call-cancel", "jira.list_issues", Map.of("project", "A")));
+            await().atMost(Duration.ofSeconds(2)).until(() -> connection.sentToolCall("jira.list_issues"));
+
+            registry.cancel(root, "call-cancel");
+
+            assertThat(future.get(2, TimeUnit.SECONDS).status()).isEqualTo(ToolStatus.CANCELLED);
+            assertThat(connection.sent()).anyMatch(frame -> frame.contains("\"type\":\"tool.cancel\""));
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void cancelBeforeDispatchReturnsCancelledWithoutToolCall() {
+        registry.attach(root, connection, List.of(descriptor()));
+
+        registry.cancel(root, "call-early");
+        ToolResult result = registry.invoke(root, "call-early", "jira.list_issues", Map.of("project", "A"));
+
+        assertThat(result.status()).isEqualTo(ToolStatus.CANCELLED);
+        assertThat(connection.sent()).isEmpty();
+    }
+
     private static ToolDescriptor descriptor() {
         return new ToolDescriptor("jira.list_issues", "List Jira issues",
                 Map.of("type", "object",

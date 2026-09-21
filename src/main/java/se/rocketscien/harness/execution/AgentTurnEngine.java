@@ -471,6 +471,10 @@ public class AgentTurnEngine {
         }
         // D-84: порядок резолва — серверные колбэки (выше) → клиентский оверлей → tool-not-available.
         if (clientToolBridge.resolve(session.id(), pendingCall.tool()).isPresent()) {
+            // W (5.2): stop/каскад прерывает in-flight клиентский вызов — клиенту tool.cancel,
+            // Turn-поток получает синтетический CANCELLED (журнал — здесь же, как sync-результат).
+            AutoCloseable interruptor = cancellation.registerInterrupt(
+                    () -> clientToolBridge.cancel(session.id(), pendingCall.callId()));
             try {
                 return clientToolBridge.invoke(session.id(), pendingCall.callId(), pendingCall.tool(),
                         pendingCall.arguments());
@@ -478,6 +482,12 @@ public class AgentTurnEngine {
                 log.warn("Клиентский инструмент {} сессии {} упал: {}",
                         pendingCall.tool(), session.id(), e.getMessage());
                 return ToolResult.error(pendingCall.callId(), pendingCall.tool(), e.getMessage());
+            } finally {
+                try {
+                    interruptor.close();
+                } catch (Exception e) {
+                    log.debug("Снятие клиентского прерывателя не удалось: {}", e.getMessage());
+                }
             }
         }
         // CLIENT-toolset: нативные файловые не резолвятся (в т.ч. stale-имена манифеста после disconnect).
