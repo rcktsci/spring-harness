@@ -8,6 +8,7 @@ import se.rocketscien.harness.config.WorkspaceDownloadProperties;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -19,8 +20,13 @@ import java.util.UUID;
  * посегментная проверка symlink'ов ({@link Files#isSymbolicLink}), канонический резолв каждого
  * сегмента, containment результата в корне сессии {@code workspaceRoot/{sessionId}}, запрет
  * {@code .}/{@code ..}/нулевых сегментов и абсолютных путей. Symlink запрещён в любом компоненте,
- * включая ведущий внутрь корня (NOFOLLOW-семантика). Остаточный TOCTOU между проверкой и
- * открытием — принятый риск (потребитель — аутентифицированный SSO-пользователь).
+ * включая ведущий внутрь корня (NOFOLLOW-семантика).
+ *
+ * <p>Остаточный TOCTOU между проверкой и открытием — принятый риск, но осознанно с обеими
+ * сторонами угрозы: **писатель** workspace — агент (произвольный {@code bash} в примонтированном
+ * каталоге, prompt-injection может растить symlink/менять файлы в момент проверки), **читатель** —
+ * аутентифицированный SSO-пользователь. Митигация — NOFOLLOW на финальном компоненте и
+ * ре-канонизация каждого сегмента; слои защиты в глубину не плодятся (директива владельца, D-72).</p>
  *
  * <p>Слои безопасности в глубину не плодятся: единственный публичный вход в файлы workspace —
  * этот эндпоинт, внутренние инструменты изолированы контейнером (D-30).</p>
@@ -37,10 +43,19 @@ public class WorkspacePathGuard {
      * Резолвит относительный POSIX-путь внутри workspace сессии в существующий обычный файл.
      *
      * @throws WorkspacePathInvalidException абсолютный путь, {@code .}/{@code ..}/пустой сегмент,
-     *                                       symlink, каталог или выход за корень (422 path-invalid)
+     *                                       symlink, каталог, недопустимые символы пути или выход
+     *                                       за корень (422 path-invalid)
      * @throws WorkspaceFileNotFoundException сегмент/файл не существует (404 file-not-found)
      */
     public Path resolve(UUID sessionId, String rawPath) {
+        try {
+            return resolveWithin(sessionId, rawPath);
+        } catch (InvalidPathException e) {
+            throw new WorkspacePathInvalidException("Недопустимый путь: " + e.getMessage());
+        }
+    }
+
+    private Path resolveWithin(UUID sessionId, String rawPath) {
         if (rawPath == null || rawPath.isBlank()) {
             throw new WorkspacePathInvalidException("Путь не задан");
         }
@@ -48,8 +63,16 @@ public class WorkspacePathGuard {
         if (!Files.exists(root, LinkOption.NOFOLLOW_LINKS)) {
             throw new WorkspaceFileNotFoundException("Workspace-каталог сессии не найден");
         }
+        // U-1: каталог сессии должен быть ровно workspaceRoot/{sessionId} — symlinked/подменённый
+        // каталог сессии не становится якорем containment (иначе гвард охранял бы подменённый корень).
+        Path anchor = canonical(workspaceRoot()).resolve(sessionId.toString());
         Path rootReal = canonical(root);
+        if (!rootReal.equals(anchor)) {
+            throw new WorkspacePathInvalidException("Каталог сессии вне workspaceRoot");
+        }
 
+        // Осознанная нормализация: целевой рантайм — Linux (разделитель `/`); backslash -> `/`
+        // нужен лишь для Windows-dev-тестов (на Linux имена с `\` считаются частью имени).
         String path = rawPath.trim().replace('\\', '/');
         if (path.startsWith("/")) {
             throw new WorkspacePathInvalidException("Абсолютный путь запрещён");
@@ -85,7 +108,8 @@ public class WorkspacePathGuard {
             }
             current = nextReal;
         }
-        throw new WorkspacePathInvalidException("Путь не задан");
+        // Недостижимо: сегментов ≥ 1, на последнем итерация возвращает или бросает выше.
+        throw new IllegalStateException("resolve: пустой список сегментов");
     }
 
     /** Safe-лист расширений (сравнение case-insensitive, api-contracts §8) → 422 extension-not-allowed. */
@@ -116,7 +140,12 @@ public class WorkspacePathGuard {
     }
 
     private Path sessionRoot(UUID sessionId) {
-        return Paths.get(dockerProperties.workspaceRoot(), sessionId.toString()).normalize();
+        return workspaceRoot().resolve(sessionId.toString());
+    }
+
+    /** Корень workspace из конфига, абсолютизированный (та же форма, что у {@code WorkspaceContainerManager}). */
+    private Path workspaceRoot() {
+        return Paths.get(dockerProperties.workspaceRoot()).toAbsolutePath().normalize();
     }
 
     private Path canonical(Path path) {

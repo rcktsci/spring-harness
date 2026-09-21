@@ -401,7 +401,7 @@ paths:
         `harness.workspace.download.allow-extensions` (сравнение case-insensitive) →
         422 extension-not-allowed. Размер определяется до отдачи (`Files.size`);
         превышение `harness.workspace.download.max-bytes` → 413 payload-too-large до
-        отправки заголовков. Отдача — потоком (chunked), без загрузки файла в память.
+        отправки заголовков. Отдача — потоком с `Content-Length`, без загрузки файла в память.
         Для CLIENT-сессий (релей §5) серверный workspace может быть пуст — файлы у
         клиента; это задокументированное ограничение, основные потребители —
         SERVER-сессии и Web Desktop.
@@ -1545,7 +1545,6 @@ components:
         - file-not-found
         - path-invalid
         - extension-not-allowed
-        - not-implemented
       description: >-
         Каталог кодов ошибок M1+M2+M4 (api-contracts §6). Точное значение для каждого
         ответа зафиксировано в description соответствующего response-компонента.
@@ -1555,8 +1554,6 @@ components:
         params-schema, trigger-revoked, signature-invalid (вебхуки).
         M4-коды (workspace-download, §8): file-not-found, path-invalid (абсолютный путь,
         ..-эскейп, symlink), extension-not-allowed (расширение вне safe-листа).
-        not-implemented (501) — переходный код stub-контроллера текущего apply-прохода
-        (пачка U заменит реализацией); не ошибка контракта.
         WS-коды релея (workspace-occupied, superseded, wrong-session-kind,
         session-not-found, duplicate-tool-name, protocol-mismatch, tool-not-available,
         tool-timeout) — во фреймовом контракте §5, вне OpenAPI.

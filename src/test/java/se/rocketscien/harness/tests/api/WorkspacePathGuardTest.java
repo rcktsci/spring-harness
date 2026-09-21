@@ -26,8 +26,13 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * M4 T.3: unit canonical-path-гварда (api-contracts §8, D-72) — {@code ..}-эскейп, symlink
- * наружу/внутрь (NOFOLLOW), каталог, абсолютный путь, нулевые сегменты, отсутствие файла,
- * case-insensitive safe-лист и pre-stat 413.
+ * наружу/внутрь (NOFOLLOW), каталог, абсолютный путь, нулевые сегменты, недопустимые символы,
+ * отсутствие файла, case-insensitive safe-лист и pre-stat 413.
+ *
+ * <p>Symlink-кейсы идут под {@code assumeTrue(symlinksSupported())}: на Linux-рантайме/CI
+ * выполняются, на Windows-dev без привилегий (нет Developer Mode) — скипаются; отдельный
+ * {@code @EnabledOnOs} не нужен, т.к. на Windows с Developer Mode symlink'и создаются и тесты
+ * исполняются. Ключевая NOFOLLOW-проверка обязана гоняться на Linux (приёмка/CI).</p>
  */
 class WorkspacePathGuardTest {
 
@@ -89,6 +94,13 @@ class WorkspacePathGuardTest {
     }
 
     @Test
+    void rejectsInvalidPathCharacters() {
+        // NUL недопустим в имени на всех платформах → InvalidPathException → 422 path-invalid (U-2).
+        assertThatThrownBy(() -> guard.resolve(sessionId, "bad\u0000name.txt"))
+                .isInstanceOf(WorkspacePathInvalidException.class);
+    }
+
+    @Test
     void rejectsDirectory() throws IOException {
         Files.createDirectories(sessionDir.resolve("sub"));
 
@@ -125,6 +137,18 @@ class WorkspacePathGuardTest {
         Files.createSymbolicLink(sessionDir.resolve("alias.txt"), sessionDir.resolve("note.txt"));
 
         assertThatThrownBy(() -> guard.resolve(sessionId, "alias.txt"))
+                .isInstanceOf(WorkspacePathInvalidException.class);
+    }
+
+    @Test
+    void rejectsSymlinkedSessionRoot() throws IOException {
+        assumeTrue(symlinksSupported(), "symlink не поддержан ФС/привилегиями");
+        Path otherSessionDir = Files.createDirectories(root.resolve(UUID.randomUUID().toString()));
+        Files.writeString(otherSessionDir.resolve("note.txt"), "hello");
+        Files.delete(sessionDir);
+        Files.createSymbolicLink(sessionDir, otherSessionDir);
+
+        assertThatThrownBy(() -> guard.resolve(sessionId, "note.txt"))
                 .isInstanceOf(WorkspacePathInvalidException.class);
     }
 

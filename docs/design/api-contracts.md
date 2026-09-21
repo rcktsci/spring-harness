@@ -206,7 +206,6 @@ Tool-уровневые отказы отдаются агенту как `TOOL_
 | `payload-too-large` | 413 | тело > лимита (дефолт 1 МБ) либо файл > `workspace.download.max-bytes` (§8) |
 | `trigger-revoked` | 410 | |
 | `tool-not-available` / `tool-timeout` | TOOL_RESULT ERROR | клиентский инструмент не резолвится / нет ответа за `tool-call-timeout` (§5) |
-| `not-implemented` | 501 | метод ещё не реализован в текущем apply-проходе (stubs); не ошибка контракта |
 
 ## 7. Доступ
 
@@ -223,13 +222,15 @@ SSO-гейт (`groups`-claim, конфиг) → дальше всё (D-41). Вл
 - **Canonical-path-гвард** (D-72): посегментная symlink-проверка, canonical-резолв,
   containment в корне `workspaces/sessions/{sessionId}`, `NOFOLLOW_LINKS` на финальный
   компонент; абсолютный путь, `..`-эскейп, нулевые сегменты, каталог и symlink → 422.
-  Остаточный TOCTOU — принятый риск (потребитель — аутентифицированный SSO-пользователь).
+  Остаточный TOCTOU — принятый риск: **писатель** workspace — агент (arbitrary `bash` в
+  примонтированном каталоге, prompt-injection), **читатель** — аутентифицированный
+  SSO-пользователь; митигация — NOFOLLOW + ре-канонизация каждого сегмента.
 - **Safe-лист** расширений (`harness.workspace.download.allow-extensions`, дефолт —
   текстовые/кодовые расширения; сравнение case-insensitive); вне листа → 422
   `extension-not-allowed`.
 - **Pre-stat 413** до отправки заголовков (`Files.size` против
-  `harness.workspace.download.max-bytes`, дефолт 10 МБ); отдача — потоком (chunked), без
-  загрузки файла в память. Усечение «в процессе» не используется.
+  `harness.workspace.download.max-bytes`, дефолт 10 МБ); отдача — потоком с `Content-Length`,
+  без загрузки файла в память. Усечение «в процессе» не используется.
 - Для CLIENT-сессий (релей §5) серверный workspace может быть пуст — файлы у клиента; это
   задокументированное ограничение, основные потребители — SERVER-сессии и Web Desktop.
 

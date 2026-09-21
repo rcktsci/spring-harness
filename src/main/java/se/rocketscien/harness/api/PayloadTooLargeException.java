@@ -1,8 +1,10 @@
 package se.rocketscien.harness.api;
 
 /**
- * Тело запроса превышает {@code harness.limits.body} → {@code 413 payload-too-large}
- * (api-contracts §0). Бросается {@link PayloadSizeFilter}-ом при чтении потоковой передачи.
+ * Полезная нагрузка превышает лимит → {@code 413 payload-too-large} (api-contracts §0, §8).
+ * Бросается {@link PayloadSizeFilter}-ом (тело запроса > {@code harness.limits.body}) и
+ * pre-stat-проверкой размера скачиваемого workspace-файла
+ * ({@code harness.workspace.download.max-bytes}, {@link WorkspacePathGuard#ensureWithinLimit}).
  */
 public class PayloadTooLargeException extends RuntimeException {
 
