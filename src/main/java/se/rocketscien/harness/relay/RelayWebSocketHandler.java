@@ -70,16 +70,24 @@ public class RelayWebSocketHandler extends TextWebSocketHandler {
             close(session, RelayCloseCodes.UNAUTHENTICATED, "unauthenticated");
             return;
         }
-        WebSocketRelayConnection connection = new WebSocketRelayConnection(
-                session, principal,
-                (int) relayProperties.sendTimeLimit().toMillis(),
-                (int) relayProperties.bufferSizeLimit().toBytes());
+        RelayConnection connection = createConnection(session, principal);
         RelaySession state = new RelaySession(principal, connection);
         session.getAttributes().put(ATTR_SESSION, state);
         long interval = relayProperties.heartbeatInterval().toMillis();
         state.heartbeat = heartbeatExecutor.scheduleAtFixedRate(
                 () -> heartbeat(session, state), interval, interval, TimeUnit.MILLISECONDS);
         log.info("Реле: соединение открыто — principal={}", principal);
+    }
+
+    /**
+     * Фабрика соединения (seam для unit-тестов стейт-машины): по умолчанию — транспортная
+     * обёртка вокруг {@link WebSocketSession}; тесты подменяют на записывающую реализацию.
+     */
+    protected RelayConnection createConnection(WebSocketSession session, String principal) {
+        return new WebSocketRelayConnection(
+                session, principal,
+                (int) relayProperties.sendTimeLimit().toMillis(),
+                (int) relayProperties.bufferSizeLimit().toBytes());
     }
 
     @Override
@@ -118,8 +126,9 @@ public class RelayWebSocketHandler extends TextWebSocketHandler {
             return;
         }
         cleanup(state);
-        log.info("Реле: соединение закрыто — principal={}, sessionId={}, status={}",
-                state.principal, state.registeredSessionId, status);
+        withMdc(sessionIdText(state), state.principal,
+                () -> log.info("Реле: соединение закрыто — sessionId={}, status={}",
+                        state.registeredSessionId, status));
     }
 
     @PreDestroy
@@ -148,8 +157,10 @@ public class RelayWebSocketHandler extends TextWebSocketHandler {
             reject(state, session, "session-not-found", "Сессия не найдена");
             return;
         }
-        if (target.get().kind() != SessionKind.FREE) {
-            reject(state, session, "wrong-session-kind", "Релей доступен только FREE-сессиям");
+        Session targetSession = target.get();
+        // T-1: FREE root — не STATE-сессия задачи и не spawn-подсессия (parentSessionId == null).
+        if (targetSession.kind() != SessionKind.FREE || targetSession.parentSessionId() != null) {
+            reject(state, session, "wrong-session-kind", "Релей доступен только FREE root-сессиям");
             return;
         }
         JsonNode tools = frame.path("client").path("tools");
@@ -161,20 +172,35 @@ public class RelayWebSocketHandler extends TextWebSocketHandler {
             reject(state, session, "workspace-occupied", "Сессия занята другим пользователем");
             return;
         }
+        // T-8: смена сессии тем же соединением — снять прежний ключ (CAS), чтобы не оставлять stale.
+        UUID previousSessionId = state.registeredSessionId;
+        if (previousSessionId != null && !previousSessionId.equals(sessionId)) {
+            registry.unregister(previousSessionId, state.connection);
+        }
         state.registeredSessionId = sessionId;
-        logRegistration(sessionId, state.principal, tools.size());
+        int toolCount = tools.isArray() ? tools.size() : 0;
+        withMdc(sessionId.toString(), state.principal,
+                () -> log.info("Реле: регистрация на сессии — инструментов={}", toolCount));
         send(state, frame("registered", Map.of("sessionId", sessionId.toString())));
     }
 
     private void heartbeat(WebSocketSession session, RelaySession state) {
-        long interval = relayProperties.heartbeatInterval().toMillis();
-        if (System.currentTimeMillis() - state.lastPong.get() > 2 * interval) {
-            log.info("Реле: heartbeat-таймаут — разрыв (principal={}, sessionId={})",
-                    state.principal, state.registeredSessionId);
-            close(session, CloseStatus.GOING_AWAY.getCode(), "heartbeat-timeout");
-            return;
+        // T-2 (D-J-1): задача scheduleAtFixedRate гаснет после любого исключения — гасим Throwable,
+        // иначе heartbeat молча умрёт и соединение никогда не таймаутится/unregister'ится.
+        try {
+            long interval = relayProperties.heartbeatInterval().toMillis();
+            if (System.currentTimeMillis() - state.lastPong.get() >= 2 * interval) {
+                withMdc(sessionIdText(state), state.principal,
+                        () -> log.info("Реле: heartbeat-таймаут — разрыв"));
+                close(session, CloseStatus.GOING_AWAY.getCode(), "heartbeat-timeout");
+                cleanup(state);
+                return;
+            }
+            send(state, frame("ping", Map.of()));
+        } catch (Throwable t) {
+            log.warn("Реле: heartbeat-тик упал — расписание продолжается (principal={}): {}",
+                    state.principal, t.toString());
         }
-        send(state, frame("ping", Map.of()));
     }
 
     private void reject(RelaySession state, WebSocketSession session, String code, String message) {
@@ -195,11 +221,20 @@ public class RelayWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
-    private void logRegistration(UUID sessionId, String principal, int toolCount) {
-        MDC.put("sessionId", sessionId.toString());
-        MDC.put("principal", principal);
+    private String sessionIdText(RelaySession state) {
+        return state.registeredSessionId == null ? null : state.registeredSessionId.toString();
+    }
+
+    /** MDC-контекст (D-77): sessionId/principal на время действия; null-поля не пишутся. */
+    private void withMdc(String sessionId, String principal, Runnable action) {
+        if (sessionId != null) {
+            MDC.put("sessionId", sessionId);
+        }
+        if (principal != null) {
+            MDC.put("principal", principal);
+        }
         try {
-            log.info("Реле: регистрация на сессии — инструментов={}", toolCount);
+            action.run();
         } finally {
             MDC.remove("sessionId");
             MDC.remove("principal");
@@ -267,9 +302,9 @@ public class RelayWebSocketHandler extends TextWebSocketHandler {
         private final RelayConnection connection;
         private final AtomicLong lastPong = new AtomicLong(System.currentTimeMillis());
         private final AtomicBoolean closed = new AtomicBoolean();
-        private Phase phase = Phase.AWAITING_HELLO;
-        private UUID registeredSessionId;
-        private ScheduledFuture<?> heartbeat;
+        private volatile Phase phase = Phase.AWAITING_HELLO;
+        private volatile UUID registeredSessionId;
+        private volatile ScheduledFuture<?> heartbeat;
 
         private RelaySession(String principal, RelayConnection connection) {
             this.principal = principal;

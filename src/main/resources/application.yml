@@ -123,6 +123,8 @@ harness:
     # Пределы ConcurrentWebSocketSessionDecorator (сериализация исходящих кадров, D-83).
     send-time-limit: 10s
     buffer-size-limit: 512KB
+    # Доверенные origin WS-handshake (Bearer-клиент не-браузерный; для Web Desktop — сузить).
+    allowed-origin-patterns: ["*"]
   workspace:
     download:
       # Скачивание серверного workspace-файла (api-contracts §8, D-72): pre-stat 413 до отдачи.

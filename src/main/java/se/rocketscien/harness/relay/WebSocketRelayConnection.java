@@ -6,8 +6,6 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
 
-import java.io.IOException;
-
 /**
  * Обёртка серверного {@link WebSocketSession}: исходящие кадры сериализуются
  * {@link ConcurrentWebSocketSessionDecorator} (D-83) — параллельные отправки из Turn'ов
@@ -34,8 +32,8 @@ public class WebSocketRelayConnection implements RelayConnection {
     public void sendText(String frame) {
         try {
             session.sendMessage(new TextMessage(frame));
-        } catch (IOException e) {
-            log.debug("Кадр релея не отправлен (соединение закрыто): {}", e.getMessage());
+        } catch (Exception e) {
+            log.debug("Кадр релея не отправлен (соединение закрыто/переполнено): {}", e.getMessage());
         }
     }
 
@@ -45,7 +43,7 @@ public class WebSocketRelayConnection implements RelayConnection {
             if (session.isOpen()) {
                 session.close(new CloseStatus(statusCode, reason));
             }
-        } catch (IOException e) {
+        } catch (Exception e) {
             log.debug("Закрытие соединения релея не удалось: {}", e.getMessage());
         }
     }

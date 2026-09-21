@@ -48,6 +48,9 @@ public class SecurityConfig {
      * проверяется на handshake ({@code relay.RelayHandshakeInterceptor}) тем же {@link JwtDecoder},
      * чтобы отказать клиенту WS-close {@code 4401}, а не HTTP {@code 401} до апгрейда. Цепочка
      * совпадает только с {@code /api/v1/relay}; остальное {@code /api/v1/**} — Bearer ниже.
+     *
+     * <p>T-12: {@code UserSyncFilter} здесь намеренно не подключён — релею нужен только principal
+     * (логи D-77, доступ по D-41 без владения), синк {@code app_user} не требуется.</p>
      */
     @Bean
     @Order(0)

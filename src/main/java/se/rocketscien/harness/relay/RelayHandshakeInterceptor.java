@@ -7,7 +7,6 @@ import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.WebSocketHandler;
 import org.springframework.web.socket.server.HandshakeInterceptor;
@@ -56,7 +55,8 @@ public class RelayHandshakeInterceptor implements HandshakeInterceptor {
                 return true;
             }
             attributes.put(PRINCIPAL_ATTRIBUTE, principalName(jwt));
-        } catch (JwtException e) {
+        } catch (Exception e) {
+            // T-10: любая аномалия декодера (пустой/битый токен) — тот же close 4401, не 500.
             log.debug("Релей: невалидный JWT — handshake отклонён (4401): {}", e.getMessage());
             attributes.put(AUTH_FAILED_ATTRIBUTE, true);
         }

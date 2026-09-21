@@ -244,6 +244,7 @@ class ConfigPropertiesBindingTest {
             assertThat(properties.toolCallTimeout()).isEqualTo(Duration.ofMinutes(5));
             assertThat(properties.sendTimeLimit()).isEqualTo(Duration.ofSeconds(10));
             assertThat(properties.bufferSizeLimit()).isEqualTo(DataSize.ofKilobytes(512));
+            assertThat(properties.allowedOriginPatterns()).containsExactly("*");
         });
     }
 

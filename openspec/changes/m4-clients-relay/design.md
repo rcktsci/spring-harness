@@ -84,7 +84,7 @@ M3 закрыл MCP-клиент и мета-инструменты оркест
 
 ### D-85: Архитектура — relay → execution через SPI
 
-**Решение**: канон направлений — `api → relay`, `relay → execution`; `execution ↛ relay` (обращение только через интерфейс, реализованный в `relay`, связывание — Spring). SPI — интерфейс `ClientToolBridge` в `execution`: `boolean isClientSession(sessionId)` (гейт нативных файловых), `Optional<ToolDescriptor> resolve(sessionId, toolName)` (манифест), `ToolResult invoke(sessionId, callId, toolName, args)` (вызов в релей). `ClientToolAdapter` в `relay` реализует `ToolCallback` и делегирует в `ClientToolBridge`. ArchUnit: `relay` — технический слой; `api` и `execution` могут зависеть от `relay` на уровне конфигурации/Wiring, но доменные классы `execution` используют только интерфейс `ClientToolBridge` из собственного пакета.
+**Решение**: канон направлений — `api → relay`, `relay → execution`; `execution ↛ relay` (обращение только через интерфейс, реализованный в `relay`, связывание — Spring). SPI — интерфейс `ClientToolBridge` в `execution`: `boolean isClientSession(sessionId)` (гейт нативных файловых), `Optional<ToolDescriptor> resolve(sessionId, toolName)` (манифест), `ToolResult invoke(sessionId, callId, toolName, args)` (вызов в релей). `ClientToolAdapter` в `relay` реализует `ToolCallback` и делегирует в `ClientToolBridge`. ArchUnit: `relay` — технический слой; `api` может зависеть от `relay`, но **`execution ↛ relay` строго** (любая форма зависимости): доменные классы `execution` используют только интерфейс `ClientToolBridge` из собственного пакета, реализация — Spring-бин в `relay`.
 
 **Альтернативы**: цикл execution ↔ relay — запрещён `noCyclesBetweenModules`; релей внутри execution — смешение WS-инфраструктуры и домена.
 

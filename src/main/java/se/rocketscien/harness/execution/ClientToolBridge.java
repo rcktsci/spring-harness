@@ -14,7 +14,7 @@ import java.util.UUID;
  * <ul>
  *   <li>{@link #isClientSession} — гейт нативных файловых инструментов (D-84: toolset
  *       сессии = наличие соединения в parent-цепочке);</li>
- *   <li>{@link #resolveTool} — резолв клиентского инструмента из live-оверлея (манифест
+ *   <li>{@link #resolve} — резолв клиентского инструмента из live-оверлея (манифест
  *       собирается на Turn, резолв — на момент вызова);</li>
  *   <li>{@link #invoke} — маршрутизация вызова в WS-релей; возвращает финальный
  *       {@link ToolResult} (или синтетический ERROR/LOST/CANCELLED).</li>
@@ -24,7 +24,7 @@ public interface ClientToolBridge {
 
     boolean isClientSession(UUID sessionId);
 
-    Optional<ToolDescriptor> resolveTool(UUID sessionId, String toolName);
+    Optional<ToolDescriptor> resolve(UUID sessionId, String toolName);
 
     ToolResult invoke(UUID sessionId, String callId, String toolName, JsonNode args);
 }
