@@ -2,13 +2,13 @@
 
 ## Purpose
 
-WebSocket-релей исполнителя CLIENT_EXEC: внешний клиент (будущий Web Desktop, в M4 — тестовый клиент) подключается к серверу, регистрируется на workspace задачи `(taskId, binding)`, декларирует свои инструменты и исполняет `tool.call`'ы локально. Протокол — api-contracts §5. Параллельный маршрутизатор инструментальных вызовов нативному серверному исполнению (workspace-tools) и MCP-клиентам (mcp-client).
+WebSocket-релей: внешний клиент (будущий Web Desktop, в M4 — тестовый клиент) подключается к серверу, регистрируется на **сессии** (D-84: единица маршрутизации — сессия, не задача), декларирует свои инструменты и исполняет `tool.call`'ы локально. Протокол — api-contracts §5.
 
 ## ADDED Requirements
 
 ### Requirement: Handshake и аутентификация
 
-WS-эндпоинт `/api/v1/relay` SHALL принимать соединения с Bearer-JWT (тот же токен, что у REST; SSO-гейт D-41 — groups-claim). Без/с кривым токеном — close 4401. После подключения клиент SHALL отправить `hello { protocol: 1 }`; сервер отвечает `welcome { protocol }`. Любой фрейм до `hello` → close 4403. Версия протокола несовместима → close 4403 `protocol-mismatch`.
+WS-эндпоинт `/api/v1/relay` SHALL принимать соединения с Bearer-JWT (тот же токен, что у REST; SSO-гейт D-41 — groups-claim). Без/с кривым токеном — close 4401. После подключения клиент SHALL отправить `hello { protocol: 1 }`; сервер отвечает `welcome { protocol }`. Любой фрейм до `hello` → close 4403. Несовместимая версия протокола → close 4403 `protocol-mismatch`.
 
 #### Scenario: штатное подключение
 
@@ -20,33 +20,52 @@ WS-эндпоинт `/api/v1/relay` SHALL принимать соединени�
 - **WHEN** клиент подключается без JWT
 - **THEN** сервер закрывает соединение с кодом 4401
 
-#### Scene: фрейм до hello
+#### Scenario: фрейм до hello
 
 - **WHEN** клиент шлёт `register` до `hello`
 - **THEN** сервер закрывает соединение с кодом 4403
 
-### Requirement: Регистрация исполнителя с декларацией инструментов
+### Requirement: Регистрация на сессию с декларацией инструментов
 
-Клиент SHALL зарегистрироваться фреймом `register { taskId, binding, basePath, client: { version, tools[] } }`. `binding` — логический ключ workspace-биндинга состояния (по умолчанию — единственный биндинг задачи; при отсутствии/неоднозначности — `error binding-required`). `basePath` — локальный корень клиента (информативно, для логов/UI). `tools[]` — декларация клиентских инструментов (см. `client-tool-bridge`). Регистрация на задачу, не находящуюся в CLIENT_EXEC-состоянии → `error task-not-client-exec` (close 4409). Workspace `(taskId, binding)` уже занято живым соединением → `error workspace-occupied` (close 4409). Успех → `registered { workspaceId }` и маршрутизация последующих `tool.call` этому клиенту.
+Клиент SHALL зарегистрироваться фреймом `register { sessionId, basePath, client: { version, tools[] } }`. `basePath` — локальный корень клиента (информативно, для логов/UI). `tools[]` — декларация клиентских инструментов (см. `client-tool-bridge`). Регистрация на несуществующую сессию → `error session-not-found` (close 4409). Регистрация на STATE-сессию задачи → `error wrong-session-kind` (close 4409): релею доступны только FREE root-сессии. Успех → `registered { sessionId }` и маршрутизация последующих `tool.call` этому клиенту. Повторный `register` с того же соединения — idempotent success.
 
 #### Scenario: успешная регистрация
 
-- **WHEN** клиент регистрируется на задачу в CLIENT_EXEC-состоянии со свободным workspace
-- **THEN** сервер отвечает `registered { workspaceId }` и сохраняет декларацию инструментов как активный оверлей
+- **WHEN** клиент регистрируется на существующую FREE-сессию
+- **THEN** сервер отвечает `registered { sessionId }` и сохраняет декларацию инструментов как активный оверлей
 
-#### Scenario: занятый workspace
+#### Scenario: несуществующая сессия
 
-- **WHEN** второй клиент регистрируется на занятый `(taskId, binding)`
-- **THEN** сервер отвечает `error workspace-occupied` и закрывает соединение с кодом 4409
+- **WHEN** sessionId неизвестен
+- **THEN** `error session-not-found`, close 4409
 
-#### Scenario: задача не в CLIENT_EXEC
+#### Scenario: STATE-сессия не регистрируется
 
-- **WHEN** клиент регистрируется на задачу в SERVER-исполнении
-- **THEN** `error task-not-client-exec`, close 4409
+- **WHEN** клиент регистрируется на STATE-сессии задачи
+- **THEN** `error wrong-session-kind`, close 4409
+
+### Requirement: Takeover и идемпотентность реестра
+
+Соединение на sessionId SHALL подчиняться политике: живое соединение и регистрируется **другое** соединение того же principal → takeover: старое закрывается кодом 4409 с `error superseded`, новое регистрируется; другой principal → `error workspace-occupied` (close 4409). `unregister` SHALL выполняться CAS по connection-identity — протухший сокет не может удалить сменившее его новое соединение.
+
+#### Scenario: takeover тем же пользователем
+
+- **WHEN** клиент переподключается новым соединением при живом старом
+- **THEN** старое закрывается 4409 `superseded`, новое получает `registered`
+
+#### Scenario: конфликт разных пользователей
+
+- **WHEN** другой пользователь регистрируется на занятую сессию
+- **THEN** `error workspace-occupied`, close 4409
+
+#### Scenario: протухший сокет не вытесняет новое
+
+- **WHEN** heartbeat-таймаут старого сокета срабатывает после реконнекта
+- **THEN** старое соединение удаляется из реестра только если оно всё ещё там (CAS), новое остаётся
 
 ### Requirement: Двунаправленная маршрутизация tool-фреймов
 
-Сервер SHALL пересылать агентские вызовы клиенту фреймом `tool.call { callId, sessionId, tool, args }` и принимать ответы `tool.result { callId, output, exitCode }` (идемпотентно по `callId` — первый финальный результат выигрывает, дубликаты игнорируются) и опциональные `tool.progress { callId, chunk }`. `tool.cancel { callId }` SHALL отправляться при отмене Turn'а (stop) — клиент прерывает локальное исполнение; повторный `tool.result` после cancel игнорируется. Незавершённый `tool.call` при разрыве соединения закрывается синтетическим `TOOL_RESULT LOST` «потеряно при отключении исполнителя» (та же семантика LOST, что у workspace-tools).
+Сервер SHALL пересылать агентские вызовы клиенту фреймом `tool.call { callId, sessionId, tool, args }` (где `tool` — free-form имя из декларации) и принимать ответы `tool.result { callId, output, exitCode }` (идемпотентно по `callId` — первый финальный результат выигрывает) и опциональные `tool.progress { callId, chunk }`. `tool.cancel { callId }` SHALL отправляться при отмене Turn'а (stop) — клиент прерывает локальное исполнение; повторный `tool.result` после cancel игнорируется. Незавершённый `tool.call` при разрыве соединения закрывается синтетическим `TOOL_RESULT LOST` «потеряно при отключении исполнителя». Журнал финального результата пишется только Turn-потоком под `sess`-локом (та же модель, что у async/MCP — D-64); WS-поток только complete'ит future по callId.
 
 #### Scenario: вызов и результат
 
@@ -70,7 +89,7 @@ WS-эндпоинт `/api/v1/relay` SHALL принимать соединени�
 
 ### Requirement: Heartbeat и таймауты
 
-Соединение SHALL поддерживаться `ping`/`pong` с интервалом `harness.relay.heartbeat-interval` (конфиг, дефолт 15 с); разрыв — по превышению `2 × heartbeat-interval` без ответного pong. `tool.call`, не получивший ответа за `harness.relay.tool-call-timeout` (конфиг), SHALL заканчиваться синтетическим `TOOL_RESULT ERROR tool-timeout` (не LOST — исполнитель жив, но не отвечает).
+Соединение SHALL поддерживаться `ping`/`pong`, инициируемыми **сервером**, с интервалом `harness.relay.heartbeat-interval` (конфиг, дефолт 15 с); разрыв — по превышению `2 × heartbeat-interval` без ответного pong. `tool.call`, не получивший ответа за `harness.relay.tool-call-timeout` (конфиг, дефолт 5 мин), SHALL заканчиваться синтетическим `TOOL_RESULT ERROR tool-timeout`. Исходящие кадры на одном WS-соединении SHALL сериализоваться общим мьютексом/очередью (параллельные отправки из Turn'ов root-сессии и её sub-сессий, а также ping'и планировщика).
 
 #### Scenario: живое соединение
 
@@ -87,30 +106,16 @@ WS-эндпоинт `/api/v1/relay` SHALL принимать соединени�
 - **WHEN** `tool.call` не получает ответа сверх `tool-call-timeout`
 - **THEN** агент получает TOOL_RESULT ERROR tool-timeout
 
-### Requirement: Переподключение и grace-период
-
-При разрыве соединения задача SHALL оставаться в CLIENT_EXEC-состоянии и ждать нового исполнителя в течение `harness.relay.session-grace-period` (конфиг, дефолт 60 мин); повторный `register` на тот же `(taskId, binding)` SHALL успешно восстановить маршрутизацию, а незавершённые к моменту разрыва вызовы, уже закрытые синтетическим LOST, НЕ переотправляются. По истечении grace-периода задача переводится в ERROR-переход (разборщик), если граф его предусматривает, иначе остаётcя в CLIENT_EXEC до явного вмешательства.
-
-#### Scenario: переподключение в пределах grace
-
-- **WHEN** клиент переподключается и регистрируется на тот же workspace в течение grace-периода
-- **THEN** маршрутизация восстанавливается, новые `tool.call` идут новому клиенту
-
-#### Scenario: истечение grace-периода
-
-- **WHEN** grace-период истёк, а исполнитель не вернулся
-- **THEN** задача выполняет ERROR-переход по графу (если есть ребро ERROR), иначе остаётся в CLIENT_EXEC
-
 ### Requirement: Реестр соединений и видимость
 
-Активные соединения SHALL храниться в in-memory реестре, ключём которого является `(taskId, binding)`; одно объединение — один исполнитель. Реестр не персистится (D-80): рестарт процесса обнуляет его, а незавершённые вызовы закрываются рестарт-сканом как LOST. Регистрация/разрыв SHALL отражаться в логах (MDC: taskId, binding, sessionId, principal) — отдельной audit-таблицы нет (D-77).
+Активные соединения SHALL храниться в in-memory реестре, ключём которого является `sessionId`; одна сессия — одно активное соединение (с учётом takeover). Реестр не персистится (D-80): рестарт процесса обнуляет его, а незавершённые вызовы закрываются рестарт-сканом как LOST. Регистрация/разрыв SHALL отражаться в логах (MDC: sessionId, principal, число инструментов) — отдельной audit-таблицы нет (D-77).
 
 #### Scenario: рестарт процесса
 
 - **WHEN** процесс упал и поднялся
-- **THEN** реестр соединений пуст; незавершённые tool.call закрыты рестарт-сканом LOST; задача ждёт нового register
+- **THEN** реестр соединений пуст; незавершённые tool.call закрыты рестарт-сканом LOST; новый register возможен
 
 #### Scenario: логирование handshake
 
 - **WHEN** клиент регистрируется
-- **THEN** в логе появляются taskId, binding, sessionId, principal и число декларированных инструментов
+- **THEN** в логе появляются sessionId, principal и число декларированных инструментов
