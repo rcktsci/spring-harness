@@ -1,13 +1,14 @@
 package se.rocketscien.harness.execution;
 
-import tools.jackson.databind.JsonNode;
+import java.util.Map;
 
 /**
  * Дескриптор клиентского инструмента из декларации {@code register} (M4, D-84):
  * {@code name} — имя в манифесте и журнале ({@code TOOL_CALL}/{@code TOOL_RESULT}),
- * {@code description} — для рендера модели, {@code inputSchema} — JSON Schema для
- * валидации {@code args} на сервере перед {@code tool.call} (D-82: {@code source}
- * информативен и на сервере не интерпретируется).
+ * {@code description} — для рендера модели, {@code inputSchema} — JSON Schema (ограниченный
+ * профиль D-58) для валидации {@code args} на сервере перед {@code tool.call}; {@code source}
+ * ({@code client} | {@code client.mcp:<server>}) — информативная метка для UI/аудита
+ * (D-82: на сервере не интерпретируется, к MCP-серверам клиента сервер не ходит).
  */
-public record ToolDescriptor(String name, String description, JsonNode inputSchema) {
+public record ToolDescriptor(String name, String description, Map<String, Object> inputSchema, String source) {
 }

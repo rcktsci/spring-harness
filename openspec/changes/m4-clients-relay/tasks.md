@@ -21,11 +21,11 @@
 
 ## 4. Пачка V — client-tool-bridge и маршрутизация
 
-- [ ] 4.1 `relay/ClientToolRegistry` — оверлей `sessionId → tools[]` (name, description, inputSchema, source); lifecycle = соединение; резолв по parent-цепочке (sub-сессии → root). D-80.
-- [ ] 4.2 `relay/ClientToolAdapter` (реализует `execution`-ный `ToolCallback`): валидация args по `inputSchema` → `tool.call` в соединение → ожидание на `CompletableFuture` с `tool-call-timeout` → ERROR tool-timeout; completion-map + tombstones; дублирующий `tool.result` игнорируется.
-- [ ] 4.3 `AgentTurnEngine`: toolset сессии (connection резолвится по parent-цепочке → CLIENT); в CLIENT нативные файловые (`bash`, `read_file`, `write_file`, `edit_file`, `glob`, `grep`) **не резолвятся** (манифест + executeToolCall-гейт); порядок серверные колбэки → клиентский оверлей → `tool-not-available`; async-классификация только по серверным колбэкам.
-- [ ] 4.4 `SubagentSpawner` — видимость оверлея дочерними sub-сессиями (тест: spawn из CLIENT-root видит клиентский инструмент; task-сессия — SERVER, оверлея нет).
-- [ ] 4.5 Интеграционные тесты: декларация `client.mcp:jira` (сервер не ходит к MCP); `duplicate-tool-name` → 4409; кривые args → ERROR params-schema; `tool-not-available` после disconnect; галлюцинированный bash в CLIENT не идёт на сервер.
+- [x] 4.1 `relay/ClientToolRegistry` — оверлей `sessionId → tools[]` (name, description, inputSchema, source); lifecycle = соединение; резолв по parent-цепочке (sub-сессии → root). D-80.
+- [x] 4.2 `relay/ClientToolAdapter` (реализует `execution`-ный `ToolCallback`): валидация args по `inputSchema` → `tool.call` в соединение → ожидание на `CompletableFuture` с `tool-call-timeout` → ERROR tool-timeout; completion-map + tombstones; дублирующий `tool.result` игнорируется.
+- [x] 4.3 `AgentTurnEngine`: toolset сессии (connection резолвится по parent-цепочке → CLIENT); в CLIENT нативные файловые (`bash`, `read_file`, `write_file`, `edit_file`, `glob`, `grep`) **не резолвятся** (манифест + executeToolCall-гейт); порядок серверные колбэки → клиентский оверлей → `tool-not-available`; async-классификация только по серверным колбэкам.
+- [x] 4.4 `SubagentSpawner` — видимость оверлея дочерними sub-сессиями (тест: spawn из CLIENT-root видит клиентский инструмент; task-сессия — SERVER, оверлея нет).
+- [x] 4.5 Интеграционные тесты: декларация `client.mcp:jira` (сервер не ходит к MCP); `duplicate-tool-name` → 4409; кривые args → ERROR params-schema; `tool-not-available` после disconnect; галлюцинированный bash в CLIENT не идёт на сервер.
 
 ## 5. Пачка W — Разрывы, cancel, рестарт-скан
 

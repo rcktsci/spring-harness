@@ -39,6 +39,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
 
 /**
  * Агентный цикл Turn'а (execution-model §2–§3, спека agent-turn): раунды
@@ -96,6 +97,7 @@ public class AgentTurnEngine {
     private final ObjectMapper objectMapper;
     private final IdGenerator idGenerator;
     private final TaskProperties taskProperties;
+    private final ClientToolBridge clientToolBridge;
 
     /**
      * Итог Turn'а: источник инструкции (J-1) и признак парковки в ожидании поздних
@@ -115,7 +117,13 @@ public class AgentTurnEngine {
             return null;
         }
         SessionStore.AgentRuntime agent = sessionStore.agentRuntime(session.agentRevisionId());
-        List<ToolCallback> toolCallbacks = new ArrayList<>(agentTools.declarations(agent));
+        // D-84: toolset сессии — наличие клиентского соединения в parent-цепочке. В CLIENT нативные
+        // файловые инструменты исключаются из манифеста (тот же гейт — в executeToolCall).
+        boolean clientToolset = clientToolBridge.isClientSession(session.id());
+        List<ToolCallback> toolCallbacks = new ArrayList<>();
+        if (!clientToolset) {
+            toolCallbacks.addAll(agentTools.declarations(agent));
+        }
         // O.4: read_compacted доступен всем агентам в их собственной сессии
         toolCallbacks.add(readCompactedTool.declaration());
         // P.3: инструменты оркестратора (6 metaTools) + spawn_subagent — только
@@ -128,11 +136,19 @@ public class AgentTurnEngine {
         // Q.3: MCP-инструменты (tools_jsonb.mcp: [{server, include?, exclude?}]) —
         // наравне с native; неизвестный сервер в конфиге агента — runtime-error манифеста
         toolCallbacks.addAll(mcpManifestCallbacks(agent));
+        // D-84: клиентский оверлей активного соединения (по parent-цепочке) — наравне с серверными
+        List<ToolCallback> clientManifest = clientToolBridge.manifest(session.id());
+        toolCallbacks.addAll(clientManifest);
         if (session.kind() == SessionKind.STATE) {
             toolCallbacks.add(transitionTool.declaration());
         }
+        // Stale-окно (D-84): имена клиентских инструментов выхвачены на старте Turn'а — disconnect
+        // внутри Turn'а оставляет их в манифесте; вызов → tool-not-available (не нативный серверный).
+        Set<String> clientToolNames = clientManifest.stream()
+                .map(callback -> callback.getToolDefinition().name())
+                .collect(Collectors.toSet());
         InstructionSource source = instructionSource(session);
-        TurnState state = new TurnState(source, session.lastConsumedSeq());
+        TurnState state = new TurnState(source, session.lastConsumedSeq(), clientToolset, clientToolNames);
 
         long renderedWatermark = 0;
         while (true) {
@@ -188,7 +204,7 @@ public class AgentTurnEngine {
                 String callId = idGenerator.newUlid();
                 Map<String, Object> arguments = parseArguments(toolCall.arguments());
                 PendingCall pendingCall = new PendingCall(callId, toolCall.name(), arguments);
-                if (isAsyncTool(toolCall.name())) {
+                if (isAsyncTool(session.id(), toolCall.name(), state)) {
                     asyncCalls.add(pendingCall);
                 } else {
                     syncCalls.add(pendingCall);
@@ -304,10 +320,17 @@ public class AgentTurnEngine {
         private long minPendingUserSeq;
         /** Подтверждённое намерение: гейт заблокировал transition при отрендеренном USER; 0 — нет. */
         private final AtomicLong userIntentSeq = new AtomicLong();
+        /** Toolset сессии на старте Turn'а: CLIENT — нативные файловые исключены (D-84). */
+        private final boolean clientToolset;
+        /** Имена клиентских инструментов манифеста Turn'а (stale-окно disconnect, D-84). */
+        private final Set<String> clientToolNames;
 
-        private TurnState(InstructionSource source, long baselineSeq) {
+        private TurnState(InstructionSource source, long baselineSeq, boolean clientToolset,
+                          Set<String> clientToolNames) {
             this.source = source;
             this.baselineSeq = baselineSeq;
+            this.clientToolset = clientToolset;
+            this.clientToolNames = clientToolNames;
         }
     }
 
@@ -445,6 +468,21 @@ public class AgentTurnEngine {
                 return ToolResult.error(pendingCall.callId(), pendingCall.tool(), e.getMessage());
             }
         }
+        // D-84: порядок резолва — серверные колбэки (выше) → клиентский оверлей → tool-not-available.
+        if (clientToolBridge.resolve(session.id(), pendingCall.tool()).isPresent()) {
+            try {
+                return clientToolBridge.invoke(session.id(), pendingCall.callId(), pendingCall.tool(),
+                        pendingCall.arguments());
+            } catch (Exception e) {
+                log.warn("Клиентский инструмент {} сессии {} упал: {}",
+                        pendingCall.tool(), session.id(), e.getMessage());
+                return ToolResult.error(pendingCall.callId(), pendingCall.tool(), e.getMessage());
+            }
+        }
+        // CLIENT-toolset: нативные файловые не резолвятся (в т.ч. stale-имена манифеста после disconnect).
+        if (state.clientToolset || state.clientToolNames.contains(pendingCall.tool())) {
+            return ToolResult.error(pendingCall.callId(), pendingCall.tool(), "tool-not-available");
+        }
         try {
             return agentTools.execute(session.id(), pendingCall.tool(), pendingCall.arguments(), cancellation);
         } catch (Exception e) {
@@ -460,20 +498,23 @@ public class AgentTurnEngine {
     }
 
     /**
-     * Async-классификация инструмента: нативные async-capable (bash, N.1) и MCP-инструменты
-     * с manifest-атрибутом сервера {@code _meta["async-capable"]} (Q.2 — окна те же).
+     * Async-классификация инструмента: серверные MCP-инструменты с manifest-атрибутом сервера
+     * {@code _meta["async-capable"]} (Q.2) и нативные async-capable (bash, N.1) в SERVER-toolset.
+     * Клиентский инструмент (включая декларированный {@code bash}) окном не обслуживается —
+     * маршрутизируется в релей; в CLIENT нативные async-capable не резолвятся (D-84).
      */
-    private boolean isAsyncTool(String tool) {
-        if (asyncExecutor.isAsyncCapable(tool)) {
-            return true;
+    private boolean isAsyncTool(UUID sessionId, String tool, TurnState state) {
+        if (mcpClients.isManagedTool(tool)) {
+            int dot = tool.indexOf('.');
+            return mcpClients.listTools(tool.substring(0, dot)).stream()
+                    .anyMatch(descriptor -> descriptor.tool().equals(tool.substring(dot + 1))
+                            && descriptor.asyncCapable());
         }
-        if (!mcpClients.isManagedTool(tool)) {
+        if (state.clientToolset || state.clientToolNames.contains(tool)
+                || clientToolBridge.resolve(sessionId, tool).isPresent()) {
             return false;
         }
-        int dot = tool.indexOf('.');
-        return mcpClients.listTools(tool.substring(0, dot)).stream()
-                .anyMatch(descriptor -> descriptor.tool().equals(tool.substring(dot + 1))
-                        && descriptor.asyncCapable());
+        return asyncExecutor.isAsyncCapable(tool);
     }
 
     /** MCP-вызов → стандартный контракт ToolResult (адаптер Q.2). */

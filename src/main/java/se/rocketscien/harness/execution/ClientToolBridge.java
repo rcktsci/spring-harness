@@ -1,7 +1,9 @@
 package se.rocketscien.harness.execution;
 
-import tools.jackson.databind.JsonNode;
+import org.springframework.ai.tool.ToolCallback;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -12,8 +14,10 @@ import java.util.UUID;
  * {@code relay} и связывается Spring-ом.
  *
  * <ul>
- *   <li>{@link #isClientSession} — гейт нативных файловых инструментов (D-84: toolset
- *       сессии = наличие соединения в parent-цепочке);</li>
+ *   <li>{@link #isClientSession} — toolset сессии (D-84: наличие соединения в parent-цепочке);
+ *       в CLIENT нативные файловые инструменты исключаются;</li>
+ *   <li>{@link #manifest} — декларации клиентского оверлея для манифеста модели (namespace —
+ *       parent-цепочка до root-сессии с соединением);</li>
  *   <li>{@link #resolve} — резолв клиентского инструмента из live-оверлея (манифест
  *       собирается на Turn, резолв — на момент вызова);</li>
  *   <li>{@link #invoke} — маршрутизация вызова в WS-релей; возвращает финальный
@@ -24,7 +28,9 @@ public interface ClientToolBridge {
 
     boolean isClientSession(UUID sessionId);
 
+    List<ToolCallback> manifest(UUID sessionId);
+
     Optional<ToolDescriptor> resolve(UUID sessionId, String toolName);
 
-    ToolResult invoke(UUID sessionId, String callId, String toolName, JsonNode args);
+    ToolResult invoke(UUID sessionId, String callId, String toolName, Map<String, Object> args);
 }

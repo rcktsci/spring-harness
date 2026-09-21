@@ -1,5 +1,6 @@
 package se.rocketscien.harness.tests.architecture;
 
+import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.lang.ArchRule;
@@ -81,10 +82,12 @@ class ArchitectureRulesTest {
             .importPaths(Paths.get("target", "classes"));
 
     /** Доменные пакеты для проверки циклов: common/config — технические, из графа исключены. */
-    private static final JavaClasses DOMAIN_CLASSES = new ClassFileImporter().importPackages(
-            BASE + ".api", BASE + ".execution", BASE + ".task", BASE + ".workflow",
-            BASE + ".session", BASE + ".identity", BASE + ".intelligence",
-            BASE + ".agent", BASE + ".mcp", BASE + ".relay");
+    private static final JavaClasses DOMAIN_CLASSES = new ClassFileImporter()
+            .importPaths(Paths.get("target", "classes"))
+            .that(JavaClass.Predicates.resideInAnyPackage(
+                    BASE + ".api..", BASE + ".execution..", BASE + ".task..", BASE + ".workflow..",
+                    BASE + ".session..", BASE + ".identity..", BASE + ".intelligence..",
+                    BASE + ".agent..", BASE + ".mcp..", BASE + ".relay.."));
 
     private static final ArchRule MODULE_LAYERING = layeredArchitecture()
             .consideringOnlyDependenciesInLayers()

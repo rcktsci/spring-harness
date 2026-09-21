@@ -10,15 +10,19 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 import se.rocketscien.harness.config.RelayProperties;
+import se.rocketscien.harness.execution.ToolDescriptor;
 import se.rocketscien.harness.session.Session;
 import se.rocketscien.harness.session.SessionKind;
 import se.rocketscien.harness.session.SessionStore;
+import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -50,6 +54,7 @@ public class RelayWebSocketHandler extends TextWebSocketHandler {
 
     private final SessionStore sessionStore;
     private final RelayConnectionRegistry registry;
+    private final ClientToolRegistry clientToolRegistry;
     private final RelayProperties relayProperties;
     private final ObjectMapper objectMapper;
 
@@ -114,6 +119,8 @@ public class RelayWebSocketHandler extends TextWebSocketHandler {
         }
         switch (type == null ? "" : type) {
             case "register" -> handleRegister(session, state, frame);
+            case "tool.result" -> handleToolResult(frame);
+            case "tool.progress" -> log.debug("Реле: tool.progress (callId={})", frame.path("callId").asString(null));
             case "pong" -> state.lastPong.set(System.currentTimeMillis());
             default -> log.debug("Реле: неизвестный фрейм '{}' (principal={})", type, state.principal);
         }
@@ -178,10 +185,46 @@ public class RelayWebSocketHandler extends TextWebSocketHandler {
             registry.unregister(previousSessionId, state.connection);
         }
         state.registeredSessionId = sessionId;
+        clientToolRegistry.attach(sessionId, state.connection, parseToolDescriptors(tools));
         int toolCount = tools.isArray() ? tools.size() : 0;
         withMdc(sessionId.toString(), state.principal,
                 () -> log.info("Реле: регистрация на сессии — инструментов={}", toolCount));
         send(state, frame("registered", Map.of("sessionId", sessionId.toString())));
+    }
+
+    /** Финальный результат клиентского вызова (api-contracts §5.3) → completion-map оверлея. */
+    private void handleToolResult(JsonNode frame) {
+        String callId = frame.path("callId").asString(null);
+        if (callId == null) {
+            return;
+        }
+        JsonNode exitCodeNode = frame.get("exitCode");
+        Integer exitCode = exitCodeNode == null || exitCodeNode.isNull() ? null : exitCodeNode.asInt();
+        clientToolRegistry.completeResult(callId, frame.path("output").asString(null), exitCode);
+    }
+
+    /** Декларация инструментов из фрейма register (name/description/inputSchema/source; D-82). */
+    private List<ToolDescriptor> parseToolDescriptors(JsonNode tools) {
+        if (tools == null || !tools.isArray()) {
+            return List.of();
+        }
+        List<ToolDescriptor> descriptors = new ArrayList<>();
+        for (JsonNode tool : tools) {
+            String name = tool.path("name").asString(null);
+            if (name == null || name.isBlank()) {
+                continue;
+            }
+            JsonNode schemaNode = tool.path("inputSchema");
+            Map<String, Object> inputSchema = null;
+            if (schemaNode != null && schemaNode.isObject()) {
+                inputSchema = objectMapper.readValue(objectMapper.writeValueAsString(schemaNode),
+                        new TypeReference<Map<String, Object>>() {
+                        });
+            }
+            descriptors.add(new ToolDescriptor(name, tool.path("description").asString(null),
+                    inputSchema, tool.path("source").asString(null)));
+        }
+        return descriptors;
     }
 
     private void heartbeat(WebSocketSession session, RelaySession state) {
@@ -218,6 +261,7 @@ public class RelayWebSocketHandler extends TextWebSocketHandler {
         }
         if (state.registeredSessionId != null) {
             registry.unregister(state.registeredSessionId, state.connection);
+            clientToolRegistry.detach(state.registeredSessionId, state.connection);
         }
     }
 

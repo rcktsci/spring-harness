@@ -7,6 +7,8 @@ import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import se.rocketscien.harness.config.RelayProperties;
+import se.rocketscien.harness.relay.ClientToolAdapter;
+import se.rocketscien.harness.relay.ClientToolRegistry;
 import se.rocketscien.harness.relay.RelayCloseCodes;
 import se.rocketscien.harness.relay.RelayConnection;
 import se.rocketscien.harness.relay.RelayConnectionRegistry;
@@ -258,7 +260,9 @@ class RelayWebSocketHandlerTest {
 
         private TestHandler(SessionStore sessionStore, RelayConnectionRegistry registry,
                             RelayProperties properties, RelayConnection connection) {
-            super(sessionStore, registry, properties, JsonMapper.builder().build());
+            super(sessionStore, registry, new ClientToolRegistry(sessionStore, registry,
+                            new ClientToolAdapter(JsonMapper.builder().build()), properties),
+                    properties, JsonMapper.builder().build());
             this.connection = connection;
         }
 
