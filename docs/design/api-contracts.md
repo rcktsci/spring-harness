@@ -163,7 +163,9 @@ Tool-уровневые отказы отдаются агенту как `TOOL_
 дёргается), `tool-timeout` (нет ответа за `harness.relay.tool-call-timeout`).
 `tool.result.exitCode` — информативное поле: non-zero exit **не** ошибка инструмента (та же
 семантика, что у native `bash`, agent-tools §5) — финальный `TOOL_RESULT` получает статус OK;
-`ERROR` — только для протокольной ошибки/таймаута/LOST.
+`ERROR` — только для протокольной ошибки/таймаута/LOST. При гонке stop с публикацией вызова
+`tool.cancel` может опередить `tool.call`: клиент обязан игнорировать `tool.cancel`
+для неизвестного `callId`.
 
 ### 5.4 Heartbeat и разрыв
 

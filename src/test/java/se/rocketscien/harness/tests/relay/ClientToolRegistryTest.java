@@ -217,6 +217,19 @@ class ClientToolRegistryTest {
         assertThat(connection.sent()).isEmpty();
     }
 
+    @Test
+    void cancelAfterCompletionIsNoOp() {
+        registry.attach(root, connection, List.of(descriptor()));
+        assertThat(registry.invoke(root, "call-done", "jira.list_issues", Map.of("project", "A")).status())
+                .isEqualTo(ToolStatus.OK);
+        int sentBefore = connection.sent().size();
+
+        registry.cancel(root, "call-done");
+
+        assertThat(connection.sent()).hasSize(sentBefore);
+        assertThat(connection.sent()).noneMatch(frame -> frame.contains("\"type\":\"tool.cancel\""));
+    }
+
     private static ToolDescriptor descriptor() {
         return new ToolDescriptor("jira.list_issues", "List Jira issues",
                 Map.of("type", "object",

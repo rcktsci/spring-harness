@@ -38,8 +38,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * <p>Маршрутизация: валидация args по inputSchema (D-58) → {@code tool.call} в соединение →
  * блокирующее ожидание на {@link CompletableFuture} с {@code harness.relay.tool-call-timeout};
  * завершение — из WS-потока ({@link #completeResult}); журнал пишет Turn-поток (D-81). Финальный
- * результат один на callId (tombstone до конца соединения), поздний {@code tool.result}
- * игнорируется.</p>
+ * результат один на callId (tombstone — до {@code harness.relay.tool-call-timeout}, V-5), поздний
+ * {@code tool.result} игнорируется.</p>
  */
 @Component
 @RequiredArgsConstructor
@@ -121,11 +121,17 @@ public class ClientToolRegistry implements ClientToolBridge {
         dispatchCancel(pendingCall);
     }
 
+    /**
+     * W-1: {@code tool.cancel} шлёт только победитель гонки завершения — если future уже завершён
+     * (complete/tool-timeout/LOST), {@code complete} вернёт {@code false}, и повторный cancel — no-op.
+     */
     private void dispatchCancel(PendingCall pendingCall) {
-        pendingCall.connection().sendText(adapter.toolCancelFrame(pendingCall.callId()));
-        pendingCall.future().complete(
-                ToolResult.cancelled(pendingCall.callId(), pendingCall.tool(), CANCELLED_REASON));
+        if (!pendingCall.future().complete(
+                ToolResult.cancelled(pendingCall.callId(), pendingCall.tool(), CANCELLED_REASON))) {
+            return;
+        }
         pendingCall.markCompleted();
+        pendingCall.connection().sendText(adapter.toolCancelFrame(pendingCall.callId()));
     }
 
     @Override
@@ -149,6 +155,11 @@ public class ClientToolRegistry implements ClientToolBridge {
     @Override
     public ToolResult invoke(UUID sessionId, String callId, String toolName, Map<String, Object> args) {
         pruneTombstones();
+        // W-1: cancel до публикации вызова (гонка stop) потребляем сразу — до resolve/validate и их
+        // early-return'ов, иначе флаг утёк бы.
+        if (cancelledBeforeDispatch.remove(callId)) {
+            return ToolResult.cancelled(callId, toolName, CANCELLED_REASON);
+        }
         UUID rootSessionId = resolveSession(sessionId).orElse(null);
         if (rootSessionId == null) {
             return ToolResult.error(callId, toolName, TOOL_NOT_AVAILABLE);
@@ -168,11 +179,6 @@ public class ClientToolRegistry implements ClientToolBridge {
         CompletableFuture<ToolResult> future = new CompletableFuture<>();
         PendingCall pendingCall = new PendingCall(callId, rootSessionId, connection, toolName, future);
         pending.put(callId, pendingCall);
-        // W: stop пришёл до публикации вызова — CANCELLED без отправки tool.call.
-        if (cancelledBeforeDispatch.remove(callId)) {
-            pending.remove(callId);
-            return ToolResult.cancelled(callId, toolName, CANCELLED_REASON);
-        }
         // W: cancel выиграл гонку с публикацией (dispatchCancel уже завершил future) — tool.call не дублируем.
         if (future.isDone()) {
             pending.remove(callId);

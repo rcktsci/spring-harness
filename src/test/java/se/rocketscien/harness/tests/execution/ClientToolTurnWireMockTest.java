@@ -173,6 +173,34 @@ class ClientToolTurnWireMockTest extends BaseApplicationTest {
         }
     }
 
+    /** W-4: каскад `SubtreeCanceller` — stop root отменяет in-flight клиентский вызов дочерней sub-сессии. */
+    @Test
+    void subtreeStopCancelsChildClientCall() {
+        Session root = newSession();
+        TestRelayConnection connection = attachOverlay(root, List.of(jiraDescriptor()));
+        connection.silent();
+        try {
+            String agentKey = jdbcTemplate.queryForObject(
+                    "SELECT a.key FROM agent a JOIN session s ON s.agent_revision_id = a.id WHERE s.id = ?",
+                    String.class, root.id());
+            Session child = sessionStore.createChildSession(root.id(), agentKey, "Субагент");
+            assertThat(clientToolRegistry.isClientSession(child.id())).isTrue();
+
+            stubToolCallThenFinal("client-subtree", "call-child", "jira.list_issues", "{\"project\":\"A\"}");
+            startTurn(child);
+            await().atMost(Duration.ofSeconds(30)).until(() -> connection.sentToolCall("jira.list_issues"));
+
+            turnManager.requestStop(root.id());
+
+            await().atMost(Duration.ofSeconds(30)).untilAsserted(() ->
+                    assertThat(connection.sent()).anyMatch(frame -> frame.contains("\"type\":\"tool.cancel\"")));
+            awaitOutcome(child.id(), TurnOutcome.CANCELLED);
+            assertThat(journalField(child.id(), "TOOL_RESULT", "status")).isEqualTo("CANCELLED");
+        } finally {
+            detach(root, connection);
+        }
+    }
+
     private TestRelayConnection attachEmptyOverlay(Session session) {
         return attachOverlay(session, List.of());
     }
