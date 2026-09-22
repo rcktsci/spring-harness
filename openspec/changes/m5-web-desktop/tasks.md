@@ -8,38 +8,39 @@
 
 ## 2. Пачка B — SSO, конфиг, типы
 
-- [ ] 2.1 Keycloak OAuth2 + PKCE: скрытый BrowserWindow, loopback redirect, обмен кода; safeStorage для токенов; silent refresh на 401; logout (очистка + Keycloak logout URL).
+- [ ] 2.1 Keycloak OAuth2 + PKCE: **видимое** BrowserWindow (форма логина Keycloak), loopback redirect, обмен кода; safeStorage для токенов; silent refresh на 401 (без окна); logout (очистка + Keycloak logout URL).
 - [ ] 2.2 Settings: `server.baseUrl`, Keycloak-параметры, `confirmCommands`, тема; `userData/config.json`; смена baseUrl → переподключение.
 - [ ] 2.3 D-89: генерация TS-типов/клиента из `src/main/resources/api/openapi.yaml` (openapi-typescript); ручные WS-фрейм-типы по api-contracts §5 (`src/api/ws-frames.ts`).
 - [ ] 2.4 Vitest: конфиг-бдиндинг, token-storage mock, PKCE-флоу (unit на verifier/challenge).
+- [ ] 2.4а WS-фрейм-схема: unit-тесты парсинга всех фреймов §5 (hello/welcome/register/registered/error/tool.*/ping/pong + close-коды) — защита от дрифта ручных типов `ws-frames.ts`.
 
 ## 3. Пачка C — relay-клиент и локальные инструменты
 
 - [ ] 3.1 `useRelay` composable + WS-клиент: connect (Bearer), hello/welcome, handshake timeout, reconnect backoff (1s→30s), pong на ping, 4401 → silent refresh.
-- [ ] 3.2 register: sessionId + basePath (`~/harness-workspaces/{sessionId}` по умолчанию, выбор пользователем) + декларация стандартного набора; обработка `registered`/`workspace-occupied` (диалог takeover)/`session-not-found`/`wrong-session-kind`/`duplicate-tool-name`/`superseded`.
+- [ ] 3.2 register: sessionId + basePath (`~/harness-workspaces/{sessionId}` по умолчанию, выбор пользователем; main-process создаёт каталог до отправки фрейма) + декларация стандартного набора; обработка `registered`/`workspace-occupied` (сообщение «занята другим пользователем», без takeover-диалога)/`session-not-found`/`wrong-session-kind`/`duplicate-tool-name`/`superseded`; авто-connect + register при старте с сохранённой активной сессией.
 - [ ] 3.3 Локальные инструменты: `bash` (child_process.spawn, cwd=basePath, таймаут, stdout+stderr, exitCode), read/write/edit (fs, лимиты, `ambiguous`/`not-found`), glob, grep, truncated-маркеры; `tool.progress` для длинных выводов; `tool.cancel` (SIGTERM→SIGKILL).
-- [ ] 3.4 Подтверждение первой регистрации («разрешить оркестратору выполнять команды в X»); режим `confirmCommands` (always/never).
+- [ ] 3.4 Подтверждение первой регистрации («разрешить оркестратору выполнять команды в X»); режим `confirmCommands` (always/never) (spec: desktop-relay-client → Безопасность локального исполнения).
 - [ ] 3.5 Vitest: WS-клиент против in-test WS-сервера (ws-стаб); все фреймы; takeover; cancel-во-время-spawn; все инструменты.
 
 ## 4. Пачка D — Чат и SSE
 
 - [ ] 4.1 Список сессий (`GET /sessions?mine=`): бейджи runtimeStatus, поиск, курсор-пагинация; создание сессии (выбор агента).
-- [ ] 4.2 Лента: все MessageKind (USER/ASSISTANT/SYSTEM/TOOL_CALL/TOOL_RESULT/COMPACT/ASYNC_ACCEPTED), markdown (markdown-it + sanitize), сворачиваемые tool-блоки, late-маркеры, подгрузка по курсору.
-- [ ] 4.3 Отправка + команды: `/compact`, `/stop` (с подтверждением), индикатор TURN_RUNNING, черновик per-session.
+- [ ] 4.2 Лента: все MessageKind (USER/ASSISTANT/SYSTEM/TOOL_CALL/TOOL_RESULT/COMPACT), markdown (markdown-it + DOMPurify sanitize), сворачиваемые tool-блоки, плейсхолдер «ожидает результат» (TOOL_RESULT status=ASYNC_ACCEPTED или TOOL_CALL без результата), late-маркеры; начальная загрузка пейджингом `since=0` по nextCursor до хвоста.
+- [ ] 4.3 Отправка + команды: кнопки Compact/Stop в строке состояния (подтверждение для Stop), индикатор «агент работает…», черновик per-session.
 - [ ] 4.4 SSE fetch-stream (`useSse`): message.created/session.status, Last-Event-ID реконнект, отписка при переключении.
 - [ ] 4.5 Статус релея в UI: «подключён (N инструментов)» / «в другом месте» (4409) / кнопки подключить/отключить.
 - [ ] 4.6 Vitest + component-тесты ленты (рендер всех kind), SSE-мокстрим.
 
 ## 5. Пачка E — Дерево сессий/задач и артефакты
 
-- [ ] 5.1 Дерево активной сессии (`GET /sessions/{id}/tree`): узлы sub-сессий (taskId, stateCode, бейджи); обновление по событиям; проваливание (открытие чата STATE-сессии + breadcrumb).
-- [ ] 5.2 Панель задачи: статус/переходы (task SSE: transition/status/subtask.terminal/comment), история, добавление комментариев.
-- [ ] 5.3 Артефакты: браузер файлов workspace, save-as, open-in-OS (temp-копия), обработка 422/413.
+- [ ] 5.1 Дерево активной сессии (`GET /sessions/{id}/tree`): узлы sub-сессий (taskId, stateCode, бейджи); обновление при переключении + по таймеру `tree.refresh-interval` (10 с) + при смене session.status; проваливание (открытие чата STATE-сессии + breadcrumb).
+- [ ] 5.2 Панель задачи: статус/переходы (task SSE: transition/status/subtask.terminal/comment), история, добавление комментариев; `statusProjection` — через `GET /tasks/{id}`.
+- [ ] 5.3 Артефакты: ввод пути + UX-валидация относительности (без `..`/абсолютных), save-as, open-in-OS (temp `<hash(path)>-<basename>`, чистка кэша), обработка 422/413; кликабельные пути из ленты TOOL_RESULT.
 - [ ] 5.4 Vitest: дерево (мок tree), task SSE-мокстрим, артефакты (мок fetch-ответы).
 
 ## 6. Пачка F — e2e, smoke, доки, архив
 
-- [ ] 6.1 Playwright-electron e2e против stub-сервера (HTTP+WS+SSE в тесте): логин → новая сессия → регистрация релея → оркестратор (stub-LLM ответы) вызывает локальный bash → tool.result → лента показывает → spawn sub-session → дерево → артефакт save-as → stop.
+- [ ] 6.1 Playwright-electron e2e против stub-сервера (in-test HTTP+WS+SSE сервер): логин → новая сессия → регистрация релея → оркестратор (фиксированный LLM-ответ с tool-call `bash` из stub-сервера) вызывает локальный bash → tool.result → лента показывает → spawn sub-session → дерево → артефакт save-as → stop.
 - [ ] 6.2 Smoke-скрипт против живого сервера (docker-compose): пошаговый мануал + скрипт-чеклист (в `web-desktop/docs/smoke.md`).
 - [ ] 6.3 `docs/design/decisions.md` — D-86…D-91.
 - [ ] 6.4 Доки-синк: `roadmap.md` (M5 финальная редакция), `architecture.md` (слой web-desktop, потребитель контрактов), `client-cli.md` → переименовать/суперседеть в «Web Desktop» (полнокровный клиент), `operations.md` (сборка/дистрибуция desktop), `agent-tools.md` (источники: native/metaTools/MCP/desktop-client).

@@ -23,7 +23,7 @@ M4 заморозил серверные контракты: REST (`/api/v1/sess
 
 ### D-86: Electron + Vue 3 + Vite + TypeScript
 
-**Решение**: Electron (main + preload + renderer), Vue 3.5 + `<script setup>`, Vite (electron-vite), TypeScript strict, Pinia, markdown-рендер `markdown-it` (или `marked` — финализируется в пачке A).
+**Решение**: Electron (main + preload + renderer), Vue 3.5 + `<script setup>`, Vite (electron-vite), TypeScript strict, Pinia, markdown-рендер `markdown-it` + `DOMPurify` (sanitize).
 
 **Альтернативы**: Tauri (Rust + webview) — меньше размер, но Rust-инфраструктура не нужна проекту (Java-shop); «чистый» web-app — нет доступа к локальной ФС/child_process (нужно для локальных инструментов и safeStorage); нативные приложения — несоразмерно.
 
@@ -55,7 +55,7 @@ M4 заморозил серверные контракты: REST (`/api/v1/sess
 
 ### D-90: Сборка и дистрибуция
 
-**Решение**: `electron-vite build` + `electron-builder` (targets: win-nsis, linux-appimage/dmg-по-запросу); конфиг `publish: null` (no auto-update); дев-сервер против `harness.server.baseUrl` из `.env`/Settings. npm-скрипты: `dev`, `build`, `test` (Vitest), `e2e` (Playwright + electron), `lint`.
+**Решение**: `electron-vite build` + `electron-builder` (targets: win-nsis, linux-appimage/dmg-по-запросу); конфиг `publish: null` (no auto-update); дев-сервер против `harness.server.baseUrl` из `.env`/Settings. Менеджер пакетов — **pnpm**; скрипты: `dev`, `build`, `test` (Vitest), `e2e` (Playwright + electron), `lint`.
 
 **Альтернативы**: ручной webpack — устаревший подход; electron-forge — хуже интеграция с Vite.
 

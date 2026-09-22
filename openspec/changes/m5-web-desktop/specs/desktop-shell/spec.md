@@ -8,7 +8,7 @@ Electron main-process приложения Web Desktop: окно, меню/tray,
 
 ### Requirement: Запуск и окно
 
-Приложение SHALL запускаться одним главным окном (1200×800 дефолт, состояние сохраняется между запусками — размер/position в `userData`). Меню: File (Quit), Edit (стандартные), View (DevTools в dev-сборке), Help (о программе, ссылка на docs). Tray-иконка с контекстным меню (Show/Quit) — опционально, конфиг `showTray` (дефолт true). Повторный запуск — фокус существующего окна (single-instance lock).
+Приложение SHALL запускаться одним главным окном (1200×800 дефолт, состояние сохраняется между запусками — размер/position в `userData`). Меню: File (Quit), Edit (стандартные), View (DevTools в dev-сборке), Help (о программе, ссылка на docs). Tray-иконка с контекстным меню (Show/Quit) — конфиг `showTray` (дефолт true). Повторный запуск — фокус существующего окна (single-instance lock).
 
 #### Scenario: первый запуск
 
@@ -22,7 +22,7 @@ Electron main-process приложения Web Desktop: окно, меню/tray,
 
 ### Requirement: SSO-логин и хранение токена
 
-Приложение SHALL реализовать Keycloak OAuth2 Authorization Code + PKCE: открытие скрытого `BrowserWindow` с URL авторизации (из конфига), перехват redirect на localhost-loopback, обмен кода на JWT. Полученные access/refresh-токены SHALL храниться через `safeStorage` (OS keychain). При истечении access-токена — silent refresh; при отказе refresh — возврат на экран логина. Выход (Logout) — очистка хранилища + open redirect logout Keycloak.
+Приложение SHALL реализовать Keycloak OAuth2 Authorization Code + PKCE: открытие **видимого** `BrowserWindow` с URL авторизации (из конфига — пользователь видит форму Keycloak и вводит креды), перехват redirect на localhost-loopback, обмен кода на JWT, закрытие окна после redirect. Полученные access/refresh-токены SHALL храниться через `safeStorage` (OS keychain). При истечении access-токена — silent refresh (без окна, fetch code exchange); при отказе refresh — возврат на экран логина. Выход (Logout) — очистка хранилища + open redirect logout Keycloak.
 
 #### Scenario: логин
 

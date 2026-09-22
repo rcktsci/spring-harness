@@ -5,12 +5,12 @@ M4 закрыл серверную часть релея: WS-протокол, �
 ## What Changes
 
 - **Desktop-приложение** (новая папка `web-desktop/` в monorepo): Electron + Vue 3 + Vite + TypeScript. Main-process shell, preload-мост, renderer на Vue.
-- **SSO-логин**: Keycloak OAuth redirect (BrowserWindow) → JWT → secure-хранение (`safeStorage`); сервер URL — конфиг приложения.
+- **SSO-логин**: Keycloak OAuth redirect (видимое BrowserWindow) → JWT → secure-хранение (`safeStorage`); сервер URL — конфиг приложения.
 - **WS-клиент релея** (`/api/v1/relay`): `hello`/`register { sessionId, basePath, client.tools[] }`/`tool.call`/`tool.progress`/`tool.result`/`tool.cancel`/`pong`; reconnect и takeover (4409 `superseded`); heartbeat-ответы.
 - **Локальные инструменты**: стандартный файловый набор (`bash`, `read_file`, `write_file`, `edit_file`, `glob`, `grep`) исполняется desktop'ом локально (Node `child_process`/`fs`) и декларируется серверу — оркестратор и его субагенты получают CLIENT-toolset (D-84). `source: "client.mcp:<server>"`-декларации из внешних MCP-серверов пользователя — **вне M5** (эволюция).
 - **Чат-интерфейс**: список сессий, лента сообщений (User/Assistant/TOOL_CALL/TOOL_RESULT, markdown, сворачиваемые tool-фреймы, `ASYNC_ACCEPTED`-плейсхолдеры, `late`-маркеры), отправка, `compact`/`stop`.
 - **Дерево сессий/задач**: FREE-root + STATE-сессии и задачи; проваливание в субагентов (parent-chain навигация); статусы задач и переходы (task SSE).
-- **Артефакты**: просмотр/скачивание файлов серверного workspace (`GET /sessions/{id}/workspace/files`), open-in-OS / save-as.
+- **Артефакты**: скачивание/открытие файлов серверного workspace (`GET /sessions/{id}/workspace/files`) по вводимому или кликабельному из ленты пути, save-as / open-in-OS. Каталог-листинг на сервере отсутствует — браузер файлов вне M5.
 - **SSE через fetch-stream**: `EventSource` не позволяет задать Bearer-заголовок — используется `fetch` + `ReadableStream` (D-87).
 
 ## Capabilities
@@ -21,7 +21,7 @@ M4 закрыл серверную часть релея: WS-протокол, �
 - `desktop-relay-client`: WS-клиент — handshake, регистрация с декларацией локальных инструментов, локальное исполнение `tool.call` (bash/read/write/edit/glob/grep), `tool.progress`/`tool.result`/`tool.cancel`, reconnect/takeover, heartbeat pong.
 - `desktop-chat`: UI чата — список сессий, лента сообщений (рендер всех MessageKind, markdown, tool-фреймы, late/ASYNC_ACCEPTED), отправка сообщений, команды compact/stop, SSE-подписка (fetch-stream).
 - `desktop-session-tree`: дерево сессий и задач — FREE/STATE-узлы, parent-chain навигация в субагентов, задачные статусы/переходы (task SSE), переключение активной сессии.
-- `desktop-artifacts`: браузер/скачивание файлов серверного workspace с фронтенд-валидацией путей (доп. слой к серверному гварду D-72), save-as / open-in-OS.
+- `desktop-artifacts`: скачивание/открытие файлов серверного workspace по пути (ручной ввод или кликабельные ссылки из ленты), save-as / open-in-OS, UX-валидация относительности пути (не безопасность — серверный гвард D-72 достаточен).
 
 ### Modified Capabilities
 
@@ -42,4 +42,5 @@ M4 закрыл серверную часть релея: WS-протокол, �
 - **Мобильный/браузерный клиент**, `auth/ticket` — не нужен (Electron держит JWT).
 - **Auto-update** (electron-updater) — внутреннее приложение одной VM; дистрибуция — сборка по запросу.
 - **Мультиоконность** — одно окно, виды переключаются внутри.
+- **Каталог-листинг workspace** (браузер файлов) — серверного эндпоинта нет; эволюция (мини-амендмент при необходимости).
 - Серверные доработки любого рода.

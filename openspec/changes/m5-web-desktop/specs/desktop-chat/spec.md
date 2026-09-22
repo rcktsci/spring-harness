@@ -8,7 +8,7 @@
 
 ### Requirement: Список сессий
 
-UI SHALL показывать список FREE-сессий (`GET /api/v1/sessions?mine=true`): заголовок, агент, `runtimeStatus`-бейдж (IDLE / TURN_RUNNING / PARKED_ASYNC), последнее сообщение, время активности; сортировка по `lastActivityAt`; поиск по `q=`; пагинация курсором. Создание новой сессии (`POST /api/v1/sessions`) — выбор агента из каталога (`GET /api/v1/agents`), заголовок.
+UI SHALL показывать список FREE-сессий (`GET /api/v1/sessions?mine=true`): заголовок, агент, `runtimeStatus`-бейдж (IDLE / TURN_RUNNING / PARKED_ASYNC; `PARKED_CLIENT` — зарезервирован и не присваивается, D-84 — UI его не обрабатывает), последнее сообщение, время активности; сортировка по `lastActivityAt`; поле поиска в шапке списка (debounce 300 мс → `q=`); пагинация курсором. Создание новой сессии (`POST /api/v1/sessions`) — выбор агента из каталога (`GET /api/v1/agents`), заголовок.
 
 #### Scenario: открытие приложения
 
@@ -22,7 +22,7 @@ UI SHALL показывать список FREE-сессий (`GET /api/v1/sessi
 
 ### Requirement: Лента сообщений
 
-UI SHALL отображать сообщения (`GET /api/v1/sessions/{id}/messages`) в хронологическом порядке: USER (справа, автор), ASSISTANT (слева, markdown-рендер), SYSTEM (центр, приглушённый), TOOL_CALL (сворачиваемый: инструмент + args), TOOL_RESULT (сворачиваемый: статус OK/ERROR/CANCELLED/LOST, output, exitCode, `truncated`-маркер), COMPACT (граница раунда), ASYNC_ACCEPTED (плейсхолдер «ожидает результат»), поздние результаты — с `late`-маркером. Подгрузка более ранних сообщений по курсору при скролле вверх.
+UI SHALL отображать сообщения (`GET /api/v1/sessions/{id}/messages`) в хронологическом порядке: USER (справа, автор), ASSISTANT (слева, markdown-рендер), SYSTEM (центр, приглушённый), TOOL_CALL (сворачиваемый: инструмент + args), TOOL_RESULT (сворачиваемый: статус `OK|ERROR|ASYNC_ACCEPTED|CANCELLED|LOST`, output, exitCode, `truncated`-маркер; плейсхолдер «ожидает результат» рендерится, если результат ещё не пришёл или его статус `ASYNC_ACCEPTED`), COMPACT (граница раунда). Поздние результаты — с `late`-маркером. Начальная загрузка: пейджинг `since=0&limit=N` по `nextCursor` до хвоста (история ограничена compact-политикой); новые сообщения приходят через SSE — подгрузка «раньше» скроллом вверх не нужна.
 
 #### Scenario: ассистент ответил
 
@@ -36,12 +36,12 @@ UI SHALL отображать сообщения (`GET /api/v1/sessions/{id}/mes
 
 #### Scenario: async-плейсхолдер
 
-- **WHEN** инструмент превысил окно и пришёл ASYNC_ACCEPTED
-- **THEN** показывается плейсхолдер; поздний TOOL_RESULT заменяет его на результат с late-маркером
+- **WHEN** TOOL_CALL исполнен, а TOOL_RESULT ещё не пришёл (или пришёл со статусом ASYNC_ACCEPTED)
+- **THEN** показывается плейсхолдер «ожидает результат»; поздний TOOL_RESULT заменяет его на результат с late-маркером
 
 ### Requirement: Отправка и команды
 
-UI SHALL отправлять сообщения (`POST /api/v1/sessions/{id}/messages`) с атрибуцией автора; команды: `/compact` → `POST .../compact`, `/stop` → `POST .../stop` (с подтверждением «остановить Turn?» при активном TURN_RUNNING). Ввод во время TURN_RUNNING — разрешён (событие подхватится доп. раундом; индикатор «агент работает»).
+UI SHALL отправлять сообщения (`POST /api/v1/sessions/{id}/messages`) с атрибуцией автора; команды реализованы кнопками в строке состояния чата (не slash-парсинг): «Compact» → `POST .../compact`, «Stop» (с подтверждением «остановить Turn?» при активном TURN_RUNNING; индикатор «агент работает…» в строке состояния рядом с полем ввода). Ввод во время TURN_RUNNING разрешён (событие подхватится доп. раундом).
 
 #### Scenario: отправка сообщения
 

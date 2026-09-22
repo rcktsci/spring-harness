@@ -8,12 +8,12 @@
 
 ### Requirement: Дерево сессий
 
-UI SHALL отображать дерево активной FREE-сессии (`GET /api/v1/sessions/{id}/tree`): корень — FREE-сессия; дочерние узлы — STATE-сессии субагентов (с `parentSessionId`, `taskId`, `stateCode`); раскрываемые узлы. Узел показывает: агент, runtimeStatus-бейдж, задачный статус если есть.
+UI SHALL отображать дерево активной FREE-сессии (`GET /api/v1/sessions/{id}/tree`): корень — FREE-сессия; дочерние узлы — STATE-сессии субагентов (с `parentSessionId`, `taskId`, `stateCode`, раскрытые узлы). Узел показывает: агент, runtimeStatus-бейдж, `stateCode` (из TreeNode; `statusProjection` — только в панели задачи через `GET /tasks/{id}`). Дерево SHALL обновляться: (а) при переключении на сессию, (б) по таймеру, пока сессия активна (интервал — конфиг `tree.refresh-interval`, дефолт 10 с), (в) при смене `session.status` (SSE).
 
 #### Scenario: оркестратор spawn'ил субагента
 
 - **WHEN** активная сессия получает sub-session (spawn_subagent)
-- **THEN** узел субагента появляется в дереве (через обновление дерева по SSE-событию или poll)
+- **THEN** узел субагента появляется в дереве при следующем обновлении (таймер/переключение/session.status)
 
 #### Scenario: проваливание
 
