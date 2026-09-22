@@ -1,10 +1,10 @@
 # Инструменты агента spring-harness
 
-> Каталог и контракты. Источники инструментов — ровно два: нативные (workspace) и MCP. Термины — `docs/glossary.md`.
+> Каталог и контракты. Источники инструментов — четыре: нативные (workspace), мета-инструменты (движок), MCP и клиентский оверлей WS-релея (M4, D-80/D-85). Термины — `docs/glossary.md`.
 
 ## 1. Нативные инструменты рабочего каталога (`WorkspaceTools`)
 
-Исполняются по биндингу состояния: `ContainerWorkspaceTools` (per-session Docker-контейнер из helper-образа: минимальная ОС + find/grep/coreutils/git; workspace примонтирован томом — D-30) или `ClientRelayWorkspaceTools` (релей на подключённый клиент). Все пути — относительные, резолв от корня workspace. Серверные read/write/bash/glob/grep используют утилиты образа, хост не трогается.
+Исполняются в per-session Docker-контейнере из helper-образа (`ContainerWorkspaceTools`: минимальная ОС + find/grep/coreutils/git; workspace примонтирован томом — D-30). В SERVER-toolset работают как раньше; в **CLIENT-toolset нативные файловые (`bash`/`read_file`/`write_file`/`edit_file`/`glob`/`grep`) не резолвятся** (D-84) — их роль берёт клиентский оверлей. Все пути — относительные, резолв от корня workspace; хост не трогается.
 
 | Инструмент | Сигнатура | Режим | Контракт |
 |---|---|---|---|
@@ -43,6 +43,10 @@
 - Подключение: клиент Spring AI; серверы из конфигурации (корпоративные 12+ за SSO-прокси), токены обновляет сервер — агент про OAuth не знает.
 - Привязка к агенту: `tools_jsonb.mcp` агента перечисляет MCP-серверы (`[{server, include?, exclude?}]`); manifest инструментов (namespace `{server}.{tool}`) попадает в промпт как обычные tool-declarations.
 - MCP-сервер наружу от нас — вне MVP (D-21).
+
+## 3b. Клиентский оверлей (WS-релей, M4)
+
+Инструменты, объявленные подключённым клиентом (`register { sessionId, client: { tools[] } }`, api-contracts §5): `{name, description, inputSchema, source}`. Оверлей — runtime-only (D-80), виден root-сессии и её sub-сессиям по parent-цепочке (D-84). Порядок резолва — после серверных колбэков; кривые args → `params-schema` без отправки `tool.call`; `source` (`client` | `client.mcp:<server>`) — информативно, сервер к MCP-клиента не ходит (D-82); `exitCode` в `tool.result` — информативный (non-zero ≠ ошибка инструмента). Отмена Turn'а/поддерева → `tool.cancel` клиенту + синтетический CANCELLED; разрыв с in-flight вызовом → LOST. Детали — `openspec/specs/client-tool-bridge`, `openspec/specs/client-relay`.
 
 ## 4. Разрешения (`permissions_jsonb` агента)
 

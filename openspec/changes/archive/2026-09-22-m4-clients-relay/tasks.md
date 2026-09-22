@@ -35,15 +35,15 @@
 
 ## 6. Пачка X — Приёмка «Роуминг» и закрытие
 
-- [ ] 6.1 Тестовый WS-клиент (`tests/relay/TestRelayClient`): hello/register/tool.call/result/cancel/ping; два инстанса на одну сессию для «офисов».
-- [ ] 6.2 `AcceptanceWorkspaceRoamingTest`: alice → root FREE-сессия с оркестратором; офис A регистрируется, оркестратор вызывает клиентские инструменты (включая декларированный bash → исполняется клиентом); disconnect → LOST + `tool-not-available` на следующие вызовы; офис B — takeover (4409 `superseded` на старое) → оркестратор продолжает работу; spawn_subagent видит клиентские инструменты; create_task-сессия — SERVER (нативный bash на сервере); финал SUCCESS.
-- [ ] 6.3 `docs/design/decisions.md` — D-72, D-77, D-78, D-80, D-81, D-82, D-83, D-84, D-85.
-- [ ] 6.4 Доки-синк: `roadmap.md` (M4 — server-side + поправка «CLI отменён, клиент — Web Desktop отдельным этапом»; убрать PARKED_CLIENT из объёма M4); `execution-model.md` (источники: native/metaTools/MCP/client); `agent-tools.md` (клиентский оверлей вместо ClientRelayWorkspaceTools); `client-cli.md` (CLI отменён — пометка supersede); `architecture.md` (слой relay, убрать ClientRelayWorkspaceTools); `workflow-domain.md` + `glossary.md` (CLIENT_EXEC — зарезервирован, не исполняется релеем); `api-contracts.md` §2/§8 (PARKED_CLIENT — зарезервировано, вне M4); `openspec/specs/session-api/spec.md` (та же правка, при архиве — sync).
-- [ ] 6.5 `apply-notes.md` — сводка пачек, тесты, отклонения (PARKED_CLIENT не реализован, task-grace вне M4, download только серверного workspace).
-- [ ] 6.6 `mvn clean verify` — зелёный; `openspec validate m4-clients-relay --strict`.
+- [x] 6.1 Тестовый WS-клиент (`tests/relay/TestRelayClient`): hello/register/tool.call/result/cancel/ping; два инстанса на одну сессию для «офисов».
+- [x] 6.2 `AcceptanceWorkspaceRoamingTest`: alice → root FREE-сессия с оркестратором; офис A регистрируется, оркестратор вызывает клиентские инструменты (включая декларированный bash → исполняется клиентом); disconnect → LOST + `tool-not-available` на следующие вызовы; офис B — takeover (4409 `superseded` на старое) → оркестратор продолжает работу; spawn_subagent видит клиентские инструменты; create_task-сессия — SERVER (нативный bash на сервере); финал SUCCESS.
+- [x] 6.3 `docs/design/decisions.md` — D-72, D-77, D-78, D-80, D-81, D-82, D-83, D-84, D-85.
+- [x] 6.4 Доки-синк: `roadmap.md` (M4 — server-side + поправка «CLI отменён, клиент — Web Desktop отдельным этапом»; убрать PARKED_CLIENT из объёма M4); `execution-model.md` (источники: native/metaTools/MCP/client); `agent-tools.md` (клиентский оверлей вместо ClientRelayWorkspaceTools); `client-cli.md` (CLI отменён — пометка supersede); `architecture.md` (слой relay, убрать ClientRelayWorkspaceTools); `workflow-domain.md` + `glossary.md` (CLIENT_EXEC — зарезервирован, не исполняется релеем); `api-contracts.md` §2/§8 (PARKED_CLIENT — зарезервировано, вне M4); `openspec/specs/session-api/spec.md` (та же правка, при архиве — sync).
+- [x] 6.5 `apply-notes.md` — сводка пачек, тесты, отклонения (PARKED_CLIENT не реализован, task-grace вне M4, download только серверного workspace).
+- [x] 6.6 `mvn clean verify` — зелёный; `openspec validate m4-clients-relay --strict`.
 
 ## 7. Архив
 
-- [ ] 7.1 `openspec archive m4-clients-relay --yes` — синк 4 спек в `openspec/specs/` (3 create + 1 update agent-turn).
-- [ ] 7.2 `AGENTS.md` — M4 завершён, следующий Web Desktop (Electron + VueJS).
-- [ ] 7.3 Commit + push.
+- [x] 7.1 `openspec archive m4-clients-relay --yes` — синк 4 спек в `openspec/specs/` (3 create + 1 update agent-turn).
+- [x] 7.2 `AGENTS.md` — M4 завершён, следующий Web Desktop (Electron + VueJS).
+- [x] 7.3 Commit + push.

@@ -23,7 +23,7 @@
 - **WHEN** клиент создаёт сессию с title и agentKey
 - **THEN** `201` с SessionDto (kind=FREE) и заголовком Location
 
-SessionDto с M2: `id, kind (FREE|STATE), title, owner, agent {key, rev}, workspaceBinding { type: SERVER_DIR }, runtimeStatus: IDLE|TURN_RUNNING|PARKED_ASYNC|PARKED_CLIENT, lastTurnOutcome?, lastSeq, lastActivityAt, createdAt`; для STATE-сессий дополнительно `taskId` и `stateCode` (у FREE отсутствуют). Enum `runtimeStatus` расширен до четырёх значений: фактическое присвоение `PARKED_ASYNC` появляется с M3 (async-инструменты), `PARKED_CLIENT` — с M4 (релей); в M2 встречаются `IDLE|TURN_RUNNING`.
+SessionDto с M2: `id, kind (FREE|STATE), title, owner, agent {key, rev}, workspaceBinding { type: SERVER_DIR }, runtimeStatus: IDLE|TURN_RUNNING|PARKED_ASYNC|PARKED_CLIENT, lastTurnOutcome?, lastSeq, lastActivityAt, createdAt`; для STATE-сессий дополнительно `taskId` и `stateCode` (у FREE отсутствуют). Enum `runtimeStatus` расширен до четырёх значений: фактическое присвоение `PARKED_ASYNC` появляется с M3 (async-инструменты); `PARKED_CLIENT` — **зарезервирован** (D-84): присвоение вне M4 (релей не паркует сессию — при разрыве клиента вызовы становятся `tool-not-available`/LOST); в M2 встречаются `IDLE|TURN_RUNNING`.
 
 #### Scenario: несуществующая сессия
 

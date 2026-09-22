@@ -15,7 +15,8 @@ states[]:
   code            — varchar, уникален в ревизии (придумывает оркестратор)
   type            — AGENT | BASH_SCRIPT | WAIT_WEBHOOK | WAIT_TASKS | TERMINAL
   workspace       — { type: SERVER_DIR, mode: AUTO | PATH, path?: "${...}" }
-                  | { type: CLIENT_EXEC }
+                  | { type: CLIENT_EXEC }   # ЗАРЕЗЕРВИРОВАНО (D-84): валидатором допускается,
+                                            # релеем НЕ исполняется — задача идёт серверно (SERVER_DIR fallback)
   agent_key       — для AGENT (конкретный агент; ревизия фиксируется на сессии)
   script          — для BASH_SCRIPT (текст, запуск через WorkspaceTools)
   scope           — для WAIT_TASKS: ALL_CHILDREN | BLOCKED_BY | TAGGED(x) | EXPLICIT(${task.params.key})

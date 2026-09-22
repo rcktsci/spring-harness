@@ -494,6 +494,11 @@ public class AgentTurnEngine {
         if (state.clientToolset || state.clientToolNames.contains(pendingCall.tool())) {
             return ToolResult.error(pendingCall.callId(), pendingCall.tool(), "tool-not-available");
         }
+        // Незарезолвленный не-нативный инструмент (в т.ч. клиентский после disconnect, D-84) —
+        // тот же контракт agent-turn: отсутствие резолва → tool-not-available.
+        if (!NativeAgentTools.NATIVE_TOOL_NAMES.contains(pendingCall.tool())) {
+            return ToolResult.error(pendingCall.callId(), pendingCall.tool(), "tool-not-available");
+        }
         try {
             return agentTools.execute(session.id(), pendingCall.tool(), pendingCall.arguments(), cancellation);
         } catch (Exception e) {

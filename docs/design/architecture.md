@@ -13,20 +13,24 @@
 | `execution` | шедулер (ShedLock + poll), wake, локи, виртуальные потоки, отмена | `WorkspaceTools`, `TurnManager` |
 | `intelligence` | Spring AI: ChatModel из LlmModel, агентный цикл, tool-calling, компакции | `LlmGateway` |
 | `integration` | вебхуки, MCP-клиенты (SSO), будущие адаптеры (Jira/Trello/GitLab) | `InboundTriggers` |
-| `api` | REST/OpenAPI + SSE, attach, клиент-релей CLIENT_EXEC | OpenAPI 3.1 spec-first; SDK генерируется из спеки |
+| `api` | REST/OpenAPI + SSE, скачивание workspace-файлов (api-contracts §8) | OpenAPI 3.1 spec-first; SDK генерируется из спеки |
+| `relay` | WS-релей `/api/v1/relay` (M4): handshake, реестр соединений, клиентский runtime-оверлей, маршрутизация tool-фреймов | `ClientToolBridge` (SPI в `execution`), `RelayConnectionRegistry` |
 
 ## 2. Правила зависимостей
 
 ```
 api → execution → { task, session, workflow } → identity
+api → relay → { execution, session }
+execution ↛ relay — доменные классы знают только SPI ClientToolBridge (пакет execution),
+реализация — relay, связывание — Spring (D-85)
 intelligence, integration — драйвены контрактами (их знают только execution/api)
 ```
 
-- ArchUnit: `api` mayOnlyAccessLayers("execution", "intelligence", "session", "identity", "task", "workflow") — с M2 список дополнен `task`/`workflow` (контроллеры задач и вебхуков).
+- ArchUnit: `api` mayOnlyAccessLayers("execution", "intelligence", "session", "identity", "task", "workflow", "relay"); `relay` — технический слой `relay → {execution, session}`; `execution ↛ relay` (строго).
 
 - Домены `task`/`workflow` **не знают** про БД-детали сессий и про LLM — замена домена задач на Jira-адаптер или вынос исполнения в раннеры не трогает ядро.
-- `WorkspaceTools` — единственная дверь к файловой системе/bash. Реализации: `ContainerWorkspaceTools` (docker-java, per-session контейнер из helper-образа: минимальная ОС + find/grep/coreutils/git; workspace монтируется томом; имя `harness-<sessionId>` — D-30), `ClientRelayWorkspaceTools` (релей на подключённый клиент).
-- Источники инструментов агента — ровно два: нативные (через `WorkspaceTools`) и MCP-клиенты.
+- `WorkspaceTools` — единственная дверь к серверной ФС/bash. Реализация: `ContainerWorkspaceTools` (docker-java, per-session контейнер из helper-образа: минимальная ОС + find/grep/coreutils/git; workspace монтируется томом; имя `harness-<sessionId>` — D-30). В CLIENT-toolset нативные файловые **не резолвятся** (D-84) — их роль берёт клиентский оверлей релея (`ClientToolRegistry` в `relay`).
+- Источники инструментов агента — четыре: нативные (`WorkspaceTools`), мета-инструменты (движок), MCP-клиенты и клиентский оверлей релея (D-80/D-85).
 
 ## 3. Контракты (Java-интерфейсы = документы того же ранга, что OpenAPI)
 
@@ -38,6 +42,7 @@ intelligence, integration — драйвены контрактами (их зн
 | `TriggerRegistry` | task | внутренний контракт пакета `task` (CRUD/revoke триггеров); наружу роль триггеров закрывают `TaskRegistry` + `InboundTriggers` (будущие внешние интеграции) |
 | `SessionStore` | session | единственная дверь к сессиям/сообщениям (append-only) |
 | `WorkspaceTools` | execution | нативные инструменты workspace по биндингу |
+| `ClientToolBridge` | execution | SPI клиентского релея (D-85): `isClientSession`/`manifest`/`resolve`/`invoke`/`cancel`; реализация — `relay` |
 | `TurnManager` | execution | запуск/парковка/отмена Turn'ов, локи |
 | `LlmGateway` | intelligence | стриминг, отмена, счёт токенов |
 | `InboundTriggers` | integration | вся внешняя входящая интеграция |
