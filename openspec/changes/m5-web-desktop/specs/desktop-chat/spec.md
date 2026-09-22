@@ -55,7 +55,7 @@ UI SHALL отправлять сообщения (`POST /api/v1/sessions/{id}/me
 
 ### Requirement: SSE-подписка через fetch-stream
 
-UI SHALL подписываться на события сессии через `fetch` + `ReadableStream` (EventSource не поддерживает Bearer-заголовок — D-87): `message.created`, `session.status` (обновление runtimeStatus-бейджа и индикатора), обработка `retry`-интервала и реконнекта по Last-Event-ID. При переключении сессии — отписка старой, подписка новой.
+UI SHALL подписываться на события сессии через `fetch` + `ReadableStream` (EventSource не поддерживает Bearer-заголовок — D-87); запрос идёт через main (D-91 — renderer не держит токен). Семантика по контракту §3.1: при коннекте/реконнекте первым приходит снапшот `session.status`, далее `message.created` (SSE `id:` = seq), `ping` (комментарий `: ping`); клиент хранит последний seq и при реконнекте передаёт его в `?since=` (Last-Event-ID приоритетен); `retry: 5000` — пауза реконнекта. При переключении сессии — отписка старой, подписка новой.
 
 #### Scenario: новое сообщение в фоне
 

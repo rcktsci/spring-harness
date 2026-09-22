@@ -22,7 +22,7 @@ Electron main-process приложения Web Desktop: окно, меню/tray,
 
 ### Requirement: SSO-логин и хранение токена
 
-Приложение SHALL реализовать Keycloak OAuth2 Authorization Code + PKCE: открытие **видимого** `BrowserWindow` с URL авторизации (из конфига — пользователь видит форму Keycloak и вводит креды), перехват redirect на localhost-loopback, обмен кода на JWT, закрытие окна после redirect. Полученные access/refresh-токены SHALL храниться через `safeStorage` (OS keychain). При истечении access-токена — silent refresh (без окна, fetch code exchange); при отказе refresh — возврат на экран логина. Выход (Logout) — очистка хранилища + open redirect logout Keycloak.
+Приложение SHALL реализовать Keycloak OAuth2 Authorization Code + PKCE: открытие **видимого** `BrowserWindow` с URL авторизации (из конфига — пользователь видит форму Keycloak и вводит креды), перехват redirect на localhost-loopback, обмен кода на JWT, закрытие окна после redirect. Полученные access/refresh-токены SHALL храниться через `safeStorage` (OS keychain); если safeStorage недоступен (нет keychain на ОС/окружении) — отказ с понятным сообщением (plain-text хранение токенов запрещено). При истечении access-токена — silent refresh (без окна, fetch code exchange); при отказе refresh — возврат на экран логина. Выход (Logout) — очистка хранилища + open redirect logout Keycloak.
 
 #### Scenario: логин
 
@@ -50,7 +50,7 @@ Electron main-process приложения Web Desktop: окно, меню/tray,
 
 ### Requirement: IPC-мост и изоляция
 
-Main и renderer SHALL общаться через типизированный `contextBridge` (preload): renderer не имеет прямого доступа к Node-API (`contextIsolation: true`, `nodeIntegration: false`). Команды: login-state, config get/set, relay-события (подписка/отписка), local-tool execution, download, open-in-OS, quit.
+Main и renderer SHALL общаться через типизированный `contextBridge` (preload): renderer не имеет прямого доступа к Node-API (`contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, CSP `default-src 'self'` — D-92). **Main владеет JWT и всеми сетевыми клиентами** (REST/WS/SSE — D-91); renderer получает/отправляет данные только через IPC. Команды: login-state, config get/set, session REST (list/get/messages/send/compact/stop), relay-управление (connect/register/disconnect + события), SSE-подписки, local-tool execution, download, open-in-OS, quit.
 
 #### Scenario: renderer вызывает локальный bash
 

@@ -8,7 +8,7 @@ WebSocket-клиент релея в Web Desktop: подключение к `/ap
 
 ### Requirement: Подключение и handshake
 
-Клиент SHALL подключаться к `{baseUrl}/api/v1/relay` с Bearer-JWT из safeStorage; при 4401 — триггер silent-refresh/relogin. После соединения SHALL отправлять `hello { protocol: 1 }` и ждать `welcome`; таймаут handshake — конфиг (дефолт 10 с), при превышении — reconnect с backoff.
+Клиент SHALL подключаться к `{baseUrl}/api/v1/relay` с Bearer-JWT из safeStorage; при 4401 — триггер silent-refresh/relogin. После соединения SHALL отправлять `hello { protocol: 1 }` и ждать `welcome`; таймаут handshake — конфиг (дефолт 10 с), при превышении — reconnect с backoff. Close 4403 (protocol-mismatch / фрейм до hello) — фатальный: клиент показывает сообщение «несовместимая версия протокола/ошибка handshake» и НЕ реконнектится.
 
 #### Scenario: штатное подключение
 
@@ -46,7 +46,7 @@ WebSocket-клиент релея в Web Desktop: подключение к `/ap
 
 ### Requirement: Локальное исполнение tool.call
 
-Получив `tool.call { callId, sessionId, tool, args }`, клиент SHALL исполнять его локально: `bash` — через `child_process.spawn` в `basePath` (shell ОС, таймаут из args/конфига, stdout+stderr объединены, non-zero exit = OK с exitCode); `read_file`/`write_file`/`edit_file` — через `fs` с лимитами вывода (конфиг); `glob` — поиск в `basePath`; `grep` — поиск по содержимому. Результат SHALL отправляться фреймом `tool.result { callId, output, exitCode }`; длинный вывод — через опциональные `tool.progress { callId, chunk }` (streaming) с финальным `tool.result`. `tool.cancel { callId }` SHALL прерывать исполняемый процесс (SIGTERM → SIGKILL по таймауту) и отменять незавершённый `tool.result`.
+Получив `tool.call { callId, sessionId, tool, args }`, клиент SHALL исполнять его локально: `bash` — через `child_process.spawn` в `basePath` (shell ОС, таймаут из args/конфига, stdout+stderr объединены, non-zero exit = OK с exitCode); `read_file`/`write_file`/`edit_file` — через `fs` с лимитами вывода (конфиг); `glob` — поиск в `basePath`; `grep` — поиск по содержимому. Результат SHALL отправляться фреймом `tool.result { callId, output, exitCode }`; длинный вывод — через опциональные `tool.progress { callId, chunk }` (streaming) с финальным `tool.result`. `tool.cancel { callId }` SHALL прерывать исполняемый процесс (SIGTERM → SIGKILL по таймауту) и отменять незавершённый `tool.result`; cancel для неизвестного `callId` (ещё не полученного/уже завершённого) — игнорируется клиентом.
 
 #### Scenario: bash-вызов
 
@@ -77,9 +77,18 @@ WebSocket-клиент релея в Web Desktop: подключение к `/ap
 - **WHEN** сервер закрывает соединение с 4409 `superseded`
 - **THEN** клиент прекращает reconnect-попытки и показывает уведомление
 
+### Requirement: Lifecycle при переключении сессий
+
+При переключении активной сессии клиент SHALL: завершать регистрацию старой (если была — соединение можно держать или переоткрыть), подключаться/регистрироваться на новую. При выходе из приложения — корректно закрывать соединение (без orphan-регистраций; сервер всё равно очистит по heartbeat/разрыву).
+
+#### Scenario: переключение
+
+- **WHEN** пользователь переключается на другую root-сессию
+- **THEN** клиент перерегистрируется на новую сессию (basePath по умолчанию новой сессии); UI показывает новый статус релея
+
 ### Requirement: Безопасность локального исполнения
 
-Локальное исполнение SHALL происходить с ведома пользователя: первая регистрация на сессию — подтверждение «разрешить оркестратору выполнять команды на этом компьютере в каталоге X»; команда bash перед исполнением отображается в UI (с возможностью abort) если включён режим подтверждения (конфиг `confirmCommands`: always/never — дефолт never для root-сессий владельца? — фиксируется в design). Путями по умолчанию остаётся `basePath` (chdir); выход за пределы не блокируется (это машина пользователя — D-88).
+Локальное исполнение SHALL происходить с ведома пользователя: первая регистрация на сессию — подтверждение «разрешить оркестратору выполнять команды на этом компьютере в каталоге X»; режим подтверждения `confirmCommands` (always/never, **дефолт always** — пользователь подтверждает каждую команду до исполнения; выключается в Settings после доверия). Путями по умолчанию остаётся `basePath` (chdir); выход за пределы не блокируется (это машина пользователя — D-88). Таймаут локальной команды SHALL быть `min(таймаут из args, harness.relay.tool-call-timeout сервера)` — превышение серверного потолка (5 мин) всё равно даст серверный `tool-timeout`.
 
 #### Scenario: первый раз на сессии
 

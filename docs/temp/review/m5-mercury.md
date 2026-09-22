@@ -107,4 +107,35 @@ M5 proposes a clean, implementable Electron+Vue desktop client that consumes fro
   - Add unit tests for PKCE verifier/challenge generation (Batch B)
 
 ---
-**Next steps**: Cross-check → Judge fixes → Owner approval → Implementation
+## Re-approval
+
+### Judge fixes verification (commit 5d4b612)
+
+| Finding | Fix location | Status |
+|---------|--------------|--------|
+| B-1: file browser removed | `proposal.md` §44 Non-goals, `desktop-artifacts/spec.md` | ✅ |
+| B-2: ASYNC_ACCEPTED → TOOL_RESULT.status | `proposal.md` §11, `tasks.md` 4.2 | ✅ |
+| H-1: no tool.result after cancel | `desktop-relay-client/spec.md` 62–64 | ✅ |
+| H-2: workspace-occupied → message only | `desktop-relay-client/spec.md` 32–35 | ✅ |
+| H-3: PARKED_CLIENT reserved | `desktop-relay-client/spec.md` (implicit) | ✅ |
+| H-4: tree refresh rules | `tasks.md` 5.1 | ✅ |
+| H-5: reconnect sends register only | `desktop-relay-client/spec.md` 37–40 | ✅ |
+| H-6: visible BrowserWindow for auth | `tasks.md` 2.1 | ✅ |
+| H-7: path validation UX-only | `desktop-artifacts/spec.md` 11 | ✅ |
+| M-1: since=0 pagination | `tasks.md` 4.2 | ✅ |
+| M-2: basePath mkdir at register | `desktop-relay-client/spec.md` 25 | ✅ |
+| M-3: compact/stop buttons | `tasks.md` 4.3 | ✅ |
+| M-4: stateCode in tree | `tasks.md` 5.1 | ✅ |
+| M-5: auto-connect moved to relay spec | `desktop-relay-client/spec.md` | ✅ |
+| M-6: task 3.4 reference | `tasks.md` 3.4 | ✅ |
+| m-1..m-5, n-1..n-3 | `tasks.md` throughout | ✅ |
+
+### Mercury fix applied
+
+| Finding | Fix location | Status |
+|---------|--------------|--------|
+| WS frame schema unit tests | `tasks.md` 2.4а | ✅ |
+
+### Decision
+
+**APPROVE** — All judge findings addressed. Proposal/specs are coherent, contract-first, and ready for owner sign-off. Implementation can proceed with batches A–F as documented.

@@ -61,11 +61,21 @@ M4 заморозил серверные контракты: REST (`/api/v1/sess
 
 **Почему**: минимальный pipeline для внутреннего приложения одной VM.
 
-### D-91: Структура проекта web-desktop
+### D-91: Структура и владение сетью — main держит секреты и клиентов
 
-**Решение**: `web-desktop/{package.json, electron.vite.config.ts, electron-builder.yml, src/{main,preload,renderer}}`; renderer: `views/{Login,Chat,Tree,Artifacts,Settings}`, `stores/` (Pinia), `api/` (generated + clients), `composables/` (useSse, useRelay, useSession); общие TS-типы WS-фреймов — ручные (WS не входит в OpenAPI) в `src/api/ws-frames.ts` по api-contracts §5.
+**Решение**: `web-desktop/{package.json, electron.vite.config.ts, electron-builder.yml, src/{main,preload,renderer}}`. **Main владеет всеми секретами и сетевыми клиентами**: JWT (safeStorage), REST-клиент, WS-релей-клиент, SSE-подписки — всё в main; renderer — чистая Vue-UI, общается с main через типизированный IPC-мост (D-92). Renderer НЕ имеет токена и НЕ открывает WS/SSE напрямую. Renderer: `views/{Login,Chat,Tree,Artifacts,Settings}`, `stores/` (Pinia), UI-composables; TS-типы — generated (openapi) + ручные WS-фрейм-типы (`src/main/ws-frames.ts` по api-contracts §5).
 
-**Почему**: изоляция от Maven-сборки; чёткое разделение main (Node-поверхность) / renderer (UI).
+**Альтернативы**: renderer держит JWT + клиенты — невозможно в Chromium (WS с Bearer) и небезопасно (XSS-утечка секрета).
+
+**Почему**: изоляция по умолчанию; секрет не покидает main; renderer остаётся sandboxed.
+
+### D-92: Sandbox renderer и CSP
+
+**Решение**: `webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false }`; CSP `default-src 'self'` (никаких remote-ресурсов); markdown-санитайз — DOMPurify.
+
+**Альтернативы**: sandbox off ради Node-зависимых npm-пакетов — ломает изоляцию; UI-слой в ней не нуждается.
+
+**Почему**: defence-in-depth на машине пользователя; DOMPurify + CSP закрывают prompt-инъекции через markdown.
 
 ## Risks / Trade-offs
 
