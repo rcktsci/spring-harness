@@ -25,3 +25,31 @@
 ## Вердикт
 
 REJECT → фиксы применяются в proposal/specs/design/tasks. После — re-approve Qwen + Mercury (Atria недоступна).
+
+## Фикс-раунд 2 (находки Atria, m5-atria.md)
+
+Ревью Atria формально исключено из цикла (сессия закончена), но must-fix подтверждены судьёй и закрыты наравне с Qwen:
+
+- **BL-1/H-2/H-3/H-5** — уже закрыты раундом 1.
+- **H-1** → D-91 переписан: main владеет JWT (safeStorage) и всеми сетевыми клиентами (REST/SSE/WS); renderer — только IPC; инициатива tool.call — серверная.
+- **H-4** → D-93: `confirmCommands` дефолт `always`, per-session consent; D-88 — risk-аппрув владельца отдельной строкой (task 6.3).
+- **M-1** — закрыт раундом 1 (since=0-пейджинг).
+- **M-2** — cancel для неизвестного callId игнорируется (relay spec).
+- **M-3** — 4403 fatal без retry (relay spec, task 3.1).
+- **M-4** — SSE: снапшот при коннекте, `: ping` игнор, retry 5000, Last-Event-ID; task SSE — since/снапшот (chat/tree spec, D-87).
+- **M-5** — закрыт раундом 1.
+- **M-6** — клиентский таймаут < серверного tool-call-timeout; progress потолок не продлевает (relay spec, D-88).
+- **M-7** → D-92: sandbox: true + CSP + DOMPurify.
+- **M-8** — lifecycle переключения сессий у релея (relay spec).
+- **M-9** — e2e-стаб полнодублирующий §5; smoke — автоматический против docker-compose (живой Keycloak) (design Risks, tasks 6.1/6.2).
+- **M-10** — task 6.4а: doc-sync api-contracts §2 (ASYNC_ACCEPTED, TreeNode taskId/stateCode).
+- **m-5/m-6/m-7/m-8/m-9/m-10** — конфиги в tasks 3.1; превью сообщения убрано; compact скрыт на STATE; ping-watchdog; safeStorage-отказ; ОС в design Risks.
+- **n-4/n-5** — DOMPurify зафиксирован (D-86); места UI зафиксированы в chat spec.
+
+## Re-approve (финал цикла)
+
+- **Qwen**: APPROVE — docs/temp/review/m5-qwen-re2.md
+- **Mercury**: APPROVE — docs/temp/review/m5-mercury-re2.md
+- **Atria**: недоступна (исключена судьёй; находки закрыты и верифицированы в re-approve обоих)
+
+**Итог: 100% консенсус доступных ревьюеров темы.** `openspec validate m5-web-desktop --strict` — valid. Цикл propose закрыт; на owner-аппрув: D-88 risk-строка + общий freeze → impl (пачки A–F).

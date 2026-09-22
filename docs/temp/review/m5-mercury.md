@@ -139,3 +139,31 @@ M5 proposes a clean, implementable Electron+Vue desktop client that consumes fro
 ### Decision
 
 **APPROVE** — All judge findings addressed. Proposal/specs are coherent, contract-first, and ready for owner sign-off. Implementation can proceed with batches A–F as documented.
+
+---
+## Re-approval round 2 (commit 0c05dac)
+
+### D-91/D-92 Architectural Review
+
+| Decision | Focus | Assessment |
+|----------|-------|------------|
+| **D-91** | Main owns network + secrets | ✅ Architecturally clean |
+| **D-92** | Renderer sandbox + CSP | ✅ Defence-in-depth |
+
+**D-91 (Network ownership):**
+- Main holds JWT (safeStorage), REST client, WS relay client, SSE subscriptions
+- Renderer is pure UI, IPC-only communication via typed contextBridge
+- Renderer has NO token, NO direct WS/SSE access
+
+**D-92 (Sandbox/CSP):**
+- `sandbox: true`, `contextIsolation: true`, `nodeIntegration: false`
+- `CSP: default-src 'self'` (no remote resources)
+- `DOMPurify` for markdown sanitization
+
+**Why this is sound:**
+1. **No secret leakage path**: Renderer cannot access tokens or open network connections
+2. **XSS containment**: Even if renderer is compromised, CSP + sandbox prevent remote exfiltration
+3. **Separation of concerns**: Main = trusted network layer; renderer = untrusted UI
+4. **Aligns with AGENTS.md**: No bloat, config-driven, clean boundaries
+
+**No changes needed.** D-91/D-92 provide proper isolation for desktop client deployment.

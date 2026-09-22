@@ -52,10 +52,10 @@ Electron main-process приложения Web Desktop: окно, меню/tray,
 
 Main и renderer SHALL общаться через типизированный `contextBridge` (preload): renderer не имеет прямого доступа к Node-API (`contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, CSP `default-src 'self'` — D-92). **Main владеет JWT и всеми сетевыми клиентами** (REST/WS/SSE — D-91); renderer получает/отправляет данные только через IPC. Команды: login-state, config get/set, session REST (list/get/messages/send/compact/stop), relay-управление (connect/register/disconnect + события), SSE-подписки, local-tool execution, download, open-in-OS, quit.
 
-#### Scenario: renderer вызывает локальный bash
+#### Scenario: оркестратор вызвал локальный bash
 
-- **WHEN** renderer (через relay-клиент) инициирует локальное исполнение bash
-- **THEN** вызов идёт через IPC в main, исполняется в main, результат возвращается в renderer
+- **WHEN** сервер шлёт `tool.call` (WS в main); включён confirmCommands
+- **THEN** main показывает команду в renderer через IPC; после confirm main исполняет и шлёт `tool.result` (renderer не инициирует исполнение сам — инициатива серверная, D-91)
 
 ### Requirement: Логи приложения
 

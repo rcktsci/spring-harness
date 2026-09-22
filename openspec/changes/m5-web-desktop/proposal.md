@@ -4,7 +4,7 @@ M4 закрыл серверную часть релея: WS-протокол, �
 
 ## What Changes
 
-- **Desktop-приложение** (новая папка `web-desktop/` в monorepo): Electron + Vue 3 + Vite + TypeScript. Main-process shell, preload-мост, renderer на Vue.
+- **Desktop-приложение** (новая папка `web-desktop/` в monorepo): Electron + Vue 3 + Vite + TypeScript. Main-process shell (владеет JWT и всеми сетевыми клиентами — D-91), preload-мост, renderer на Vue.
 - **SSO-логин**: Keycloak OAuth redirect (видимое BrowserWindow) → JWT → secure-хранение (`safeStorage`); сервер URL — конфиг приложения.
 - **WS-клиент релея** (`/api/v1/relay`): `hello`/`register { sessionId, basePath, client.tools[] }`/`tool.call`/`tool.progress`/`tool.result`/`tool.cancel`/`pong`; reconnect и takeover (4409 `superseded`); heartbeat-ответы.
 - **Локальные инструменты**: стандартный файловый набор (`bash`, `read_file`, `write_file`, `edit_file`, `glob`, `grep`) исполняется desktop'ом локально (Node `child_process`/`fs`) и декларируется серверу — оркестратор и его субагенты получают CLIENT-toolset (D-84). `source: "client.mcp:<server>"`-декларации из внешних MCP-серверов пользователя — **вне M5** (эволюция).
@@ -30,16 +30,16 @@ M4 закрыл серверную часть релея: WS-протокол, �
 ## Impact
 
 - **Код**: новая папка `web-desktop/` (npm-пакет в monorepo): Electron main, preload, Vue-renderer, общие TS-типы из `openapi.yaml` (генерация `openapi-typescript` или ручные типы по контрактам — решается в design).
-- **Сборка**: `electron-vite` + `electron-builder`; npm-скрипты в корне (`pnpm`/`npm` — выбрать в design); Java-сборка не меняется (Maven-проект не зависит от папки).
+- **Сборка**: `electron-vite` + `electron-builder`; npm-скрипты в корне (`pnpm` — D-90); Java-сборка не меняется (Maven-проект не зависит от папки).
 - **API**: без изменений; используются REST `/api/v1/sessions*`, `/tasks*`, `/workspace/files`, WS `/api/v1/relay`.
 - **Зависимости**: новый JS-стек (electron, vue, vite, typescript, pinia, markdown-рендер) — всё в `web-desktop/package.json`, изолированно от Maven.
 - **Документы**: `roadmap.md` (M5 финальная редакция), `architecture.md` (слой web-desktop), `decisions.md` (D-86…), `client-cli.md` — переименовать/суперседнуть в «Web Desktop» (документ клиента), `operations.md` (сборка/дистрибуция desktop).
-- **Тесты**: Vitest (unit/component) + Playwright-electron e2e против stub-сервера; smoke против живого сервера — manual/CI.
+- **Тесты**: Vitest (unit/component) + Playwright-electron e2e против stub-сервера (полнодублирующего §5); автоматический smoke против docker-compose (живой Keycloak).
 
 ## Non-goals
 
 - **MCP-бриджинг** (`source: client.mcp:<server>` — проксирование внешних MCP-серверов пользователя) — эволюция после M5.
-- **Мобильный/браузерный клиент**, `auth/ticket` — не нужен (Electron держит JWT).
+- **Мобильный/браузерный клиент**, `auth/ticket` — не нужен (JWT и сетевые клиенты живут в main-процессе Electron — D-91).
 - **Auto-update** (electron-updater) — внутреннее приложение одной VM; дистрибуция — сборка по запросу.
 - **Мультиоконность** — одно окно, виды переключаются внутри.
 - **Каталог-листинг workspace** (браузер файлов) — серверного эндпоинта нет; эволюция (мини-амендмент при необходимости).

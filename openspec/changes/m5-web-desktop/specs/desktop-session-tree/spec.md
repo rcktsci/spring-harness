@@ -22,7 +22,7 @@ UI SHALL отображать дерево активной FREE-сессии (`
 
 ### Requirement: Задачи и переходы
 
-UI SHALL отображать задачи оркестратора (`GET /api/v1/tasks?...`): статус (CURRENT/TERMINAL-проекция), suspended-флаг, текущее состояние; подписка на task SSE (`GET /api/v1/tasks/{id}/events`) — переходы `task.transition`, `task.status`, `subtask.terminal`, комментарии задачи. Комментарии можно добавлять (`POST /api/v1/tasks/{id}/comments`).
+UI SHALL отображать задачи оркестратора (`GET /api/v1/tasks?...`): статус (CURRENT/TERMINAL-проекция), suspended-флаг, текущее состояние; подписка на task SSE (`GET /api/v1/tasks/{id}/events`) — переходы `task.transition`, `task.status`, `subtask.terminal`, комментарии задачи; семантика та же, что session SSE (§3.2): при коннекте — снапшот `task.status`, курсор `since=task_event_seq` / Last-Event-ID при реконнекте, `: ping` игнорируется. Комментарии можно добавлять (`POST /api/v1/tasks/{id}/comments`).
 
 #### Scenario: задача перешла в состояние
 
