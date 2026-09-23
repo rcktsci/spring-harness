@@ -4,7 +4,7 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "lib": ["ES2022"],
+    "lib": ["ES2022", "DOM"],
     "strict": true,
     "noImplicitAny": true,
     "strictNullChecks": true,
@@ -41,8 +41,9 @@
     "src/shared/**/*.ts",
     "src/api/generated/**/*.d.ts",
     "electron.vite.config.ts",
-    "tests/unit/**/*.ts",
+    "tests/unit/*.test.ts",
+    "tests/unit/*.ts",
     "vitest.config.ts"
   ],
-  "exclude": ["node_modules", "out", "dist", "src/renderer/**"]
+  "exclude": ["node_modules", "out", "dist", "src/renderer/**", "tests/unit/components", "tests/unit/feed.test.ts"]
 }

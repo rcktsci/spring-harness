@@ -24,12 +24,12 @@
 
 ## 4. Пачка D — Чат и SSE
 
-- [ ] 4.1 Список сессий (`GET /sessions?mine=`): бейджи runtimeStatus, поиск, курсор-пагинация; создание сессии (выбор агента).
-- [ ] 4.2 Лента: все MessageKind (USER/ASSISTANT/SYSTEM/TOOL_CALL/TOOL_RESULT/COMPACT), markdown (markdown-it + DOMPurify sanitize), сворачиваемые tool-блоки, плейсхолдер «ожидает результат» (TOOL_RESULT status=ASYNC_ACCEPTED или TOOL_CALL без результата), late-маркеры; начальная загрузка пейджингом `since=0` по nextCursor до хвоста.
-- [ ] 4.3 Отправка + команды: кнопки Compact/Stop в строке состояния (подтверждение для Stop), индикатор «агент работает…», черновик per-session.
-- [ ] 4.4 SSE fetch-stream (`useSse` в main): message.created/session.status, снапшот при коннекте, ping-комментарии, Last-Event-ID реконнект (retry 5000), отписка при переключении; renderer получает события через IPC.
-- [ ] 4.5 Статус релея в UI: «подключён (N инструментов)» / «в другом месте» (4409) / кнопки подключить/отключить.
-- [ ] 4.6 Vitest + component-тесты ленты (рендер всех kind), SSE-мокстрим.
+- [x] 4.1 Список сессий (`GET /sessions?mine=`): бейджи runtimeStatus, поиск, курсор-пагинация; создание сессии (выбор агента).
+- [x] 4.2 Лента: все MessageKind (USER/ASSISTANT/SYSTEM/TOOL_CALL/TOOL_RESULT/COMPACT), markdown (markdown-it + DOMPurify sanitize), сворачиваемые tool-блоки, плейсхолдер «ожидает результат» (TOOL_RESULT status=ASYNC_ACCEPTED или TOOL_CALL без результата), late-маркеры; начальная загрузка пейджингом `since=0` по nextCursor до хвоста.
+- [x] 4.3 Отправка + команды: кнопки Compact/Stop в строке состояния (подтверждение для Stop), индикатор «агент работает…», черновик per-session.
+- [x] 4.4 SSE fetch-stream (`useSse` в main): message.created/session.status, снапшот при коннекте, ping-комментарии, Last-Event-ID реконнект (retry 5000), отписка при переключении; renderer получает события через IPC.
+- [x] 4.5 Статус релея в UI: «подключён (N инструментов)» / «в другом месте» (4409) / кнопки подключить/отключить.
+- [x] 4.6 Vitest + component-тесты ленты (рендер всех kind), SSE-мокстрим.
 
 ## 5. Пачка E — Дерево сессий/задач и артефакты
 

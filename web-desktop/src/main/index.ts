@@ -7,13 +7,32 @@ import { buildAppMenu } from './menu.js';
 import { createTray } from './tray.js';
 import { startLogin, logout, readLoginState, refreshIfNeeded } from './auth.js';
 import { RelayClient } from './relay-client.js';
-import { IPC, type ServerConfig } from '../shared/ipc-contract.js';
+import { SessionSseClient } from './sse.js';
+import {
+  compactSession,
+  createSession,
+  getSession,
+  listAgents,
+  listMessages,
+  listSessions,
+  sendMessage,
+  stopSession,
+} from './rest-client.js';
+import {
+  IPC,
+  type MessageListQuery,
+  type ServerConfig,
+  type SessionCreateBody,
+  type SessionListQuery,
+  type SessionSendBody,
+} from '../shared/ipc-contract.js';
 
 const DEV_URL = process.env['VITE_DEV_SERVER_URL'];
 const isDev = Boolean(DEV_URL);
 let mainWindow: BrowserWindow | null = null;
 let config = await loadConfig();
 let relay: RelayClient | null = null;
+let sse: SessionSseClient | null = null;
 initLogger(config.logLevel, config.logMaxSizeBytes);
 log.info('app starting', { isDev, version: app.getVersion() });
 
@@ -65,6 +84,13 @@ async function bootstrap(): Promise<void> {
 
   registerIpcStubs();
   relay = createRelay();
+  sse = new SessionSseClient(
+    config,
+    (sessionId, frame) => {
+      mainWindow?.webContents.send('sse:event', { sessionId, ...frame });
+    },
+    async () => refreshIfNeeded(config, config.tokenClockSkewSeconds),
+  );
 
   if (isDev && DEV_URL) {
     await mainWindow.loadURL(DEV_URL);
@@ -108,6 +134,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   relay?.shutdown();
+  sse?.shutdown();
   log.info('app quitting');
 });
 
@@ -157,8 +184,17 @@ async function onServerConfigChanged(next: ServerConfig): Promise<void> {
       const { clearTokens } = await import('./token-store.js');
       clearTokens();
     }
+    // Drop any live SSE so the next subscribe re-authenticates cleanly.
+    void sse?.unsubscribe();
     if (baseUrlChanged) {
-      // RelayClient captures cfg in the constructor — rebuild for the new URL.
+      // Both clients capture cfg in the constructor — rebuild for the new URL.
+      sse = new SessionSseClient(
+        config,
+        (sessionId, frame) => {
+          mainWindow?.webContents.send('sse:event', { sessionId, ...frame });
+        },
+        async () => refreshIfNeeded(config, config.tokenClockSkewSeconds),
+      );
       relay?.shutdown();
       relay = createRelay();
       if (config.relayActiveSessionId) {
@@ -188,6 +224,16 @@ function registerIpcStubs(): void {
     IPC.RELAY_CONFIRM_REGISTRATION,
     IPC.TOOL_RESPOND_CONFIRM,
     IPC.TOOL_CANCEL,
+    IPC.SESSION_LIST,
+    IPC.SESSION_GET,
+    IPC.SESSION_CREATE,
+    IPC.SESSION_MESSAGES,
+    IPC.SESSION_SEND,
+    IPC.SESSION_COMPACT,
+    IPC.SESSION_STOP,
+    IPC.AGENTS_LIST,
+    IPC.SSE_SUBSCRIBE,
+    IPC.SSE_UNSUBSCRIBE,
     IPC.APP_QUIT,
   ]);
 
@@ -305,8 +351,50 @@ function registerIpcStubs(): void {
     relay?.cancelToolCall(callId);
   });
 
+  ipcMain.handle(IPC.SESSION_LIST, async (_evt, query: SessionListQuery = {}) => {
+    return listSessions(config, { mine: true, ...query, limit: query.limit ?? config.sessionListLimit });
+  });
+
+  ipcMain.handle(IPC.SESSION_GET, async (_evt, id: string) => getSession(config, id));
+
+  ipcMain.handle(IPC.SESSION_CREATE, async (_evt, body: SessionCreateBody) =>
+    createSession(config, body),
+  );
+
+  ipcMain.handle(IPC.AGENTS_LIST, async () => listAgents(config));
+
+  ipcMain.handle(IPC.SESSION_MESSAGES, async (_evt, payload: { id: string } & MessageListQuery) => {
+    const { id, since, limit } = payload;
+    return listMessages(config, id, {
+      since: since ?? 0,
+      limit: limit ?? config.chatPageLimit,
+    });
+  });
+
+  ipcMain.handle(IPC.SESSION_SEND, async (_evt, payload: SessionSendBody) =>
+    sendMessage(config, payload.id, payload.text),
+  );
+
+  ipcMain.handle(IPC.SESSION_COMPACT, async (_evt, id: string) => compactSession(config, id));
+
+  ipcMain.handle(IPC.SESSION_STOP, async (_evt, id: string) => stopSession(config, id));
+
+  ipcMain.handle(
+    IPC.SSE_SUBSCRIBE,
+    async (_evt, payload: { sessionId: string; sinceSeq?: number }) => {
+      await sse?.subscribe(payload.sessionId, payload.sinceSeq ?? 0);
+      return true;
+    },
+  );
+
+  ipcMain.handle(IPC.SSE_UNSUBSCRIBE, async (_evt, _sessionId?: string) => {
+    await sse?.unsubscribe();
+    return true;
+  });
+
   ipcMain.handle(IPC.APP_QUIT, async () => {
     relay?.shutdown();
+    sse?.shutdown();
     app.quit();
   });
 }

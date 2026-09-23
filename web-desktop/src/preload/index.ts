@@ -1,7 +1,17 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type {
+  AgentCatalog,
+  MessagePage,
+  SendMessageAccepted,
+  SessionCreateBody,
+  SessionDto,
+  SessionListQuery,
+  SessionPage,
+} from '../shared/ipc-contract.js';
 import {
   IPC,
   type LoginState,
+  type MessageListQuery,
   type RelayStatus,
   type ServerConfig,
   type ServerConfigPatch,
@@ -24,14 +34,21 @@ const api = {
     openLogs: (): Promise<void> => ipcRenderer.invoke(IPC.CONFIG_OPEN_LOGS),
   },
   session: {
-    list: (): Promise<unknown[]> => ipcRenderer.invoke(IPC.SESSION_LIST),
-    get: (id: string): Promise<unknown> => ipcRenderer.invoke(IPC.SESSION_GET, id),
-    messages: (id: string): Promise<unknown[]> => ipcRenderer.invoke(IPC.SESSION_MESSAGES, id),
-    send: (id: string, body: string): Promise<unknown> =>
-      ipcRenderer.invoke(IPC.SESSION_SEND, { id, body }),
-    compact: (id: string): Promise<unknown> => ipcRenderer.invoke(IPC.SESSION_COMPACT, id),
-    stop: (id: string): Promise<unknown> => ipcRenderer.invoke(IPC.SESSION_STOP, id),
+    list: (query: SessionListQuery = {}): Promise<SessionPage> =>
+      ipcRenderer.invoke(IPC.SESSION_LIST, query),
+    get: (id: string): Promise<SessionDto> => ipcRenderer.invoke(IPC.SESSION_GET, id),
+    create: (body: SessionCreateBody): Promise<SessionDto> =>
+      ipcRenderer.invoke(IPC.SESSION_CREATE, body),
+    messages: (id: string, query: MessageListQuery = {}): Promise<MessagePage> =>
+      ipcRenderer.invoke(IPC.SESSION_MESSAGES, { id, ...query }),
+    send: (id: string, text: string): Promise<SendMessageAccepted> =>
+      ipcRenderer.invoke(IPC.SESSION_SEND, { id, text }),
+    compact: (id: string): Promise<void> => ipcRenderer.invoke(IPC.SESSION_COMPACT, id),
+    stop: (id: string): Promise<void> => ipcRenderer.invoke(IPC.SESSION_STOP, id),
     tree: (id: string): Promise<unknown> => ipcRenderer.invoke(IPC.SESSION_TREE, id),
+  },
+  agents: {
+    list: (): Promise<AgentCatalog> => ipcRenderer.invoke(IPC.AGENTS_LIST),
   },
   relay: {
     connect: (): Promise<RelayStatus | null> => ipcRenderer.invoke(IPC.RELAY_CONNECT),
@@ -60,10 +77,23 @@ const api = {
     },
   },
   sse: {
-    subscribe: (sessionId: string, cb: (event: unknown) => void): Unsub => {
-      const handler = (_e: Electron.IpcRendererEvent, payload: unknown): void => cb(payload);
-      void ipcRenderer.invoke(IPC.SSE_SUBSCRIBE, sessionId);
+    /**
+     * Subscribes to the session event stream in main. Events arrive on
+     * `sse:event` as `{ sessionId, id?, event, data }`. Unsubscribing the
+     * previous session happens implicitly on the next `subscribe` and on
+     * this returned teardown.
+     */
+    subscribe: (
+      sessionId: string,
+      sinceSeq: number,
+      cb: (frame: { sessionId: string; id?: string; event: string; data: string }) => void,
+    ): Unsub => {
+      const handler = (
+        _e: Electron.IpcRendererEvent,
+        payload: { sessionId: string; id?: string; event: string; data: string },
+      ): void => cb(payload);
       ipcRenderer.on('sse:event', handler);
+      void ipcRenderer.invoke(IPC.SSE_SUBSCRIBE, { sessionId, sinceSeq });
       return () => {
         ipcRenderer.removeListener('sse:event', handler);
         void ipcRenderer.invoke(IPC.SSE_UNSUBSCRIBE, sessionId);

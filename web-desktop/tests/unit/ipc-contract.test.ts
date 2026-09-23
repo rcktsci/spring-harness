@@ -7,6 +7,9 @@ describe('ipc-contract', () => {
     expect(IPC.CONFIG_GET).toBe('config:get');
     expect(IPC.CONFIG_SET).toBe('config:set');
     expect(IPC.SESSION_SEND).toBe('session:send');
+    expect(IPC.SESSION_LIST).toBe('session:list');
+    expect(IPC.SESSION_CREATE).toBe('session:create');
+    expect(IPC.AGENTS_LIST).toBe('agents:list');
     expect(IPC.RELAY_REGISTER).toBe('relay:register');
     expect(IPC.SSE_SUBSCRIBE).toBe('sse:subscribe');
     expect(IPC.APP_QUIT).toBe('app:quit');
@@ -22,5 +25,10 @@ describe('ipc-contract', () => {
     expect(DEFAULT_CONFIG.confirmCommands).toBe('always');
     expect(DEFAULT_CONFIG.logLevel).toBe('info');
     expect(DEFAULT_CONFIG.logMaxSizeBytes).toBe(5 * 1024 * 1024);
+    expect(DEFAULT_CONFIG.sessionListLimit).toBe(50);
+    expect(DEFAULT_CONFIG.sessionSearchDebounceMs).toBe(300);
+    expect(DEFAULT_CONFIG.chatPageLimit).toBe(100);
+    expect(DEFAULT_CONFIG.chatHistoryMaxPages).toBe(500);
+    expect(DEFAULT_CONFIG.sseRetryDefaultMs).toBe(5_000);
   });
 });

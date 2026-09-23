@@ -10,6 +10,11 @@
  * Channels are namespaced as "domain:action".
  */
 
+import type { AgentCatalog, MessagePage, SessionPage } from './api-types.js';
+import type { SessionDto, SendMessageAccepted } from './api-types.js';
+
+export type { AgentCatalog, MessagePage, SessionPage, SessionDto, SendMessageAccepted };
+
 export const IPC = {
   AUTH_LOGIN_STATE: 'auth:login-state',
   AUTH_LOGIN_START: 'auth:login-start',
@@ -22,11 +27,13 @@ export const IPC = {
 
   SESSION_LIST: 'session:list',
   SESSION_GET: 'session:get',
+  SESSION_CREATE: 'session:create',
   SESSION_MESSAGES: 'session:messages',
   SESSION_SEND: 'session:send',
   SESSION_COMPACT: 'session:compact',
   SESSION_STOP: 'session:stop',
   SESSION_TREE: 'session:tree',
+  AGENTS_LIST: 'agents:list',
 
   RELAY_CONNECT: 'relay:connect',
   RELAY_REGISTER: 'relay:register',
@@ -88,6 +95,16 @@ export const DEFAULT_CONFIG: ServerConfig = {
   /** Default cap for grep matches when the tool args omit maxMatches. */
   toolGrepMaxMatches: 1_000,
   confirmCommands: 'always',
+  /** Page size for GET /sessions (cursor envelope). */
+  sessionListLimit: 50,
+  /** Debounce for the session-list search field → `q=`. */
+  sessionSearchDebounceMs: 300,
+  /** Page size for GET /sessions/{id}/messages when walking history to the tail. */
+  chatPageLimit: 100,
+  /** Safety cap on history pages per open (since=0 walk). */
+  chatHistoryMaxPages: 500,
+  /** Fallback SSE reconnect delay when the stream omits `retry:` (§3.1 = 5000). */
+  sseRetryDefaultMs: 5_000,
 };
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];
@@ -138,11 +155,39 @@ export type ServerConfig = {
   toolGlobMaxResults: number;
   toolGrepMaxMatches: number;
   confirmCommands: 'always' | 'never';
+  sessionListLimit: number;
+  sessionSearchDebounceMs: number;
+  chatPageLimit: number;
+  chatHistoryMaxPages: number;
+  sseRetryDefaultMs: number;
   /**
    * Last registered FREE session — auto connect+register on next startup
    * (desktop-relay-client: «при старте с сохранённой активной сессией»).
    */
   relayActiveSessionId?: string;
+};
+
+export type SessionListQuery = {
+  mine?: boolean;
+  q?: string;
+  cursor?: string;
+  limit?: number;
+};
+
+export type SessionCreateBody = {
+  title?: string;
+  agentKey: string;
+  agentRev?: number;
+};
+
+export type MessageListQuery = {
+  since?: number;
+  limit?: number;
+};
+
+export type SessionSendBody = {
+  id: string;
+  text: string;
 };
 
 export type ServerConfigPatch = Partial<ServerConfig>;
