@@ -1,0 +1,49 @@
+appId: io.rcktsci.spring-harness.web-desktop
+productName: Spring Harness Web Desktop
+copyright: Copyright (c) 2026 RocketScience
+artifactName: ${productName}-${version}-${arch}.${ext}
+
+directories:
+  output: dist/${version}
+  buildResources: build
+
+files:
+  - out/**/*
+  - resources/**/*
+  - package.json
+  - '!**/*.{md,markdown}'
+  - '!**/{.editorconfig,.eslintignore,.prettierignore,.prettierrc.json,.gitignore}'
+  - '!**/{tsconfig*.json,eslint.config.*,.prettierrc.json}'
+  - '!**/{__tests__,tests,test,coverage,docs}/**'
+  - '!{*.map,tsconfig.tsbuildinfo}'
+
+asar: true
+asarUnpack:
+  - resources/**
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-win-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Spring Harness
+
+linux:
+  target:
+    - AppImage
+  category: Development
+  artifactName: ${productName}-${version}-linux-${arch}.${ext}
+
+mac:
+  target: []
+  category: public.app-category.developer-tools
+
+publish: null

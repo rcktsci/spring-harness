@@ -1,10 +1,10 @@
 ## 1. Пачка A — Scaffold и shell
 
-- [ ] 1.1 `web-desktop/` scaffold: package.json, electron.vite.config.ts, tsconfig (strict), eslint+prettier, electron-builder.yml (win-nsis + linux-appimage, publish: null), `.gitignore` (node_modules, dist, out).
-- [ ] 1.2 main: `index.ts` (окно 1200×800, state persistence, single-instance lock), menu, tray (конфиг), логи (electron-log, ротация, `log-level`).
-- [ ] 1.3 preload: `contextBridge` API (contextIsolation, sandbox: true, no nodeIntegration, CSP `default-src 'self'` — D-92) — типизированный контракт main↔renderer; **main владеет JWT + всеми сетевыми клиентами** (D-91).
-- [ ] 1.4 renderer: Vue 3 + Pinia + router-minimal; каркас views (Login/Chat/Tree/Artifacts/Settings); компонент-скелет.
-- [ ] 1.5 CI/скрипты: `pnpm test` (Vitest), `pnpm e2e` (Playwright-electron), `pnpm lint`; README папки.
+- [x] 1.1 `web-desktop/` scaffold: package.json, electron.vite.config.ts, tsconfig (strict), eslint+prettier, electron-builder.yml (win-nsis + linux-appimage, publish: null), `.gitignore` (node_modules, dist, out).
+- [x] 1.2 main: `index.ts` (окно 1200×800, state persistence, single-instance lock), menu, tray (конфиг), логи (electron-log, ротация, `log-level`).
+- [x] 1.3 preload: `contextBridge` API (contextIsolation, sandbox: true, no nodeIntegration, CSP `default-src 'self'` — D-92) — типизированный контракт main↔renderer; **main владеет JWT + всеми сетевыми клиентами** (D-91).
+- [x] 1.4 renderer: Vue 3 + Pinia + router-minimal; каркас views (Login/Chat/Tree/Artifacts/Settings); компонент-скелет.
+- [x] 1.5 CI/скрипты: `pnpm test` (Vitest), `pnpm e2e` (Playwright-electron), `pnpm lint`; README папки.
 
 ## 2. Пачка B — SSO, конфиг, типы
 
