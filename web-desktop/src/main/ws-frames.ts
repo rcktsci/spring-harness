@@ -67,6 +67,11 @@ export interface ToolResultFrame {
   callId: string;
   output: string;
   exitCode: number;
+  /**
+   * Client-only flag: the call was cancelled (§5.3) so the result must
+   * not be sent to the server. Never serialized onto the wire.
+   */
+  suppressed?: boolean;
 }
 
 export interface PongFrame {

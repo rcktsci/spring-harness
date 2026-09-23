@@ -32,6 +32,8 @@ export const IPC = {
   RELAY_REGISTER: 'relay:register',
   RELAY_DISCONNECT: 'relay:disconnect',
   RELAY_STATUS: 'relay:status',
+  RELAY_SET_SESSION: 'relay:set-session',
+  RELAY_CONFIRM_REGISTRATION: 'relay:confirm-registration',
 
   SSE_SUBSCRIBE: 'sse:subscribe',
   SSE_UNSUBSCRIBE: 'sse:unsubscribe',
@@ -41,6 +43,7 @@ export const IPC = {
 
   TOOL_CONFIRM: 'tool:confirm',
   TOOL_CANCEL: 'tool:cancel',
+  TOOL_RESPOND_CONFIRM: 'tool:respond-confirm',
 
   APP_QUIT: 'app:quit',
 } as const;
@@ -61,6 +64,29 @@ export const DEFAULT_CONFIG: ServerConfig = {
   loginWindowWidth: 900,
   loginWindowHeight: 750,
   tokenClockSkewSeconds: 30,
+  relayHandshakeTimeoutMs: 10_000,
+  relayHeartbeatIntervalMs: 15_000,
+  /** Server ping watchdog fires at 2× the expected interval (§5.4). */
+  relayPingWatchdogMultiplier: 2,
+  relayReconnectInitialMs: 1_000,
+  relayReconnectMaxMs: 30_000,
+  relayReconnectBackoffFactor: 2,
+  /**
+   * Client-side tool ceiling. Must be **strictly less** than the server's
+   * tool-call-timeout (§5.4 = 300_000) so the client fires first and we
+   * never race the server's tool-timeout.
+   */
+  relayToolCallTimeoutMs: 295_000,
+  relayRegisterTimeoutMs: 10_000,
+  /** Max bytes/chars a single tool result emits before the truncated marker. */
+  toolOutputLimitBytes: 1_000_000,
+  toolProgressChunkBytes: 64_000,
+  /** SIGTERM → SIGKILL grace period for cancelled/timed-out bash. */
+  toolKillGraceMs: 2_000,
+  /** Default cap for glob matches when the tool args omit maxResults. */
+  toolGlobMaxResults: 1_000,
+  /** Default cap for grep matches when the tool args omit maxMatches. */
+  toolGrepMaxMatches: 1_000,
   confirmCommands: 'always',
 };
 
@@ -97,16 +123,55 @@ export type ServerConfig = {
   loginWindowHeight: number;
   /** Seconds of clock skew tolerated before an access token is treated as expired. */
   tokenClockSkewSeconds: number;
+  relayHandshakeTimeoutMs: number;
+  relayHeartbeatIntervalMs: number;
+  relayPingWatchdogMultiplier: number;
+  relayReconnectInitialMs: number;
+  relayReconnectMaxMs: number;
+  relayReconnectBackoffFactor: number;
+  /** Strictly < server tool-call-timeout (§5.4). Effective = min(args, this). */
+  relayToolCallTimeoutMs: number;
+  relayRegisterTimeoutMs: number;
+  toolOutputLimitBytes: number;
+  toolProgressChunkBytes: number;
+  toolKillGraceMs: number;
+  toolGlobMaxResults: number;
+  toolGrepMaxMatches: number;
   confirmCommands: 'always' | 'never';
+  /**
+   * Last registered FREE session — auto connect+register on next startup
+   * (desktop-relay-client: «при старте с сохранённой активной сессией»).
+   */
+  relayActiveSessionId?: string;
 };
 
 export type ServerConfigPatch = Partial<ServerConfig>;
 
 export type RelayStatus = {
   connected: boolean;
+  registered: boolean;
+  phase: 'disconnected' | 'connecting' | 'handshake' | 'registering' | 'connected' | 'fatal';
   sessionId?: string;
+  basePath?: string;
   toolCount?: number;
+  /** Human-readable state reason (error code, notification text). */
   reason?: string;
+  /** Machine-readable code for UI branching (§5.2 / §5.5). */
+  code?: string;
+};
+
+export type ToolCallView = {
+  callId: string;
+  sessionId: string;
+  tool: string;
+  args: Record<string, unknown>;
+  basePath: string;
+};
+
+export type RegistrationConsentRequest = {
+  sessionId: string;
+  basePath: string;
+  tools: string[];
 };
 
 export type ConfirmCommandsResult = {

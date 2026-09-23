@@ -33,13 +33,15 @@
     "electron-log": "5.4.4",
     "pinia": "4.0.3",
     "vue": "3.5.43",
-    "vue-router": "5.3.1"
+    "vue-router": "5.3.1",
+    "ws": "8.21.3"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@playwright/test": "1.63.0",
     "@stylistic/eslint-plugin": "5.10.0",
     "@types/node": "24.13.6",
+    "@types/ws": "8.18.1",
     "@vitejs/plugin-vue": "6.0.9",
     "@vue/eslint-config-typescript": "14.9.0",
     "electron": "44.4.4",

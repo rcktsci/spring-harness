@@ -1,5 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { IPC, type LoginState, type ServerConfig, type ServerConfigPatch } from '../shared/ipc-contract.js';
+import {
+  IPC,
+  type LoginState,
+  type RelayStatus,
+  type ServerConfig,
+  type ServerConfigPatch,
+  type ToolCallView,
+} from '../shared/ipc-contract.js';
 
 type Unsub = () => void;
 
@@ -27,10 +34,30 @@ const api = {
     tree: (id: string): Promise<unknown> => ipcRenderer.invoke(IPC.SESSION_TREE, id),
   },
   relay: {
-    connect: (): Promise<void> => ipcRenderer.invoke(IPC.RELAY_CONNECT),
-    register: (sessionId: string): Promise<void> => ipcRenderer.invoke(IPC.RELAY_REGISTER, sessionId),
+    connect: (): Promise<RelayStatus | null> => ipcRenderer.invoke(IPC.RELAY_CONNECT),
+    register: (sessionId: string, kind: string, basePath?: string): Promise<unknown> =>
+      ipcRenderer.invoke(IPC.RELAY_REGISTER, { sessionId, kind, basePath }),
+    setSession: (sessionId: string, kind: string): Promise<unknown> =>
+      ipcRenderer.invoke(IPC.RELAY_SET_SESSION, { sessionId, kind }),
     disconnect: (): Promise<void> => ipcRenderer.invoke(IPC.RELAY_DISCONNECT),
-    status: (): Promise<unknown> => ipcRenderer.invoke(IPC.RELAY_STATUS),
+    status: (): Promise<RelayStatus | null> => ipcRenderer.invoke(IPC.RELAY_STATUS),
+    confirmRegistration: (sessionId: string, approved: boolean): Promise<unknown> =>
+      ipcRenderer.invoke(IPC.RELAY_CONFIRM_REGISTRATION, { sessionId, approved }),
+    onStatus: (cb: (status: RelayStatus) => void): Unsub => {
+      const handler = (_e: Electron.IpcRendererEvent, payload: RelayStatus): void => cb(payload);
+      ipcRenderer.on('relay:status', handler);
+      return () => ipcRenderer.removeListener('relay:status', handler);
+    },
+    onRegistrationConsent: (
+      cb: (req: { sessionId: string; basePath: string; tools: string[] }) => void,
+    ): Unsub => {
+      const handler = (
+        _e: Electron.IpcRendererEvent,
+        payload: { sessionId: string; basePath: string; tools: string[] },
+      ): void => cb(payload);
+      ipcRenderer.on('relay:registration-consent', handler);
+      return () => ipcRenderer.removeListener('relay:registration-consent', handler);
+    },
   },
   sse: {
     subscribe: (sessionId: string, cb: (event: unknown) => void): Unsub => {
@@ -48,13 +75,27 @@ const api = {
     open: (path: string): Promise<void> => ipcRenderer.invoke(IPC.ARTIFACT_OPEN, path),
   },
   tool: {
-    confirm: (callId: string, approved: boolean): Promise<void> =>
-      ipcRenderer.invoke(IPC.TOOL_CONFIRM, { callId, approved }),
+    respondConfirm: (callId: string, approved: boolean): Promise<void> =>
+      ipcRenderer.invoke(IPC.TOOL_RESPOND_CONFIRM, { callId, approved }),
     cancel: (callId: string): Promise<void> => ipcRenderer.invoke(IPC.TOOL_CANCEL, callId),
-    onCall: (cb: (call: unknown) => void): Unsub => {
-      const handler = (_e: Electron.IpcRendererEvent, payload: unknown): void => cb(payload);
+    onCall: (cb: (call: ToolCallView, basePath: string) => void): Unsub => {
+      const handler = (
+        _e: Electron.IpcRendererEvent,
+        call: ToolCallView,
+        basePath: string,
+      ): void => cb(call, basePath);
       ipcRenderer.on('tool:call', handler);
       return () => ipcRenderer.removeListener('tool:call', handler);
+    },
+    onResult: (cb: (callId: string, output: string, exitCode: number) => void): Unsub => {
+      const handler = (
+        _e: Electron.IpcRendererEvent,
+        callId: string,
+        output: string,
+        exitCode: number,
+      ): void => cb(callId, output, exitCode);
+      ipcRenderer.on('tool:result', handler);
+      return () => ipcRenderer.removeListener('tool:result', handler);
     },
   },
   app: {

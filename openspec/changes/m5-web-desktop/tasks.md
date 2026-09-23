@@ -16,11 +16,11 @@
 
 ## 3. Пачка C — relay-клиент и локальные инструменты
 
-- [ ] 3.1 `useRelay` composable + WS-клиент (в main): connect (Bearer), hello/welcome, handshake timeout (конфиг), reconnect backoff (конфиг: 1s→30s, экспонента), pong на ping + ping-watchdog (ранний reconnect при молчании сервера), 4401 → silent refresh, 4403 → фатальная ошибка без реконнекта; lifecycle при переключении сессий (см. spec).
-- [ ] 3.2 register: sessionId + basePath (`~/harness-workspaces/{sessionId}` по умолчанию, выбор пользователем; main-process создаёт каталог до отправки фрейма) + декларация стандартного набора; обработка `registered`/`workspace-occupied` (сообщение «занята другим пользователем», без takeover-диалога)/`session-not-found`/`wrong-session-kind`/`duplicate-tool-name`/`superseded`; авто-connect + register при старте с сохранённой активной сессией.
-- [ ] 3.3 Локальные инструменты: `bash` (child_process.spawn, cwd=basePath, таймаут = min(args timeout, серверный tool-call-timeout), stdout+stderr, exitCode), read/write/edit (fs, лимиты, `ambiguous`/`not-found`), glob, grep, truncated-маркеры; `tool.progress` для длинных выводов; `tool.cancel` (SIGTERM→SIGKILL; cancel неизвестного callId — игнор).
-- [ ] 3.4 Подтверждение первой регистрации («разрешить оркестратору выполнять команды в X»); режим `confirmCommands` (always/never, дефолт always — D-93; spec: desktop-relay-client → Безопасность локального исполнения).
-- [ ] 3.5 Vitest: WS-клиент против in-test WS-сервера (ws-стаб); все фреймы; takeover; cancel-во-время-spawn; все инструменты.
+- [x] 3.1 `useRelay` composable + WS-клиент (в main): connect (Bearer), hello/welcome, handshake timeout (конфиг), reconnect backoff (конфиг: 1s→30s, экспонента), pong на ping + ping-watchdog (ранний reconnect при молчании сервера), 4401 → silent refresh, 4403 → фатальная ошибка без реконнекта; lifecycle при переключении сессий (см. spec).
+- [x] 3.2 register: sessionId + basePath (`~/harness-workspaces/{sessionId}` по умолчанию, выбор пользователем; main-process создаёт каталог до отправки фрейма) + декларация стандартного набора; обработка `registered`/`workspace-occupied` (сообщение «занята другим пользователем», без takeover-диалога)/`session-not-found`/`wrong-session-kind`/`duplicate-tool-name`/`superseded`; авто-connect + register при старте с сохранённой активной сессией.
+- [x] 3.3 Локальные инструменты: `bash` (child_process.spawn, cwd=basePath, таймаут = min(args timeout, серверный tool-call-timeout), stdout+stderr, exitCode), read/write/edit (fs, лимиты, `ambiguous`/`not-found`), glob, grep, truncated-маркеры; `tool.progress` для длинных выводов; `tool.cancel` (SIGTERM→SIGKILL; cancel неизвестного callId — игнор).
+- [x] 3.4 Подтверждение первой регистрации («разрешить оркестратору выполнять команды в X»); режим `confirmCommands` (always/never, дефолт always — D-93; spec: desktop-relay-client → Безопасность локального исполнения).
+- [x] 3.5 Vitest: WS-клиент против in-test WS-сервера (ws-стаб); все фреймы; takeover; cancel-во-время-spawn; все инструменты.
 
 ## 4. Пачка D — Чат и SSE
 
