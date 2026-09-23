@@ -19,12 +19,14 @@ No server-side changes live in this package.
 ```
 web-desktop/
   src/
-    main/        Electron main: window, menu, tray, logging, config
+    main/        Electron main: window, menu, tray, logging, config,
+                 Keycloak PKCE auth, safeStorage token store, ws-frames
     preload/     contextBridge API surface (typed IPC contract)
     renderer/    Vue 3 SPA (views + stores)
     shared/      IPC channel names + payload types (single source of truth)
+    api/generated/  TS types from openapi.yaml (do not edit)
   tests/
-    unit/        Vitest suites (currently ipc-contract smoke)
+    unit/        Vitest suites (config binding, pkce, token store, ws-frames)
     e2e/         Playwright-electron smoke stub (real scenarios in bundle F)
   resources/     Tray icon + app icon (generated, committed)
   build/         electron-builder static assets (icon.ico/icon.png)
@@ -42,6 +44,7 @@ web-desktop/
 pnpm install
 pnpm dev          # electron-vite dev (HMR for main + preload + renderer)
 pnpm build        # production bundle into ./out
+pnpm generate:api # regenerate TS types from the frozen openapi.yaml
 pnpm typecheck    # tsc --noEmit + vue-tsc
 pnpm lint         # ESLint flat config, --max-warnings=0
 pnpm format       # Prettier write
@@ -51,6 +54,10 @@ pnpm package:win    # NSIS installer via electron-builder
 pnpm package:linux  # AppImage via electron-builder
 pnpm verify       # lint + typecheck + test + build
 ```
+
+`generate:api` writes `src/api/generated/openapi.d.ts` from
+`../src/main/resources/api/openapi.yaml` (frozen contract, D-89). The
+folder is excluded from lint/prettier — never hand-edit it.
 
 ## Architecture invariants (frozen)
 
@@ -81,11 +88,11 @@ no hardcoded magic numbers in code paths.
 - Renderer holds no token and opens no socket; all network is owned by
   main (D-91).
 
-## Known gaps (batch A scope)
+## Known gaps (batch A/B scope)
 
-- IPC channels other than config/auth-state/quit resolve to an explicit
-  `not implemented in batch A: <channel>` error. Real handlers arrive in
-  bundles B/C/D.
+- Relay, SSE, session and artifact IPC channels resolve to an explicit
+  `not implemented in batch B: <channel>` error. Real handlers arrive in
+  bundles C/D/E.
 - `pnpm e2e` is a skipped placeholder (`tests/e2e/smoke.spec.ts`); real
   Playwright-electron scenarios are bundle F (tasks 6.1/6.2).
 

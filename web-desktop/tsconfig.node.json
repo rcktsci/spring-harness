@@ -39,6 +39,7 @@
     "src/main/**/*.ts",
     "src/preload/**/*.ts",
     "src/shared/**/*.ts",
+    "src/api/generated/**/*.d.ts",
     "electron.vite.config.ts",
     "tests/unit/**/*.ts",
     "vitest.config.ts"

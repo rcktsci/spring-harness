@@ -49,7 +49,6 @@ export const DEFAULT_CONFIG: ServerConfig = {
   serverBaseUrl: 'http://localhost:8080',
   keycloakIssuer: 'http://localhost:8080/realms/harness',
   keycloakClientId: 'spring-harness-web-desktop',
-  keycloakRedirectUri: 'http://127.0.0.1:43189/callback',
   showTray: true,
   theme: 'system',
   logLevel: 'info',
@@ -59,6 +58,9 @@ export const DEFAULT_CONFIG: ServerConfig = {
   windowMinWidth: 800,
   windowMinHeight: 600,
   windowStateDebounceMs: 500,
+  loginWindowWidth: 900,
+  loginWindowHeight: 750,
+  tokenClockSkewSeconds: 30,
   confirmCommands: 'always',
 };
 
@@ -68,13 +70,20 @@ export type LoginState = {
   loggedIn: boolean;
   subject?: string;
   expiresAt?: number;
+  /** Human-readable reason when auth is unavailable (e.g. no OS keychain). */
+  error?: string;
 };
 
 export type ServerConfig = {
   serverBaseUrl: string;
   keycloakIssuer: string;
   keycloakClientId: string;
-  keycloakRedirectUri: string;
+  /**
+   * The OAuth2 redirect_uri is deliberately NOT configurable here: the
+   * loopback listener binds an ephemeral port at login time, so the URI
+   * is always `http://127.0.0.1:<ephemeral>/callback`. Keycloak must have
+   * a wildcard loopback redirect registered for the client.
+   */
   showTray: boolean;
   theme: 'light' | 'dark' | 'system';
   logLevel: 'error' | 'warn' | 'info' | 'verbose' | 'debug' | 'silly';
@@ -84,6 +93,10 @@ export type ServerConfig = {
   windowMinWidth: number;
   windowMinHeight: number;
   windowStateDebounceMs: number;
+  loginWindowWidth: number;
+  loginWindowHeight: number;
+  /** Seconds of clock skew tolerated before an access token is treated as expired. */
+  tokenClockSkewSeconds: number;
   confirmCommands: 'always' | 'never';
 };
 

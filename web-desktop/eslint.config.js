@@ -16,6 +16,8 @@ export default [
       'pnpm-lock.yaml',
       '*.config.js',
       '*.config.cjs',
+      // generated from the frozen openapi.yaml — never hand-edited
+      'src/api/generated/**',
     ],
   },
 

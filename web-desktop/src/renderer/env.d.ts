@@ -8,10 +8,12 @@ declare module '*.vue' {
   export default component;
 }
 
-interface ImportMetaEnv {
-  readonly VITE_DEV_SERVER_URL?: string;
-}
+declare global {
+  interface ImportMetaEnv {
+    readonly VITE_DEV_SERVER_URL?: string;
+  }
 
-interface Window {
-  readonly harness: HarnessApi;
+  interface Window {
+    readonly harness: HarnessApi;
+  }
 }

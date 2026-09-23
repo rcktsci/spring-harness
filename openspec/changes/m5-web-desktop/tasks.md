@@ -8,11 +8,11 @@
 
 ## 2. Пачка B — SSO, конфиг, типы
 
-- [ ] 2.1 Keycloak OAuth2 + PKCE: **видимое** BrowserWindow (форма логина Keycloak), loopback redirect, обмен кода; safeStorage для токенов; silent refresh на 401 (без окна); logout (очистка + Keycloak logout URL).
-- [ ] 2.2 Settings: `server.baseUrl`, Keycloak-параметры, `confirmCommands` (дефолт `always` — D-93), тема; `userData/config.json`; смена baseUrl → переподключение.
-- [ ] 2.3 D-89: генерация TS-типов/клиента из `src/main/resources/api/openapi.yaml` (openapi-typescript); ручные WS-фрейм-типы по api-contracts §5 (`src/main/ws-frames.ts`).
-- [ ] 2.4 Vitest: конфиг-бдиндинг, token-storage mock, PKCE-флоу (unit на verifier/challenge).
-- [ ] 2.4а WS-фрейм-схема: unit-тесты парсинга всех фреймов §5 (hello/welcome/register/registered/error/tool.*/ping/pong + close-коды) — защита от дрифта ручных типов `ws-frames.ts`.
+- [x] 2.1 Keycloak OAuth2 + PKCE: **видимое** BrowserWindow (форма логина Keycloak), loopback redirect, обмен кода; safeStorage для токенов; silent refresh на 401 (без окна); logout (очистка + Keycloak logout URL).
+- [x] 2.2 Settings: `server.baseUrl`, Keycloak-параметры, `confirmCommands` (дефолт `always` — D-93), тема; `userData/config.json`; смена baseUrl → переподключение.
+- [x] 2.3 D-89: генерация TS-типов/клиента из `src/main/resources/api/openapi.yaml` (openapi-typescript); ручные WS-фрейм-типы по api-contracts §5 (`src/main/ws-frames.ts`).
+- [x] 2.4 Vitest: конфиг-бдиндинг, token-storage mock, PKCE-флоу (unit на verifier/challenge).
+- [x] 2.4а WS-фрейм-схема: unit-тесты парсинга всех фреймов §5 (hello/welcome/register/registered/error/tool.*/ping/pong + close-коды) — защита от дрифта ручных типов `ws-frames.ts`.
 
 ## 3. Пачка C — relay-клиент и локальные инструменты
 
