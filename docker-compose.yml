@@ -1,0 +1,114 @@
+# Deployment compose for spring-harness (deployment-readme / D-R1, D-R3).
+#
+# Targets a private Linux VM with docker + compose v2.
+# - All secrets/credentials are inlined as `CHANGE_ME` placeholders (no `.env`).
+# - Keycloak is intentionally NOT included (bring your own external instance).
+# - The `orchestrator` container reaches the host's docker daemon via
+#   `/var/run/docker.sock` (D-30: per-session workspace helper containers).
+# - The workspace bind-mount is configured with the SAME path inside and
+#   outside the container, so the daemon resolves host paths absolutely.
+#
+# First run:
+#   1. mkdir -p /srv/harness/workspaces          # host side of the workspace volume
+#   2. docker build -f docker/Dockerfile -t harness-helper:local .   # helper image
+#   3. Edit the `CHANGE_ME` values below (KC issuer/JWKS, webhook secret,
+#      LLM key, etc.)
+#   4. docker compose up -d
+#   5. curl http://<vm>:8081/actuator/health   # actuator on 8081 (management port)
+
+services:
+
+  postgres:
+    image: postgres:17
+    container_name: harness-postgres
+    restart: unless-stopped
+    environment:
+      # These three vars drive the official `postgres` image's first-boot
+      # DB/user creation. Without them Liquibase on first start fails with
+      # "database does not exist".
+      POSTGRES_USER: harness
+      POSTGRES_PASSWORD: CHANGE_ME_postgres_password
+      POSTGRES_DB: harness
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # NB: postgres listens on 5432 inside the compose network only, the
+    # orchestrator reaches it via `DB_HOST=postgres`. The host port is
+    # intentionally NOT published (only 8080 and 8081 face the host).
+    # (ad-hoc psql: docker compose exec postgres psql -U harness)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - harness
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.orchestrator
+    image: spring-harness:local
+    container_name: harness-orchestrator
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"   # API (REST/SSE/WS)
+      - "8081:8081"   # actuator / management (compose healthcheck target)
+    volumes:
+      # Per-session workspace helper containers (D-30), the orchestrator's
+      # docker-java client needs the host's docker daemon.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Workspace bind-mount: same absolute path inside the container and on
+      # the host, so the daemon's path resolution matches the orchestrator's
+      # view. Pre-create this directory on the host before `up -d`.
+      - ${HARNESS_WORKSPACE_ROOT:-/srv/harness/workspaces}:/srv/harness/workspaces
+    environment:
+      # --- PostgreSQL (matches docker-compose service name "postgres") ------
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: harness
+      DB_USERNAME: harness
+      DB_PASSWORD: CHANGE_ME_postgres_password   # must match postgres service
+
+      # --- Keycloak (external instance; D-R1) ------------------------------------
+      # Example:
+      #   https://keycloak.example.com/realms/myrealm/protocol/openid-connect/certs
+      KEYCLOAK_ISSUER_URI: "https://keycloak.example.com/realms/myrealm"
+      KEYCLOAK_JWKS_URI: "https://keycloak.example.com/realms/myrealm/protocol/openid-connect/certs"
+
+      # --- Webhook capability-URL signing (HMAC-SHA256, api-contracts 4.4) ---
+      HARNESS_WEBHOOK_SECRET: CHANGE_ME_webhook_hmac_secret
+      # Public base URL: external systems POST capability URLs to this host.
+      # Replace <vm> with the VM's resolvable hostname/IP.
+      HARNESS_WEBHOOK_BASE_URL: "http://CHANGE_ME_vm_hostname:8080"
+
+      # --- LLM provider credentials (M3, D-43: encryption-key set) -------------
+      # Without a real value the server still boots but the first Turn will
+      # fail when it tries to decrypt the per-key reference. Set this to the
+      # plaintext secret exported from your LLM provider.
+      HARNESS_LLM_KEY_V1: CHANGE_ME_llm_provider_key
+
+      # --- Per-session workspace root ------------------------------------------
+      # MUST match the bind-mount target above: same absolute path in both.
+      HARNESS_WORKSPACE_ROOT: /srv/harness/workspaces
+
+      # --- Actuator port (matches 8081:8081 publish above) --------------------
+      MANAGEMENT_SERVER_PORT: 8081
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    networks:
+      - harness
+
+networks:
+  harness:
+    driver: bridge
+
+volumes:
+  pgdata:
+    name: harness-pgdata

@@ -1,0 +1,53 @@
+# syntax=docker/dockerfile:1.7
+# Orchestrator image — multi-stage build per D-R2 (deployment-readme).
+#
+# Stage 1: builder (Liberica JDK 25 alpine-musl + Maven). Builds the boot-jar
+#   inside the container so the only host prerequisite is docker itself.
+# Stage 2: runtime (Liberica JRE 25 alpine-musl). Carries only the jar.
+
+# ----- Stage 1: build ------------------------------------------------------
+FROM rcktsci/java-tooling:25 AS build
+
+WORKDIR /src
+
+# 1) Resolve dependencies first so this layer caches across source-only edits.
+COPY pom.xml ./
+# `dependency:go-offline` is the canonical way to seed the local Maven cache.
+# `-DskipTests` keeps it cheap (no compile/test yet).
+RUN mvn -q -DskipTests -Dmaven.javadoc.skip=true dependency:go-offline
+
+# 2) Now copy the source and build the boot jar. `${maven.project.build.outputDirectory}`
+# is implicitly `target/`. `-DskipTests` per task definition; tests run in CI, not in the
+# deployment image.
+COPY src ./src
+RUN mvn -q -DskipTests -Dmaven.javadoc.skip=true package
+
+# Locate the boot jar (spring-boot-maven-plugin produces both
+# `<artifact>-<ver>.jar` (fat) and `<artifact>-<ver>.jar.original`). Pick the
+# fat jar deterministically by excluding anything ending in `.original`.
+RUN JAR=$(ls -1 target/*.jar | grep -v '\.original$' | head -n1) && \
+    cp "$JAR" /tmp/app.jar
+
+# ----- Stage 2: runtime ---------------------------------------------------
+FROM bellsoft/liberica-openjre-alpine-musl:25 AS runtime
+
+WORKDIR /app
+
+# Non-root user for slightly safer defaults; container still needs the docker
+# socket mount (root at the host path), which is bind-mounted at the same UID.
+RUN addgroup -S harness && adduser -S harness -G harness
+USER harness
+
+# Single artifact copied from the build stage.
+COPY --from=build --chown=harness:harness /tmp/app.jar /app/app.jar
+
+# Ports:
+#   8080 — REST/SSE/WS API (api-contracts §2)
+#   8081 — actuator/management (compose healthcheck, see deployment-readme)
+EXPOSE 8080 8081
+
+ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError"
+
+# The entrypoint is a single boot jar; runtime config comes from env (see
+# application.yml — every knob has an env override).
+ENTRYPOINT ["java", "-jar", "/app/app.jar"]

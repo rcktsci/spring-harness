@@ -59,9 +59,31 @@
 | Числа — конфиг | ✅ | Нет новых хардкодов в приложении. Порты 8080/8081 — инфраструктурные константы compose. |
 | Секреты не в git | ⚠️ | Плейсхолдеры `CHANGE_ME` + предупреждение в README. Риск случайного коммита реальных секретов остаётся (human factor). Допустимо по уровню проекта, но можно усилить `git update-index --skip-worktree docker-compose.yml` в README. |
 
----
+## Re-approval
 
-## Рекомендации по фиксу
+**Дата:** 2026-09-24 (post-commit 7e8b83c)
+
+Перепроверка обновлённых артефактов (`design.md`, `tasks.md`, `proposal.md`):
+
+| # | Находка (оригинал) | design.md | tasks.md | proposal.md | Статус |
+|---|-------------------|-----------|----------|-------------|--------|
+| CRITICAL-1 | `MANAGEMENT_SERVER_PORT=8081` | ✅ D-R3, line 41 | ✅ 1.2, line 6 | N/A (proposal не детализирует env) | Закрыто |
+| MAJOR-2 | `POSTGRES_USER/DB/PASSWORD` + `pg_isready -U -d` | ✅ D-R3, line 41 | ✅ 1.2, line 6 | N/A | Закрыто |
+| MAJOR-3 | mvn (корп. образ) vs `./mvnw`+chmod | ✅ D-R2, line 33 | ✅ 1.1/2.1 | N/A | Закрыто |
+| MAJOR-4 | Node ≥20.18 / pnpm ≥10 | N/A | ✅ 2.3, line 12 | N/A | Закрыто |
+| MAJOR-5 | `HARNESS_WEBHOOK_BASE_URL` | ✅ D-R3, line 41 | ✅ 1.2, line 6 | N/A | Закрыто |
+| MINOR-6 | `pg_isready` формат | N/A | ✅ 1.2, line 6 | N/A | Закрыто |
+| MINOR-7 | Web Origins `http://127.0.0.1` | ✅ D-R4, line 49 | ✅ 2.2, line 11 | N/A | Закрыто |
+| MINOR-8 | `package:win` на Windows / `package:linux` на Linux | N/A | ✅ 2.3, line 12 | N/A | Закрыто |
+| MINOR-9 | `mkdir -p` workspace | ✅ D-R3, line 41 | ✅ 2.1, line 10 | N/A | Закрыто |
+| MINOR-10 | LLM-key warning | N/A | ✅ 2.3, line 12 | N/A | Закрыто |
+| MINOR-11 | `KEYCLOAK_JWKS_URI` в env | ✅ D-R3, line 41 | ✅ 1.2/2.1 | N/A | Закрыто |
+| MINOR-12 | `docker compose config` | N/A | ✅ 1.2, line 6 | N/A | Закрыто |
+
+Все 12 находок подтверждённо закрыты. Противоречий между design↔tasks↔proposal не выявлено. `MANAGEMENT_SERVER_PORT=8081` добавлено в env compose (решение CRITICAL без изменения Java-кода). PostgreSQL credentials — описаны. Node/pnpm версии — в 2.3. `mvn` vs `./mvnw` разнесён по сценариям (корп. образ внутри Docker, `./mvnw` на dev-машине). `HARNESS_WEBHOOK_BASE_URL` — в env.
+
+**Вердикт Re-approval: APPROVE**
+
 
 1. **CRITICAL**: В `docker-compose.yml` orchestrator env добавить `MANAGEMENT_SERVER_PORT=8081`. Альтернатива (если change не хочет env): убрать expose 8081 из compose и README, проверять health на `:8080`.
 2. **MAJOR 2**: В `docker-compose.yml` postgres env добавить `POSTGRES_USER: harness`, `POSTGRES_PASSWORD: harness`.
