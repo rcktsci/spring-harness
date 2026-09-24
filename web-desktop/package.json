@@ -20,6 +20,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test --config=playwright.config.ts",
+    "e2e:stub": "playwright test --config=playwright.config.ts --project=stub-server",
+    "e2e:electron": "playwright test --config=playwright.config.ts --project=electron-smoke",
     "lint": "eslint . --max-warnings=0",
     "lint:fix": "eslint . --fix",
     "generate:api": "openapi-typescript ../src/main/resources/api/openapi.yaml -o src/api/generated/openapi.d.ts",

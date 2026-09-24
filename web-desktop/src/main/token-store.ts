@@ -43,6 +43,14 @@ function storePath(): string {
 }
 
 export function loadTokens(): TokenSet | null {
+  // e2e bypass (Playwright stub-server): HARNESS_E2E_TOKEN injects a pre-issued
+  // bearer — saves the stub Keycloak issuer from having to render HTML.
+  if (process.env['HARNESS_E2E_ENABLED'] === '1' && process.env['HARNESS_E2E_TOKEN']) {
+    return {
+      accessToken: process.env['HARNESS_E2E_TOKEN'],
+      expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    };
+  }
   assertSafeStorage();
   let raw: Buffer;
   try {

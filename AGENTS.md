@@ -59,7 +59,24 @@
 - **M3 «Агентский слой» завершён** (openspec/changes/archive/…-m3-agent-layer, пачки N/O/P/Q/R/S): async-инструменты (окно → `ASYNC_ACCEPTED` → поздний `TOOL_RESULT late`, рестарт-скан + `AsyncTimeoutWatcher`), `spawn_subagent` + `read_compacted` + каскадная отмена поддерева, оркестратор-metaTools (`permissions_jsonb.metaTools`, гейт D-70), MCP-клиент (SDK 2.0.0, namespace `server.tool`), приёмочный e2e «Сделай биллинг»; D-60…D-70 — в docs/design/decisions.md. Архитектурные слои ArchUnit расширены `agent`/`mcp`.
 - **M4 «Клиенты и релей» завершён** (openspec/changes/archive/2026-09-22-m4-clients-relay, пачки 1/T/U/V/W/X): WS-релей `/api/v1/relay` (handshake/heartbeat/takeover, close 4401/4403/4409), клиентский toolset как runtime-оверлей (parent-chain, гейт нативных файловых в CLIENT, `tool.cancel`/LOST, рестарт-скан), скачивание серверного workspace (§8, canonical-гвард), приёмка «Роуминг» (`AcceptanceWorkspaceRoamingTest`); D-72, D-77, D-78, D-80…D-85. Слой ArchUnit `relay`, SPI `ClientToolBridge`. **560 тестов** зелёных (`mvn clean verify`, 3 symlink-skip на Windows).
 - Contract-first отработан на M1+M2+M3+M4: спека заморожена (ревью-цикл) → генерация 7.25 → контроллеры на сгенерированных интерфейсах → e2e через сгенерированный клиент.
-- Следующий шаг: **M5 «Web Desktop» (Electron + VueJS)** — отдельный этап: чат/дерево сессий и задач, скачивание артефактов, полноценный WS-клиент релея (объём: docs/design/roadmap.md, контракты в openspec/specs/). attach-CLI отменён.
+- **M5 «Web Desktop» (Electron + VueJS) завершён и заархивирован** (openspec/changes/archive/2026-09-24-m5-web-desktop, пачки A/B/C/D/E/F): scaffold (Electron + Vue 3 + Vite + TS strict), SSO PKCE + safeStorage + silent refresh, `confirmCommands=always` (D-93), WS-релей-клиент `RelayClient` (full §5: handshake, ping-watchdog, 4401→silent refresh, 4403→fatal, 4409→`superseded`-takeover, parent-chain toolset-оверлей, cancel во время spawn) + локальные инструменты `bash`/`read_file`/`write_file`/`edit`/`glob`/`grep`, список сессий, лента всех `MessageKind` (markdown-it + DOMPurify), сворачиваемые tool-блоки, плейсхолдер, late-маркер, `since=0`-пейджинг, черновик per-session, SSE через `fetch`+`ReadableStream` (`SessionSseClient`/`TaskSseClient` поверх общего `SseStream`), дерево сессий, проваливание в STATE-субагентов + breadcrumb, панель задачи (statusProjection + история + комментарии), артефакты (UX-валидация + save-as + open-in-OS через temp-кэш `<sha256[:16]>-<basename>` + обработка 404/413/422; D-72 серверный canonical-гвард — security boundary), Playwright-electron e2e против in-test stub-сервера (REST + WS §5 + SSE §3.1/§3.2). **D-86…D-93** — в docs/design/decisions.md; D-88 — owner-risk-apprув отдельной строкой (аппрув получен в ревью-цикле пачки D).
+- 5 новых спек в `openspec/specs/`: `desktop-shell`, `desktop-chat`, `desktop-relay-client`, `desktop-session-tree`, `desktop-artifacts`. Архитектурные слои ArchUnit: новые слои не нужны (Electron + Vue 3 — отдельный npm-пакет в monorepo, вне Maven; см. D-86/D-90).
+- **Следующий шаг — эволюция** (см. §"Эволюция после M5" ниже): раннеры (control/execution split), селективная компакция (агентский инструмент поверх COMPACT), MCP-сервер наружу (operatorский UI для `harness.mcp.servers`), ротация capability-секретов (cron-джоба), адаптеры задач в Jira/Trello/GitLab, multi-instance состояний (ShedLock-реестр → Redis), браузерный клиент (потребует `auth/ticket` capability по D-42), auto-update (electron-updater).
+## Эволюция после M5 (за рамками архивированного change)
+
+Каждая строчка — отдельный openspec-change с собственным ревью-циклом. Триггеры — за владельцем.
+
+| Направление | Где зафиксировано | Триггер |
+|---|---|---|
+| Раннеры (control/execution split) | roadmap.md → эволюция; `TurnManager` уже изолирован в `execution`, вынос = новая реализация | Рост нагрузки (горизонтальное масштабирование Turn'ов) |
+| Селективная компакция (агентский инструмент) | roadmap.md; `read_compacted` уже есть в `agent` layer | Длинные сессии — снижение качества модели от объёма контекста |
+| MCP-сервер наружу (operatorский UI) | `agent-tools.md` §3; D-63 уже в ядре | Корпоративные интеграции через MCP |
+| Ротация capability-секретов (cron) | api-contracts §4.4 + D-05/D-25/D-26 | Заявленный срок жизни HMAC-секрета |
+| Адаптеры Jira/Trello/GitLab | `integration` слой + api-contracts | Корпоративный onboarding |
+| Multi-instance состояний | ShedLock-реестр → Redis | Горизонтальное масштабирование |
+| Браузерный клиент | D-42 + `auth/ticket` | Запрос пользователя на веб-без-Electron |
+| Auto-update (electron-updater) | D-90 + ops-раздел | Переход от внутреннего MVP к распространению |
+
 ## Ключевые документы
 
 - [docs/glossary.md](docs/glossary.md) — глоссарий: термины, типы, инварианты.
@@ -71,6 +88,8 @@
 - [docs/design/security-multitenancy.md](docs/design/security-multitenancy.md) — аутентификация, матрица AccessPolicy, секреты, аудит.
 - [docs/design/operations.md](docs/design/operations.md) — логи, метрики, health, деплой, бэкапы, алерты.
 - [docs/design/agent-tools.md](docs/design/agent-tools.md) — каталог инструментов агента: нативные, мета-, MCP.
-- [docs/design/client-cli.md](docs/design/client-cli.md) — attach-CLI: команды, UX-минимум.
-- [docs/design/roadmap.md](docs/design/roadmap.md) — фазы реализации M1–M5 (каждая = openspec-change).
-- [docs/design/decisions.md](docs/design/decisions.md) — журнал решений (ADR).
+- [docs/design/roadmap.md](docs/design/roadmap.md) — фазы реализации M1–M5 (каждая = openspec-change); M5 done.
+- [docs/design/decisions.md](docs/design/decisions.md) — журнал решений (ADR); включает D-86…D-93 (Web Desktop) и D-88 owner-risk-строкой.
+- [docs/design/web-desktop-client.md](docs/design/web-desktop-client.md) — Web Desktop: архитектура (D-91), сценарии A–F, security (D-88/D-92/D-93), параметры конфига.
+- [web-desktop/docs/smoke.md](web-desktop/docs/smoke.md) — Playwright-electron e2e против docker-compose + ручной smoke.
+- [openspec/specs/](openspec/specs/) — заархивированные спеки (`desktop-shell`, `desktop-chat`, `desktop-relay-client`, `desktop-session-tree`, `desktop-artifacts`).

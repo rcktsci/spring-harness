@@ -14,7 +14,15 @@ export default defineConfig({
   },
   projects: [
     {
+      name: 'stub-server',
+      // Pure stub-server specs (no Electron). Fast, headless, CI-friendly.
+      testMatch: /stub-server\.spec\.ts$/,
+    },
+    {
       name: 'electron-smoke',
+      // Full Electron-driver e2e (requires a display server / Xvfb on Linux).
+      // Run with `pnpm e2e --project=electron-smoke` after `pnpm build`.
+      testMatch: /electron-smoke\.spec\.ts$/,
     },
   ],
 });

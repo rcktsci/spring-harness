@@ -16,6 +16,18 @@
 | `api` | REST/OpenAPI + SSE, скачивание workspace-файлов (api-contracts §8) | OpenAPI 3.1 spec-first; SDK генерируется из спеки |
 | `relay` | WS-релей `/api/v1/relay` (M4): handshake, реестр соединений, клиентский runtime-оверлей, маршрутизация tool-фреймов | `ClientToolBridge` (SPI в `execution`), `RelayConnectionRegistry` |
 
+## 1a. Клиенты
+
+spring-harness не навязывает UI — серверный контракт публичный (api-contracts.md), а UI выбирается за клиентом. На M5 первым и единственным полноценным клиентом стал **Web Desktop** (Electron + Vue 3, см. `web-desktop-client.md` и D-86…D-93).
+
+| Клиент | Где | Контракт | Роль |
+|---|---|---|---|
+| Web Desktop | `web-desktop/` (Electron main + preload + Vue 3 renderer) | REST /api/v1/* + SSE §3.1/§3.2 + WS-релей §5 | Десктоп-клиент оператора: чат, дерево сессий/задач, артефакты, локальные инструменты через релей |
+
+Архитектура клиента — D-91 (main владеет секретами и сетью; renderer — sandboxed, без Node API, JWT не покидает main). Контрактная схема server↔client — та же `api-contracts.md`; никакой отдельной схемы для «Web Desktop» нет, это просто первый серьёзный потребитель.
+
+Будущие клиенты (evolution roadmap): тонкий браузерный клиент (потребует capability-билетов по D-42, реализация — post-M5); интеграционные боты (MCP-сервер наружу) живут в `integration` слое и через api, не как самостоятельные desktop-клиенты.
+
 ## 2. Правила зависимостей
 
 ```

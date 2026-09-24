@@ -40,16 +40,16 @@
 
 ## 6. Пачка F — e2e, smoke, доки, архив
 
-- [ ] 6.1 Playwright-electron e2e против stub-сервера (in-test HTTP+WS+SSE сервер, **полноценно** реализующий §3.1/§3.2/§5: 4401/4403/4409, heartbeat, cancel-гонка, takeover, снапшоты SSE): логин → новая сессия → регистрация релея → оркестратор (фиксированный LLM-ответ с tool-call `bash` из stub-сервера) вызывает локальный bash → tool.result → лента показывает → spawn sub-session → дерево → артефакт save-as → stop.
-- [ ] 6.2 Smoke против живого сервера: **автоматический** Playwright-smoke против docker-compose (живой Keycloak, тестовый realm/user) — desktop лишь клиент, прогон дёшев; мануал-фолбэк в `web-desktop/docs/smoke.md`.
-- [ ] 6.3 `docs/design/decisions.md` — D-86…D-93; D-88 — отдельной risk-строкой на appрув владельца.
-- [ ] 6.4 Доки-синк: `roadmap.md` (M5 финальная редакция), `architecture.md` (слой web-desktop, потребитель контрактов), `client-cli.md` → переименовать/суперседеть в «Web Desktop» (полнокровный клиент), `operations.md` (сборка/дистрибуция desktop), `agent-tools.md` (источники: native/metaTools/MCP/desktop-client).
-- [ ] 6.4а `docs/design/api-contracts.md` §2 — сверка с openapi.yaml: MessageKind (+ASYNC_ACCEPTED), SessionDto/runtimeStatus, TreeNode (+taskId, stateCode) — doc-fix без серверных изменений.
-- [ ] 6.5 `apply-notes.md` — сводка пачек, тесты, отклонения (MCP-бриджинг, auto-update, мультиоконность — вне M5).
-- [ ] 6.6 `openspec validate m5-web-desktop --strict`; Playwright e2e зелёный.
+- [x] 6.1 Playwright-electron e2e против stub-сервера (in-test HTTP+WS+SSE сервер, **полноценно** реализующий §3.1/§3.2/§5: 4401/4403/4409, heartbeat, cancel-гонка, takeover, снапшоты SSE): логин → новая сессия → регистрация релея → оркестратор (фиксированный LLM-ответ с tool-call `bash` из stub-сервера) вызывает локальный bash → tool.result → лента показывает → spawn sub-session → дерево → артефакт save-as → stop.
+- [x] 6.2 Smoke против живого сервера: **автоматический** Playwright-smoke против docker-compose (живой Keycloak, тестовый realm/user) — desktop лишь клиент, прогон дёшев; мануал-фолбэк в `web-desktop/docs/smoke.md`.
+- [x] 6.3 `docs/design/decisions.md` — D-86…D-93; D-88 — отдельной risk-строкой на appрув владельца.
+- [x] 6.4 Доки-синк: `roadmap.md` (M5 финальная редакция), `architecture.md` (слой web-desktop, потребитель контрактов), `client-cli.md` → переименовать/суперседеть в «Web Desktop» (полнокровный клиент), `operations.md` (сборка/дистрибуция desktop), `agent-tools.md` (источники: native/metaTools/MCP/desktop-client).
+- [x] 6.4а `docs/design/api-contracts.md` §2 — сверка с openapi.yaml: MessageKind (+ASYNC_ACCEPTED), SessionDto/runtimeStatus, TreeNode (+taskId, stateCode) — doc-fix без серверных изменений.
+- [x] 6.5 `apply-notes.md` — сводка пачек, тесты, отклонения (MCP-бриджинг, auto-update, мультиоконность — вне M5).
+- [x] 6.6 `openspec validate m5-web-desktop --strict`; Playwright e2e зелёный.
 
 ## 7. Архив
 
-- [ ] 7.1 `openspec archive m5-web-desktop --yes` — 5 новых спек в `openspec/specs/`.
-- [ ] 7.2 `AGENTS.md` — M5 завершён; следующий шаг — эволюция (раннеры, селективная компакция, MCP-сервер наружу, адаптеры Jira/Trello/GitLab) по roadmap.
-- [ ] 7.3 Commit + push.
+- [x] 7.1 `openspec archive m5-web-desktop --yes` — 5 новых спек в `openspec/specs/`.
+- [x] 7.2 `AGENTS.md` — M5 завершён; следующий шаг — эволюция (раннеры, селективная компакция, MCP-сервер наружу, адаптеры Jira/Trello/GitLab) по roadmap.
+- [x] 7.3 Commit + push.
