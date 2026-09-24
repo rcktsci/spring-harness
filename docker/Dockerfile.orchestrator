@@ -20,6 +20,10 @@ RUN mvn -q -DskipTests -Dmaven.javadoc.skip=true dependency:go-offline
 # is implicitly `target/`. `-DskipTests` per task definition; tests run in CI, not in the
 # deployment image.
 COPY src ./src
+# The frozen contract lives in the repo root (api/openapi.yaml) and the
+# openapi-generator executions read it from ${project.basedir}/api — without
+# this COPY the in-container build fails with "Could not find /src/api/openapi.yaml".
+COPY api ./api
 RUN mvn -q -DskipTests -Dmaven.javadoc.skip=true package
 
 # Locate the boot jar (spring-boot-maven-plugin produces both

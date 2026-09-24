@@ -137,13 +137,23 @@ class WebhooksRoutingTest extends BaseApplicationTest {
     @Test
     void unlistedPathsAreDeniedWith401Unauthenticated() throws IOException, InterruptedException {
         // N-1: всё вне /api/webhooks/** и /api/v1/** закрыто (в т.ч. /actuator/**,
-        // когда появится в M): аноним — 401 unauthenticated, без 200-утечек
+        // кроме health): аноним — 401 unauthenticated, без 200-утечек
         Response actuator = get(localServerUrl() + "/actuator/prometheus");
         Response root = get(localServerUrl() + "/");
 
         assertThat(actuator.status()).isEqualTo(401);
         assertThat(actuator.body()).contains("\"code\":\"unauthenticated\"");
         assertThat(root.status()).isEqualTo(401);
+    }
+
+    @Test
+    void healthEndpointIsAnonymousForProbes() throws IOException, InterruptedException {
+        // health-probe (docker healthcheck, k8s liveness/readiness) не несёт Bearer:
+        // /actuator/health отвечает анонимно, деталей не раскрывая (show-details=never)
+        Response health = get(localServerUrl() + "/actuator/health");
+
+        assertThat(health.status()).isEqualTo(200);
+        assertThat(health.body()).contains("\"status\":\"UP\"");
     }
 
     private ApiException catchWebhookCall(WebhooksApi webhooksApi, UUID taskId) {

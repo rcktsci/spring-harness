@@ -77,7 +77,12 @@ public class SecurityConfig {
         return http.build();
     }
 
-    /** Catch-all (N-1): всё вне /api/webhooks/** и /api/v1/** — закрыто, анониму — 401. */
+    /**
+     * Catch-all (N-1): всё вне /api/webhooks/** и /api/v1/** — закрыто, анониму — 401.
+     * Исключение — health-эндпоинты: docker/k8s health-probe не несёт Bearer-токен,
+     * поэтому {@code /actuator/health} (+ подпути liveness/readiness) анонимны.
+     * Остальные actuator-эндпоинты (metrics, prometheus, env, loggers) остаются закрыты.
+     */
     @Bean
     @Order(3)
     @SneakyThrows
@@ -88,7 +93,9 @@ public class SecurityConfig {
                 .securityMatcher("/**")
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth -> auth.anyRequest().denyAll())
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
+                        .anyRequest().denyAll())
                 .exceptionHandling(handling -> handling.authenticationEntryPoint(unauthenticatedEntryPoint));
         return http.build();
     }
