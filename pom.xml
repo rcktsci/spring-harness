@@ -241,14 +241,17 @@
             <artifactId>assertj-core</artifactId>
             <scope>test</scope>
         </dependency>
-        <!-- Тест-клиент из openapi.yaml (генератор java/native) сериализует Jackson 2 —
-             версии — jackson-2-bom Boot. test-scope: main-код и сгенерированные серверные DTO
-             (useJackson3) Jackson 2 не используют, в runtime банка попадает только
-             транзитивно из openai-java (D-94). -->
+        <!-- Jackson 2 databind нужен openai-java и на compile, и в рантайме (D-94). Объявлен
+             явно и именно в runtime: nearest-wins по scope — при provided/test наше
+             объявление перебивало бы транзитивную compile-зависимость openai-java, и банка
+             выпадала бы из образа (проверено: без неё openai-java падает на
+             NoClassDefFoundError: com/fasterxml/jackson/databind/ObjectMapper).
+             Наш код и сгенерированные DTO (useJackson3) Jackson 2 не используют —
+             это проверяет ArchUnit-правило. -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
-            <scope>test</scope>
+            <scope>runtime</scope>
         </dependency>
 
         <!-- Jackson 2 в main-runtime — ровно для LLM-клиента (D-94). Spring AI 2 для
