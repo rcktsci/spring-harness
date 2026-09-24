@@ -18,6 +18,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.openai.OpenAiChatModel;
+import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.function.FunctionToolCallback;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import se.rocketscien.harness.common.AesGcmEncryption;
@@ -167,6 +169,43 @@ class LlmInvokerWireMockTest {
         assertThat(responses).isNotNull();
         ChatResponse last = responses.get(responses.size() - 1);
         assertThat(last.getMetadata().getUsage().getCompletionTokens()).isEqualTo(7);
+    }
+
+    @Test
+    void sendsConfiguredModelIdToProvider() {
+        server.stubFor(post(urlEqualTo(PATH)).willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "text/event-stream")
+                .withBody(sse(chunk("ok"), finalChunk(1, 1)))));
+
+        invoker.stream(modelId, new Prompt("hi")).collectList().block();
+
+        assertThat(requestBody()).contains("\"model\":\"gpt-4\"");
+    }
+
+    @Test
+    void keepsModelIdWhenToolCallbacksAreAttached() {
+        // Регрессия (живой стенд 2026-09-24): при tool-callbacks опции собирались заново
+        // (LlmInvoker) и model терялся — провайдер получал gpt-5-mini вместо MiniMax-M3.
+        server.stubFor(post(urlEqualTo(PATH)).willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "text/event-stream")
+                .withBody(sse(chunk("ok"), finalChunk(1, 1)))));
+
+        ToolCallback bash = FunctionToolCallback.builder("bash", () -> "ok").build();
+        invoker.stream(modelId, new Prompt("hi"), List.of(bash)).collectList().block();
+
+        String body = requestBody();
+        assertThat(body).as("request body: %s", body).contains("\"model\":\"gpt-4\"");
+        assertThat(body).as("request body: %s", body).contains("\"bash\"");
+        assertThat(body).as("request body: %s", body).contains("\"temperature\":0.0");
+    }
+
+    private String requestBody() {
+        List<com.github.tomakehurst.wiremock.verification.LoggedRequest> requests =
+                server.findAll(postRequestedFor(urlEqualTo(PATH)));
+        assertThat(requests).isNotEmpty();
+        return requests.get(0).getBodyAsString();
     }
 
     private String text(ChatResponse response) {

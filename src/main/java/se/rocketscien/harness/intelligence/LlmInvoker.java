@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Service;
@@ -44,18 +45,16 @@ public class LlmInvoker {
      * Декларации инструментов уходят в prompt-level options (провайдер-специфичный
      * {@link OpenAiChatOptions} — модель ожидает именно его); внутреннее исполнение Spring AI
      * не происходит — цикл инструментов ведёт Turn (write-ahead, execution-model §1).
+     *
+     * <p>Опции склеиваются с дефолтами модели, а не заменяют их: prompt-level options имеют
+     * приоритет, и модель без tools (или с tools, собранными «с нуля») теряла
+     * {@code model}/{@code temperature} — провайдер получал дефолт SDK (регрессия на живом
+     * стенде 2026-09-24: LiteLLM отклонил {@code model=gpt-5-mini} вместо {@code MiniMax-M3}).</p>
      */
     public Flux<ChatResponse> stream(UUID llmModelId, Prompt prompt, List<ToolCallback> toolCallbacks) {
-        Prompt effective = prompt;
-        if (toolCallbacks != null && !toolCallbacks.isEmpty()) {
-            effective = new Prompt(prompt.getInstructions(),
-                    OpenAiChatOptions.builder().toolCallbacks(toolCallbacks).build());
-        }
-        Prompt finalPrompt = effective;
-        // chatModel резолвится на подписке: LlmConfigurationException приходит как сигнал Flux,
-        // а не синхронным исключением (C-J-6 #14).
         return Flux.defer(() -> {
             ChatModel model = llmGateway.chatModel(llmModelId);
+            Prompt finalPrompt = withToolCallbacks(prompt, toolCallbacks, model);
             long retries = Math.max(0, turnProperties.llmRetries() - 1L);
             if (retries == 0) {
                 return model.stream(finalPrompt);
@@ -72,6 +71,19 @@ public class LlmInvoker {
                                     "LLM call failed after " + turnProperties.llmRetries() + " attempts",
                                     signal.failure())));
         });
+    }
+
+    private static Prompt withToolCallbacks(Prompt prompt, List<ToolCallback> toolCallbacks, ChatModel model) {
+        if (toolCallbacks == null || toolCallbacks.isEmpty()) {
+            return prompt;
+        }
+        if (model instanceof OpenAiChatModel openAiModel
+                && openAiModel.getDefaultOptions() instanceof OpenAiChatOptions defaults) {
+            return new Prompt(prompt.getInstructions(),
+                    defaults.mutate().toolCallbacks(toolCallbacks).build());
+        }
+        return new Prompt(prompt.getInstructions(),
+                OpenAiChatOptions.builder().toolCallbacks(toolCallbacks).build());
     }
 
     static boolean isTransient(Throwable throwable) {
