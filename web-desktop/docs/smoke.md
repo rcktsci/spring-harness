@@ -2,52 +2,43 @@
 
 > Полное smoke-описание: запуск, ожидаемые результаты, ручной фолбэк, debug.
 
-## 1. Автоматический smoke (Playwright-electron + docker-compose)
+## 1. Автоматический smoke (Playwright-electron + in-test stub)
 
-Скрипт `scripts/smoke-docker.{ps1,sh}` поднимает **полный сценарий**:
+Playwright-electron driver запускает собранный desktop против **in-test stub-сервера**
+(`tests/e2e/stub-server.ts`, поднимается самим спеком). Ни docker-compose,
+ни Keycloak, ни живой бэкенд для этого прогона не нужны; нужен только GUI-сеанс
+(native Windows/macOS, Xvfb на Linux-CI).
 
-1. (опц.) `pnpm run build` (electron-vite)
-2. Playwright-electron driver запускает собранный desktop с `HARNESS_E2E_*` env
-3. Desktop проходит full сценарий:
-   - логин bypass / PKCE через живой Keycloak → токен в `safeStorage`
-   - список сессий (`GET /api/v1/sessions?mine=true`) — рендер
-   - создание FREE-сессии (`POST /api/v1/sessions`)
-   - чат: ввод промпта → `POST /api/v1/sessions/{id}/messages`
-   - SSE-подписка: snapshot `session.status`, `message.created`-кадры
-   - оркестратор пушит `tool.call bash` через SSE → desktop (auto-confirm в smoke) исполняет `bash` локально → `tool.result` через WS-релей
-   - финальный `ASSISTANT` через SSE → отображение в ленте
-   - переход на `/artifacts?sessionId=&path=hello.md` → `GET /api/v1/sessions/{id}/workspace/files` → локальный save-as
+Сценарий:
 
-### Предусловия
+1. (опц.) `pnpm run build` (electron-vite) — если не задан `HARNESS_E2E_BUILT=0`
+2. Запуск Electron с `HARNESS_E2E_*` env: token bypass + авто-подтверждение
+   команд + адрес стаба (спек проставляет их сам)
+3. Desktop открывает список сессий (стаб отдаёт FREE root-сессию)
+4. Открытие сессии → чат
+5. Пользователь пишет промпт → `POST /messages`
+6. Стаб отвечает через SSE: `tool.call bash` → desktop исполняет локально →
+   `tool.result` через WS-релей
+7. Стаб пушит финальный `ASSISTANT` → появление в ленте
+8. Артефакты: `GET /api/v1/sessions/{id}/workspace/files` через save-as-диалог
 
-- Docker + docker-compose на PATH
-- docker-compose файл серверного стенда в репозитории поднят (например, `dev/docker-compose.yml` с Keycloak + PostgreSQL + orchestrator)
-- Тестовый realm/user в Keycloak создан (по умолчанию `harness/tester/tester`)
+Живой стенд (docker-compose + реальный Keycloak) для e2e **не реализован**;
+`scripts/smoke-docker.{ps1,sh}` — заготовка, параметры которой спек
+перетирает своими значениями.
 
 ### Запуск
 
 ```bash
 cd web-desktop
-HARNESS_E2E_SERVER_BASE_URL=http://localhost:8080 \
-HARNESS_E2E_KEYCLOAK_ISSUER=http://localhost:8080/realms/harness \
-HARNESS_E2E_KEYCLOAK_CLIENT_ID=spring-harness-web-desktop \
-HARNESS_E2E_KEYCLOAK_USER=tester \
-HARNESS_E2E_KEYCLOAK_PASSWORD=tester \
-pwsh scripts/smoke-docker.ps1   # или bash scripts/smoke-docker.sh
+pnpm run e2e:electron
 ```
-
-Окружение пробрасывается в Electron; desktop читает токен через реальный PKCE-redirect на Keycloak.
 
 ### Ожидаемый результат
 
 ```
-[smoke] server=http://localhost:8080 issuer=http://localhost:8080/realms/harness
-[smoke] building electron-vite bundle...
-[smoke] running Playwright-electron (full scenario)...
 Running 1 test using 1 worker
-  ✓  1 [electron-smoke] › tests\e2e\electron-smoke.spec.ts:15:1 › chat + bash tool-call + artifact save-as against stub server (X.XXXs)
+  ✓  1 [electron-smoke] › tests\e2e\electron-smoke.spec.ts:…:1 › chat + bash tool-call + artifact save-as against stub server (X.XXXs)
 1 passed (Xm Xs)
-[smoke] OK
 ```
 
 Если тест красный — см. §4.
@@ -90,11 +81,12 @@ pnpm run dev   # electron-vite dev с HMR
 - **E2E trace**: `HARNESS_E2E_BUILT=0 pnpm exec playwright test --trace=on` — артефакт в `test-results/`.
 - **Stub-server лог**: установить `DEBUG=stub:*` или просто смотреть stdout Playwright — спеки делают `console.log` через `-`.
 - **WS-frame dump**: `HARNESS_RELAY_DEBUG=1` (если включим в `relay-client.ts`) → `log.debug` каждого фрейма.
+- **`Error: Electron uninstall` при `pnpm dev`**: бинарник Electron не скачан — postinstall-скрипты зависимостей блокируются pnpm по умолчанию. Allowlist лежит в `pnpm-workspace.yaml` (`onlyBuiltDependencies: [electron]`); лечится `pnpm rebuild electron` (или `node node_modules/electron/install.js`). На медленной сети помогает `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/`.
 
 ## 5. Окружение для Playwright-electron на CI
 
 - **Linux**: требуется Xvfb (`xvfb-run --auto-servernum --server-args='-screen 0 1280x800x24' pnpm exec playwright test --project=electron-smoke`).
-- **Windows**: работает без Xvfb; но `pnpm e2e` не стартует если нет `\\.\DISPLAY` (headless).
-- **macOS**: нативно, никаких обёрток.
+- **Windows / macOS**: нативный GUI-сеанс, дополнительных обёрток не нужно.
+- На CI `pnpm install` обязан вытащить бинарник Electron (allowlist в `pnpm-workspace.yaml`); без этого `electron-smoke` падает с «Electron uninstall».
 
 В CI по умолчанию `pnpm verify` запускает только Vitest + lint + typecheck + build. **Полный Playwright-electron прогон** — отдельный шаг (`pnpm e2e:electron`).

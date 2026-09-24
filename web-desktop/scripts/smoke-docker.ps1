@@ -1,15 +1,8 @@
 #!/usr/bin/env pwsh
-# Automated Playwright-electron smoke against docker-compose (live Keycloak).
-#
-# Prereqs:
-#   - Docker + docker-compose on PATH
-#   - The server repo's `dev/Keycloak/docker-compose.yml` (or analogous) up
-#     with a test realm/user seeded (e.g. realm "harness", user "tester").
-#   - `pnpm build` (electron-vite) ran once.
-#
-# What it does:
-#   1. Reads server URL + Keycloak issuer from env or defaults.
-#   2. Runs `electron-smoke` project (full happy-path scenario).
+# ЗАГОТОВКА. Сейчас эквивалентен `pnpm e2e:electron`: electron-smoke всегда
+# идёт против in-test stub-сервера и перетирает HARNESS_E2E_* своими
+# значениями, поэтому параметры живого стенда ни на что не влияют.
+# Живой smoke (docker-compose + реальный Keycloak) не реализован.
 #
 # Usage:
 #   pwsh web-desktop/scripts/smoke-docker.ps1

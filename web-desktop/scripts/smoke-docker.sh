@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# POSIX sibling of smoke-docker.ps1.
+# POSIX sibling of smoke-docker.ps1. ЗАГОТОВКА: см. замечание в .ps1.
 set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 web_dir="$repo_root/web-desktop"
