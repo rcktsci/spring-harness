@@ -2,7 +2,7 @@
 
 An agent platform: chat sessions with real LLM orchestration, a workflow engine with typed states, subagent trees, MCP integrations, and a cross-platform desktop client.
 
-Backend: Java 25, Spring Boot 4.1.1, Spring AI 2.0.1, PostgreSQL 17. Desktop client (`web-desktop/`): Electron, Vue 3, Vite, TypeScript.
+Backend: Java 25, Spring Boot 4.1.1, Spring AI 2.0.1, PostgreSQL 18. Desktop client (`web-desktop/`): Electron, Vue 3, Vite, TypeScript.
 
 The design docs live in [`docs/design/`](docs/design/), the decision log in [`docs/design/decisions.md`](docs/design/decisions.md), and agent-working conventions in [`AGENTS.md`](AGENTS.md).
 
@@ -16,7 +16,7 @@ What you need on the VM:
 
 - `docker` with the `compose` plugin (`docker compose version`).
 - Network access to your Keycloak instance (see section 2).
-- Network access to Docker Hub, for `postgres:17` and the base images used by `docker/Dockerfile.orchestrator`.
+- Network access to Docker Hub, for `postgres:18` and the base images used by `docker/Dockerfile.orchestrator`.
 - A directory for session workspaces. Create it before the first start, otherwise the docker daemon will create it as root and the permissions will surprise you:
 
   ```bash
