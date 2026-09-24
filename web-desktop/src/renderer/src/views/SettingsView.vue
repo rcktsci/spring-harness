@@ -1,14 +1,43 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import type { ServerConfig } from '@shared/ipc-contract';
+import { useAuthStore } from '../stores/auth';
 
 const cfg = ref<ServerConfig | null>(null);
 const saved = ref(false);
 const error = ref<string | null>(null);
+const authBusy = ref(false);
+const auth = useAuthStore();
 
 onMounted(async () => {
   cfg.value = await window.harness.config.get();
+  await auth.refresh();
 });
+
+/** Явная переавторизация: без неё истёкший токен оставляет пользователя запертым в UI. */
+async function onSignIn(): Promise<void> {
+  authBusy.value = true;
+  error.value = null;
+  try {
+    await auth.login();
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    authBusy.value = false;
+  }
+}
+
+async function onSignOut(): Promise<void> {
+  authBusy.value = true;
+  error.value = null;
+  try {
+    await auth.logout();
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    authBusy.value = false;
+  }
+}
 
 async function save(): Promise<void> {
   if (!cfg.value) return;
@@ -37,6 +66,28 @@ async function openLogs(): Promise<void> {
       v-if="cfg"
       class="form"
     >
+      <div class="session">
+        <span>Session</span>
+        <button
+          v-if="!auth.state.loggedIn"
+          type="button"
+          data-testid="sign-in"
+          :disabled="authBusy"
+          @click="onSignIn"
+        >
+          Sign in
+        </button>
+        <button
+          v-else
+          type="button"
+          class="secondary"
+          data-testid="sign-out"
+          :disabled="authBusy"
+          @click="onSignOut"
+        >
+          Sign out
+        </button>
+      </div>
       <label>
         <span>Server base URL</span>
         <input v-model="cfg.serverBaseUrl" />
@@ -75,7 +126,11 @@ async function openLogs(): Promise<void> {
         </select>
       </label>
       <div class="actions">
-        <button @click="save">
+        <button
+          type="button"
+          data-testid="save"
+          @click="save"
+        >
           Save
         </button>
         <button

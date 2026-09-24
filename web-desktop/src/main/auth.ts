@@ -19,6 +19,7 @@ import type { AddressInfo } from 'node:net';
 import { log } from './logger.js';
 import {
   clearTokens,
+  isTokenFresh,
   loadTokens,
   saveTokens,
   type TokenSet,
@@ -266,7 +267,21 @@ export async function refreshIfNeeded(
 }
 
 /**
- * Returns a usable access token or throws a human-readable error.
+ * Сессия пригодна, если токен ещё свежий ИЛИ его можно тихо обновить.
+ * Проверка только наличия токена (прежнее поведение) оставляла приложение
+ * «залогиненным» с мёртвым токеном: гейт пускал в чат, каждый вызов падал
+ * «Not signed in», а на /login не пускал — пользователь оказывался заперт
+ * (реальный случай 2026-09-24: SSO-логин без refresh_token).
+ */
+export function isSessionUsable(tokens: TokenSet, skewSeconds: number): boolean {
+  if (isTokenFresh(tokens, skewSeconds)) {
+    return true;
+  }
+  return typeof tokens.refreshToken === 'string' && tokens.refreshToken.length > 0;
+}
+
+/**
+ * Returns the access token or throws when the session cannot be recovered.
  * Callers surface the message to the renderer.
  */
 export async function requireAccessToken(cfg: ServerConfig, skewSeconds: number): Promise<string> {
@@ -292,11 +307,15 @@ export async function logout(cfg: ServerConfig): Promise<void> {
 }
 
 /**
- * Synchronous state for the renderer (never the token itself).
+ * Синхронное состояние для renderer (никогда сам токен).
+ * `loggedIn` = сессия пригодна (свежая или обновляемая), а не «файл токенов
+ * существует» — иначе просроченный токен запирает пользователя в UI (см.
+ * {@link isSessionUsable}).
  */
-export function readLoginState(): { loggedIn: boolean } {
+export function readLoginState(skewSeconds: number): { loggedIn: boolean } {
   try {
-    return { loggedIn: loadTokens() !== null };
+    const tokens = loadTokens();
+    return { loggedIn: tokens !== null && isSessionUsable(tokens, skewSeconds) };
   } catch {
     // safeStorage unavailable → not logged in, and login will explain why
     return { loggedIn: false };

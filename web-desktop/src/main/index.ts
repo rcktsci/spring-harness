@@ -301,7 +301,7 @@ function registerIpcStubs(): void {
 
   ipcMain.handle(IPC.AUTH_LOGIN_STATE, async () => {
     try {
-      return readLoginState();
+      return readLoginState(config.tokenClockSkewSeconds);
     } catch (err) {
       // safeStorage unavailable — surface a readable reason, never a crash
       return {
@@ -316,7 +316,7 @@ function registerIpcStubs(): void {
     if (!result.ok) {
       throw new Error(result.message ?? `login ${result.reason}`);
     }
-    return readLoginState();
+    return readLoginState(config.tokenClockSkewSeconds);
   });
 
   ipcMain.handle(IPC.AUTH_LOGIN_LOGOUT, async () => {
@@ -328,7 +328,7 @@ function registerIpcStubs(): void {
     if (!token) {
       throw new Error('session expired — sign in again');
     }
-    return readLoginState();
+    return readLoginState(config.tokenClockSkewSeconds);
   });
 
   ipcMain.handle(IPC.RELAY_CONNECT, async () => {
