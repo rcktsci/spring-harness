@@ -23,7 +23,14 @@ What you need on the VM:
   mkdir -p /srv/harness/workspaces
   ```
 
-  Root-owned is fine here: the per-session helper containers do the workspace work via `docker exec`, the orchestrator process itself does not write there. If a future tool writes to the workspace directly from the orchestrator, revisit ownership then.
+  It must be writable by the user the orchestrator container runs as: the orchestrator itself creates the per-session directory (`workspaces/<sessionId>`) before starting the helper container, so a root-owned root fails with `AccessDeniedException` on the very first tool call. The app boots fine without this, only tool calls fail, so you can fix it after the first start:
+
+  ```bash
+  OWNER="$(docker compose exec -T orchestrator sh -c 'echo "$(id -u):$(id -g)"')"
+  sudo chown -R "$OWNER" /srv/harness/workspaces   # use $HARNESS_WORKSPACE_ROOT if you changed it
+  ```
+
+  The container user is deliberately left to the image (`USER harness`) rather than pinned in compose: it needs access to `/var/run/docker.sock` to create helper containers, and a pinned uid that is not in the host's `docker` group would lose exactly that.
 
 Prepare the repo:
 

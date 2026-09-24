@@ -108,6 +108,10 @@ class WorkspaceContainerFailureDockerTest {
 
         assertThat(result.status()).isEqualTo(ToolStatus.ERROR);
         assertThat(result.output()).containsIgnoringCase("workspace");
+        // Живой стенд 2026-09-24: AccessDeniedException отдавался как «.../workspaces/<id>» —
+        // повтор пути, по которому непонятно, что именно сломалось. Тип причины обязателен в тексте
+        // (Windows: NoSuchFileException, Linux: FileSystemException/AccessDeniedException).
+        assertThat(result.output()).containsPattern("Failed to prepare workspace directory .+ — \\w+Exception");
     }
 
     private WorkspaceTools tools(Path root) {

@@ -10,6 +10,7 @@
 #
 # First run:
 #   1. mkdir -p /srv/harness/workspaces          # host side of the workspace volume
+#      and chown it to the orchestrator container's user (README, "What you need")
 #   2. docker build -f docker/Dockerfile -t harness-helper:local .   # helper image
 #   3. Edit the `CHANGE_ME` values below (KC issuer/JWKS, webhook secret,
 #      LLM key, etc.)
@@ -62,7 +63,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # Workspace bind-mount: same absolute path inside the container and on
       # the host, so the daemon's path resolution matches the orchestrator's
-      # view. Pre-create this directory on the host before `up -d`.
+      # view. Pre-create this directory on the host before `up -d`, owned by the
+      # user the orchestrator runs as — the orchestrator creates the per-session
+      # subdirectory itself, a root-owned root fails with AccessDeniedException.
       - ${HARNESS_WORKSPACE_ROOT:-/srv/harness/workspaces}:/srv/harness/workspaces
     environment:
       # --- PostgreSQL (matches docker-compose service name "postgres") ------

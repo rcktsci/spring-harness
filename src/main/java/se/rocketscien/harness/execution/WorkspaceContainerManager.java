@@ -313,7 +313,7 @@ public class WorkspaceContainerManager {
             Files.createDirectories(hostDir);
         } catch (IOException e) {
             throw new WorkspaceContainerException(
-                    "Failed to prepare workspace directory " + hostDir + ": " + e.getMessage(), false, e);
+                    "Failed to prepare workspace directory " + hostDir + " — " + rootCause(e), false, e);
         }
 
         ensureImage();
@@ -346,6 +346,17 @@ public class WorkspaceContainerManager {
             throw new WorkspaceContainerException(
                     "Failed to start workspace container " + name + ": " + e.getMessage(), false, e);
         }
+    }
+
+    private static String rootCause(Throwable t) {
+        Throwable root = t;
+        while (root.getCause() != null) {
+            root = root.getCause();
+        }
+        String message = root.getMessage();
+        return message == null || message.equals(root.toString())
+                ? root.getClass().getSimpleName()
+                : root.getClass().getSimpleName() + ": " + message;
     }
 
     private void ensureImage() {
