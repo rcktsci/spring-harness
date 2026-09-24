@@ -63,6 +63,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * {@code execution} используют только SPI {@code ClientToolBridge} собственного пакета (D-85).
  * {@code .impl}-правило и циклы распространены на {@code relay}; негативный тест
  * {@code relayViolationIsCaught} фиксирует, что {@code execution → relay} ловится.</p>
+ *
+ * <p>D-94: граница Jackson. В main-коде проекта Jackson 2 нет — ни databind, ни datatype/dataformat;
+ * допускаются только {@code com.fasterxml.jackson.annotation} (их читает Jackson 3, ими
+ * размечены сгенерированные DTO). Jackson 2 в рантайме существует как изолированный набор
+ * openai-java (D-94) и не должен расползаться по коду. Негативный тест
+ * {@code jackson2ViolationIsCaught} фиксирует, что правило ловит нарушителя.</p>
  */
 class ArchitectureRulesTest {
 
@@ -88,6 +94,29 @@ class ArchitectureRulesTest {
                     BASE + ".api..", BASE + ".execution..", BASE + ".task..", BASE + ".workflow..",
                     BASE + ".session..", BASE + ".identity..", BASE + ".intelligence..",
                     BASE + ".agent..", BASE + ".mcp..", BASE + ".relay.."));
+
+    /**
+     * D-94: в main-коде нет Jackson 2 — ни databind, ни datatype/dataformat/module/core.
+     * Допускается только {@code com.fasterxml.jackson.annotation}: Jackson 3 читает те же
+     * аннотации, ими размечены сгенерированные DTO. Jackson 2 в рантайме живёт изолированно
+     * внутри openai-java и не должен расползаться по коду.
+     */
+    private static final String[] JACKSON2_PACKAGES = {
+            "com.fasterxml.jackson.databind..",
+            "com.fasterxml.jackson.datatype..",
+            "com.fasterxml.jackson.dataformat..",
+            "com.fasterxml.jackson.module..",
+            "com.fasterxml.jackson.core..",
+    };
+
+    private static final ArchRule JACKSON2_ISOLATED = noClasses()
+            .that().resideInAPackage(BASE + "..")
+            .should().dependOnClassesThat().resideInAnyPackage(JACKSON2_PACKAGES)
+            .because("Jackson 2 допустим только как изолированный набор openai-java (D-94); "
+                    + "собственный код, сгенерированные DTO (useJackson3) и HTTP-слой — Jackson 3 "
+                    + "(tools.jackson). Jackson 3 читает com.fasterxml.jackson.annotation — "
+                    + "это его собственный annotation-артефакт (jackson-annotations 2.x)")
+            .as("Jackson 2 не используется в main-коде, кроме jackson-annotations");
 
     private static final ArchRule MODULE_LAYERING = layeredArchitecture()
             .consideringOnlyDependenciesInLayers()
@@ -123,6 +152,12 @@ class ArchitectureRulesTest {
     @Test
     void moduleLayeringIsRespected() {
         MODULE_LAYERING.check(MAIN_CLASSES);
+    }
+
+    /** D-94: main-код проекта не пользуется Jackson 2 (кроме jackson-annotations). */
+    @Test
+    void jackson2StaysOutOfMainCode() {
+        JACKSON2_ISOLATED.check(MAIN_CLASSES);
     }
 
     @Test
@@ -225,6 +260,16 @@ class ArchitectureRulesTest {
                 .hasMessageContaining("execution не зависит от relay")
                 .hasMessageContaining("ArchUnitRelayBridgeViolator")
                 .hasMessageContaining("ArchUnitRelayFixture");
+    }
+
+    /** D-94: Jackson 2 в main-коде роняет JACKSON2_ISOLATED. */
+    @Test
+    void jackson2ViolationIsCaught() {
+        assertThatThrownBy(() -> JACKSON2_ISOLATED.check(new ClassFileImporter().importClasses(
+                ArchUnitJackson2Violator.class)))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("Jackson 2 не используется в main-коде, кроме jackson-annotations")
+                .hasMessageContaining("ArchUnitJackson2Violator");
     }
 
     /** Нарушение слоёв (session → task) роняет MODULE_LAYERING. */

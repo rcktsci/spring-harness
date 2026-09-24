@@ -241,20 +241,30 @@
             <artifactId>assertj-core</artifactId>
             <scope>test</scope>
         </dependency>
-        <!-- Тест-клиент из openapi.yaml (генератор java/native): сериализация — Jackson 2;
-             версии — jackson-2-bom Boot. provided (не test): на compile+test classpath,
-             в main-runtime (упаковку) не попадает. Нужда: (1) сгенерированные модели
-             сервера с uniqueItems тянут @JsonDeserialize (D.2); (2) тест-клиент
-             сериализует Jackson 2. Main-runtime остаётся на Jackson 3 (AGENTS.md). -->
+        <!-- Тест-клиент из openapi.yaml (генератор java/native) сериализует Jackson 2 —
+             версии — jackson-2-bom Boot. test-scope: main-код и сгенерированные серверные DTO
+             (useJackson3) Jackson 2 не используют, в runtime банка попадает только
+             транзитивно из openai-java (D-94). -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
-            <scope>provided</scope>
+            <scope>test</scope>
         </dependency>
+
+        <!-- Jackson 2 в main-runtime — ровно для LLM-клиента (D-94). Spring AI 2 для
+             OpenAI-протокола построен на официальном openai-java SDK, а тот — Jackson 2:
+             com.openai.core.ObjectMappers жёстко ссылается на JavaTimeModule/Jdk8Module/
+             KotlinModule. Jdk8 и Kotlin приезжают транзитивно, jsr310 был единственным
+             недостающим — без него первый же вызов модели падал
+             NoClassDefFoundError: com/fasterxml/jackson/datatype/jsr310/JavaTimeModule
+             (воспроизведено на живом стенде 2026-09-24; тесты не ловили: provided/test-scope
+             попадает в test-classpath, но не в рантайм-образ).
+             Инвариант: Jackson 2 в рантайме — только этот набор, изолирован в LLM-клиенте;
+             DTO/REST/SSE проекта — Jackson 3 (jackson-annotations 2.x общий для обоих).
+             Следит ArchUnit-правило (ArchitectureRulesTest#jackson2StaysOutOfMainCode). -->
         <dependency>
             <groupId>com.fasterxml.jackson.datatype</groupId>
             <artifactId>jackson-datatype-jsr310</artifactId>
-            <scope>test</scope>
         </dependency>
     </dependencies>
 
@@ -331,8 +341,12 @@
                  api/openapi.yaml. SSE-операции (теги SessionEvents,
                  TaskEvents) исключены из генерации — контроллеры на SseEmitter вручную
                  (D-M1-8; M2 — D.2). openApiNullable=false — nullable-поля без
-                 JsonNullable/Jackson-2 (jackson-databind-nullable в main-runtime
-                 запрещён). -->
+                 JsonNullable (jackson-databind-nullable в main-runtime запрещён).
+                 Boot 4 + Jackson 3: useSpringBoot4/useJackson3 доступны с 7.20.0
+                 (openapi-generator#22854); при useJackson3 аннотации databind
+                 (@JsonDeserialize/@JsonSerialize) генерируются из tools.jackson.databind.annotation,
+                 поэтому сгенерированные DTO не тянут Jackson 2 (D-94). Опции взаимно
+                 исключают SB3/SB4, а useJackson3 несовместим с openApiNullable. -->
             <plugin>
                 <groupId>org.openapitools</groupId>
                 <artifactId>openapi-generator-maven-plugin</artifactId>
@@ -352,7 +366,8 @@
                             <configOptions>
                                 <interfaceOnly>true</interfaceOnly>
                                 <skipDefaultInterface>true</skipDefaultInterface>
-                                <useSpringBoot3>true</useSpringBoot3>
+                                <useSpringBoot4>true</useSpringBoot4>
+                                <useJackson3>true</useJackson3>
                                 <openApiNullable>false</openApiNullable>
                                 <useTags>true</useTags>
                                 <requestMappingMode>api_interface</requestMappingMode>
