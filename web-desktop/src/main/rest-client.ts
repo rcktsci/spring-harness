@@ -64,7 +64,17 @@ async function requestJson<T>(
     log.warn('api request failed', { path, status: res.status, body: text.slice(0, 500) });
     throw new Error(`API ${init.method ?? 'GET'} ${path} → ${res.status}${text ? `: ${text.slice(0, 200)}` : ''}`);
   }
-  return (await res.json()) as T;
+  // 202-команды (compact/stop/…) возвращаются без тела — res.json() на пустом теле бросает
+  // «Unexpected end of JSON input» (регрессия живого стенда 2026-09-24).
+  const text = await res.text();
+  if (text.trim() === '') {
+    return undefined as T;
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(`API ${init.method ?? 'GET'} ${path} → 200 but body is not JSON: ${text.slice(0, 200)}`);
+  }
 }
 
 export async function listSessions(cfg: ServerConfig, query: SessionListQuery = {}): Promise<SessionPage> {
