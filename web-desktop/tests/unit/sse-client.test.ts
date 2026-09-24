@@ -119,4 +119,49 @@ describe('SessionSseClient', () => {
     await Promise.resolve();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  describe('HTTP error handling', () => {
+    it('401 on connect: warns, retries after retryMs, gives up only on unsubscribe', async () => {
+      vi.useFakeTimers();
+      fetchMock
+        .mockResolvedValueOnce(new Response('{"code":"unauthenticated"}', { status: 401 }))
+        .mockResolvedValueOnce(new Response('', { status: 401 }));
+
+      const client = makeClient();
+      await client.subscribe('sess-1');
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+      // Default fallback retry: cfg.sseRetryDefaultMs = 5_000.
+      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      // Stop retrying on unsubscribe.
+      await client.unsubscribe();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('500 on connect: same retry path as 401', async () => {
+      vi.useFakeTimers();
+      fetchMock.mockResolvedValue(new Response('', { status: 500 }));
+      const client = makeClient();
+      await client.subscribe('sess-1');
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      await client.unsubscribe();
+    });
+
+    it('204 No Content on connect: treats as failure (no body) and reconnects', async () => {
+      vi.useFakeTimers();
+      fetchMock
+        .mockResolvedValueOnce(new Response(null, { status: 204 }))
+        .mockResolvedValueOnce(new Response(null, { status: 204 }));
+      const client = makeClient();
+      await client.subscribe('sess-1');
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      await client.unsubscribe();
+    });
+  });
 });

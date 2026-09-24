@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import SessionList from '../components/SessionList.vue';
 import ChatFeed from '../components/ChatFeed.vue';
 import { useSessions } from '../composables/useSessions';
@@ -7,6 +8,8 @@ import { useChat } from '../composables/useChat';
 import { useRelay } from '../composables/useRelay';
 import { isAgentWorking } from '../lib/feed';
 
+const route = useRoute();
+const router = useRouter();
 const {
   sessions,
   agents,
@@ -56,6 +59,42 @@ watch(activeId, (id, prev) => {
   if (prev) drafts.value[prev] = draft.value;
   draft.value = (id && drafts.value[id]) || '';
 });
+
+/**
+ * Open a session pinned via `?sessionId=…` (e.g. arrived from the SessionTree
+ * drill-down). One-shot: clears the query so browser back/forward does not
+ * silently re-open a stale id.
+ */
+function routeSessionId(): string | null {
+  const q = route.query['sessionId'];
+  return typeof q === 'string' && q ? q : null;
+}
+
+async function openRouteSession(): Promise<void> {
+  const id = routeSessionId();
+  if (!id) return;
+  if (id === chat.activeId.value) return;
+  try {
+    await chat.openSession(id);
+  } finally {
+    // Drop the query key whether open succeeded or not — keep the URL stable
+    // for refresh but stop router-driven re-entry.
+    const q = { ...route.query };
+    delete q['sessionId'];
+    router.replace({ path: route.path, query: q }).catch(() => undefined);
+  }
+}
+
+onMounted(() => {
+  void openRouteSession();
+});
+
+watch(
+  () => route.query['sessionId'],
+  (_next, _prev) => {
+    void openRouteSession();
+  },
+);
 
 async function onSelect(id: string): Promise<void> {
   await chat.openSession(id);
@@ -117,6 +156,15 @@ async function toggleRelay(): Promise<void> {
 
 function onRefreshSessions(): void {
   void refresh();
+}
+
+async function onOpenArtifact(path: string): Promise<void> {
+  const sessionId = activeId.value;
+  if (!sessionId) return;
+  await router.push({
+    path: '/artifacts',
+    query: { sessionId, path },
+  });
 }
 </script>
 
@@ -238,7 +286,10 @@ function onRefreshSessions(): void {
           {{ chat.error.value }}
         </p>
 
-        <ChatFeed :entries="chat.entries.value" />
+        <ChatFeed
+          :entries="chat.entries.value"
+          @open-artifact="onOpenArtifact"
+        />
 
         <form
           class="composer"

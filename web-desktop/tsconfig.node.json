@@ -45,5 +45,14 @@
     "tests/unit/*.ts",
     "vitest.config.ts"
   ],
-  "exclude": ["node_modules", "out", "dist", "src/renderer/**", "tests/unit/components", "tests/unit/feed.test.ts"]
+  "exclude": [
+    "node_modules",
+    "out",
+    "dist",
+    "src/renderer/**",
+    "tests/unit/components",
+    "tests/unit/feed.test.ts",
+    "tests/unit/artifact-paths.test.ts",
+    "tests/unit/session-tree.test.ts"
+  ]
 }

@@ -8,23 +8,37 @@ import { createTray } from './tray.js';
 import { startLogin, logout, readLoginState, refreshIfNeeded } from './auth.js';
 import { RelayClient } from './relay-client.js';
 import { SessionSseClient } from './sse.js';
+import { TaskSseClient } from './task-sse.js';
 import {
+  addTaskComment,
   compactSession,
   createSession,
   getSession,
+  getSessionTree,
+  getTask,
   listAgents,
   listMessages,
   listSessions,
+  listTaskComments,
+  listTaskHistory,
+  listTasks,
   sendMessage,
   stopSession,
 } from './rest-client.js';
+import { openArtifact, pruneCache, saveArtifactAs, WorkspaceFileError } from './artifact.js';
 import {
   IPC,
+  type ArtifactDownloadBody,
   type MessageListQuery,
   type ServerConfig,
   type SessionCreateBody,
   type SessionListQuery,
   type SessionSendBody,
+  type TaskCommentAddBody,
+  type TaskCommentsListQuery,
+  type TaskHistoryQuery,
+  type TaskListQuery,
+  type TaskSubscribeBody,
 } from '../shared/ipc-contract.js';
 
 const DEV_URL = process.env['VITE_DEV_SERVER_URL'];
@@ -33,6 +47,7 @@ let mainWindow: BrowserWindow | null = null;
 let config = await loadConfig();
 let relay: RelayClient | null = null;
 let sse: SessionSseClient | null = null;
+let taskSse: TaskSseClient | null = null;
 initLogger(config.logLevel, config.logMaxSizeBytes);
 log.info('app starting', { isDev, version: app.getVersion() });
 
@@ -91,6 +106,12 @@ async function bootstrap(): Promise<void> {
     },
     async () => refreshIfNeeded(config, config.tokenClockSkewSeconds),
   );
+  taskSse = new TaskSseClient(config, (taskId, frame) => {
+    mainWindow?.webContents.send('task:event', { taskId, ...frame });
+  });
+
+  // Background prune of the artifact open-cache (userData/cache/artifacts/*)
+  void pruneCache(config.artifactCacheMaxAgeMs);
 
   if (isDev && DEV_URL) {
     await mainWindow.loadURL(DEV_URL);
@@ -135,6 +156,10 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   relay?.shutdown();
   sse?.shutdown();
+  taskSse?.shutdown();
+  // Best-effort: prune expired open-in-OS cache files on graceful exit
+  // (spec: «кэш чистится при выходе»). Fire-and-forget — never block quit.
+  void pruneCache(config.artifactCacheMaxAgeMs);
   log.info('app quitting');
 });
 
@@ -186,6 +211,7 @@ async function onServerConfigChanged(next: ServerConfig): Promise<void> {
     }
     // Drop any live SSE so the next subscribe re-authenticates cleanly.
     void sse?.unsubscribe();
+    void taskSse?.unsubscribe();
     if (baseUrlChanged) {
       // Both clients capture cfg in the constructor — rebuild for the new URL.
       sse = new SessionSseClient(
@@ -195,6 +221,9 @@ async function onServerConfigChanged(next: ServerConfig): Promise<void> {
         },
         async () => refreshIfNeeded(config, config.tokenClockSkewSeconds),
       );
+      taskSse = new TaskSseClient(config, (taskId, frame) => {
+        mainWindow?.webContents.send('task:event', { taskId, ...frame });
+      });
       relay?.shutdown();
       relay = createRelay();
       if (config.relayActiveSessionId) {
@@ -231,9 +260,19 @@ function registerIpcStubs(): void {
     IPC.SESSION_SEND,
     IPC.SESSION_COMPACT,
     IPC.SESSION_STOP,
+    IPC.SESSION_TREE,
     IPC.AGENTS_LIST,
     IPC.SSE_SUBSCRIBE,
     IPC.SSE_UNSUBSCRIBE,
+    IPC.TASK_GET,
+    IPC.TASK_LIST,
+    IPC.TASK_HISTORY,
+    IPC.TASK_COMMENTS_LIST,
+    IPC.TASK_COMMENT_ADD,
+    IPC.TASK_SUBSCRIBE,
+    IPC.TASK_UNSUBSCRIBE,
+    IPC.ARTIFACT_DOWNLOAD,
+    IPC.ARTIFACT_OPEN,
     IPC.APP_QUIT,
   ]);
 
@@ -379,6 +418,8 @@ function registerIpcStubs(): void {
 
   ipcMain.handle(IPC.SESSION_STOP, async (_evt, id: string) => stopSession(config, id));
 
+  ipcMain.handle(IPC.SESSION_TREE, async (_evt, id: string) => getSessionTree(config, id));
+
   ipcMain.handle(
     IPC.SSE_SUBSCRIBE,
     async (_evt, payload: { sessionId: string; sinceSeq?: number }) => {
@@ -392,9 +433,87 @@ function registerIpcStubs(): void {
     return true;
   });
 
+  ipcMain.handle(IPC.TASK_LIST, async (_evt, query: TaskListQuery = {}) =>
+    listTasks(config, {
+      mine: true,
+      ...query,
+      limit: query.limit ?? config.taskHistoryLimit,
+    }),
+  );
+
+  ipcMain.handle(IPC.TASK_GET, async (_evt, id: string) => getTask(config, id));
+
+  ipcMain.handle(IPC.TASK_HISTORY, async (_evt, payload: { id: string } & TaskHistoryQuery) =>
+    listTaskHistory(config, payload.id, {
+      since: payload.since,
+      limit: payload.limit ?? config.taskHistoryLimit,
+    }),
+  );
+
+  ipcMain.handle(IPC.TASK_COMMENTS_LIST, async (_evt, payload: { id: string } & TaskCommentsListQuery) =>
+    listTaskComments(config, payload.id, {
+      cursor: payload.cursor,
+      limit: payload.limit ?? config.taskHistoryLimit,
+    }),
+  );
+
+  ipcMain.handle(IPC.TASK_COMMENT_ADD, async (_evt, payload: { id: string } & TaskCommentAddBody) =>
+    addTaskComment(config, payload.id, { body: payload.body }),
+  );
+
+  ipcMain.handle(IPC.TASK_SUBSCRIBE, async (_evt, payload: TaskSubscribeBody) => {
+    await taskSse?.subscribe(payload.taskId, payload.sinceSeq ?? 0);
+    return true;
+  });
+
+  ipcMain.handle(IPC.TASK_UNSUBSCRIBE, async (_evt, _taskId?: string) => {
+    await taskSse?.unsubscribe();
+    return true;
+  });
+
+  ipcMain.handle(IPC.ARTIFACT_OPEN, async (_evt, body: ArtifactDownloadBody) => {
+    try {
+      return await openArtifact(config, body);
+    } catch (err) {
+      throw mapArtifactError(err);
+    }
+  });
+
+  ipcMain.handle(IPC.ARTIFACT_DOWNLOAD, async (_evt, body: ArtifactDownloadBody) => {
+    try {
+      return await saveArtifactAs(config, body, mainWindow);
+    } catch (err) {
+      throw mapArtifactError(err);
+    }
+  });
+
   ipcMain.handle(IPC.APP_QUIT, async () => {
     relay?.shutdown();
     sse?.shutdown();
+    taskSse?.shutdown();
     app.quit();
   });
+}
+
+function mapArtifactError(err: unknown): Error {
+  if (err instanceof WorkspaceFileError) {
+    const code = parseProblemCode(err.detail);
+    const map: Record<number, string> = {
+      404: 'файл не найден',
+      413: 'файл слишком большой',
+      422: code === 'extension-not-allowed' ? 'тип файла нельзя скачать' : 'некорректный путь',
+    };
+    const friendly = map[err.status] ?? `ошибка сервера: ${err.status}`;
+    return new Error(`${friendly} (${err.status})`);
+  }
+  return err instanceof Error ? err : new Error(String(err));
+}
+
+function parseProblemCode(detail: string): string | undefined {
+  try {
+    const parsed = JSON.parse(detail) as { code?: string };
+    return parsed.code;
+  } catch {
+    return undefined;
+  }
 }

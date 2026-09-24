@@ -3,9 +3,15 @@ import { ref } from 'vue';
 import type { MessageDto } from '@shared/api-types';
 import { renderMarkdown } from '../lib/markdown';
 import { textPayload, toolResultPayload, type FeedEntry, type ToolBlock } from '../lib/feed';
+import { DEFAULT_EXT_HINT, extractArtifactPaths } from '../lib/artifact-paths';
 
 const props = defineProps<{
   entries: FeedEntry[];
+  artifactExtensions?: string;
+}>();
+
+const emit = defineEmits<{
+  'open-artifact': [path: string];
 }>();
 
 const openTools = ref<Set<string>>(new Set());
@@ -57,6 +63,44 @@ function callArgsJson(block: ToolBlock): string {
 
 function authorOf(m: MessageDto): string {
   return m.author ?? '';
+}
+
+function extensionList(): string[] {
+  const hint = (props.artifactExtensions ?? DEFAULT_EXT_HINT.join(',')).split(',').map((s) => s.trim()).filter(Boolean);
+  return hint;
+}
+
+/** Splits tool output into text-and-path segments for the clickable render. */
+function outputSegments(text: string): Array<{ kind: 'text'; text: string } | { kind: 'path'; text: string }> {
+  if (!text) return [];
+  const paths = new Set(extractArtifactPaths(text, extensionList()));
+  if (paths.size === 0) {
+    return [{ kind: 'text', text }];
+  }
+  const out: Array<{ kind: 'text'; text: string } | { kind: 'path'; text: string }> = [];
+  const sorted = [...paths].sort((a, b) => b.length - a.length);
+  let remaining = text;
+  while (remaining.length > 0) {
+    let firstIdx = -1;
+    let firstPath = '';
+    for (const p of sorted) {
+      const idx = remaining.indexOf(p);
+      if (idx >= 0 && (firstIdx === -1 || idx < firstIdx)) {
+        firstIdx = idx;
+        firstPath = p;
+      }
+    }
+    if (firstIdx === -1) {
+      out.push({ kind: 'text', text: remaining });
+      break;
+    }
+    if (firstIdx > 0) {
+      out.push({ kind: 'text', text: remaining.slice(0, firstIdx) });
+    }
+    out.push({ kind: 'path', text: firstPath });
+    remaining = remaining.slice(firstIdx + firstPath.length);
+  }
+  return out;
 }
 </script>
 
@@ -185,7 +229,27 @@ function authorOf(m: MessageDto): string {
                 class="truncated"
               >truncated</span>
             </div>
-            <pre>{{ resultOutput(entry.block) }}</pre>
+            <pre
+              v-if="outputSegments(resultOutput(entry.block)).length === 1 && outputSegments(resultOutput(entry.block))[0]?.kind === 'text'"
+            >{{ resultOutput(entry.block) }}</pre>
+            <pre
+              v-else
+              data-testid="tool-output"
+            >
+              <template
+                v-for="(seg, i) in outputSegments(resultOutput(entry.block))"
+                :key="i"
+              >
+                <button
+                  v-if="seg.kind === 'path'"
+                  type="button"
+                  class="artifact-link"
+                  :data-path="seg.text"
+                  @click="emit('open-artifact', seg.text)"
+                >{{ seg.text }}</button>
+                <template v-else>{{ seg.text }}</template>
+              </template>
+            </pre>
           </div>
         </div>
       </div>

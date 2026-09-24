@@ -33,10 +33,10 @@
 
 ## 5. Пачка E — Дерево сессий/задач и артефакты
 
-- [ ] 5.1 Дерево активной сессии (`GET /sessions/{id}/tree`): узлы sub-сессий (taskId, stateCode, бейджи); обновление при переключении + по таймеру `tree.refresh-interval` (10 с) + при смене session.status; проваливание (открытие чата STATE-сессии + breadcrumb).
-- [ ] 5.2 Панель задачи: статус/переходы (task SSE: transition/status/subtask.terminal/comment), история, добавление комментариев; `statusProjection` — через `GET /tasks/{id}`.
-- [ ] 5.3 Артефакты: ввод пути + UX-валидация относительности (без `..`/абсолютных), save-as, open-in-OS (temp `<hash(path)>-<basename>`, чистка кэша), обработка 422/413; кликабельные пути из ленты TOOL_RESULT.
-- [ ] 5.4 Vitest: дерево (мок tree), task SSE-мокстрим, артефакты (мок fetch-ответы).
+- [x] 5.1 Дерево активной сессии (`GET /sessions/{id}/tree`): узлы sub-сессий (taskId, stateCode, бейджи); обновление при переключении + по таймеру `tree.refresh-interval` (10 с) + при смене session.status; проваливание (открытие чата STATE-сессии + breadcrumb).
+- [x] 5.2 Панель задачи: статус/переходы (task SSE: transition/status/subtask.terminal/comment), история, добавление комментариев; `statusProjection` — через `GET /tasks/{id}`.
+- [x] 5.3 Артефакты: ввод пути + UX-валидация относительности (без `..`/абсолютных), save-as, open-in-OS (temp `<hash(path)>-<basename>`, чистка кэша), обработка 422/413; кликабельные пути из ленты TOOL_RESULT.
+- [x] 5.4 Vitest: дерево (мок tree), task SSE-мокстрим, артефакты (мок fetch-ответы).
 
 ## 6. Пачка F — e2e, smoke, доки, архив
 

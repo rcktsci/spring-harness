@@ -10,10 +10,37 @@
  * Channels are namespaced as "domain:action".
  */
 
-import type { AgentCatalog, MessagePage, SessionPage } from './api-types.js';
-import type { SessionDto, SendMessageAccepted } from './api-types.js';
+import type {
+  AgentCatalog,
+  CommentDto,
+  CommentPage,
+  MessagePage,
+  SendMessageAccepted,
+  SessionDto,
+  SessionPage,
+  SessionTreePage,
+  TaskDto,
+  TaskPage,
+  TransitionDto,
+  TransitionPage,
+  WorkspaceDownloadResult,
+} from './api-types.js';
 
-export type { AgentCatalog, MessagePage, SessionPage, SessionDto, SendMessageAccepted };
+export type {
+  AgentCatalog,
+  MessagePage,
+  SendMessageAccepted,
+  SessionDto,
+  SessionPage,
+  SessionTreePage,
+  TaskDto,
+  TaskPage,
+  TransitionDto,
+  TransitionPage,
+  CommentDto,
+  CommentPage,
+  WorkspaceDownloadResult,
+};
 
 export const IPC = {
   AUTH_LOGIN_STATE: 'auth:login-state',
@@ -45,8 +72,17 @@ export const IPC = {
   SSE_SUBSCRIBE: 'sse:subscribe',
   SSE_UNSUBSCRIBE: 'sse:unsubscribe',
 
+  TASK_GET: 'task:get',
+  TASK_LIST: 'task:list',
+  TASK_HISTORY: 'task:history',
+  TASK_COMMENTS_LIST: 'task:comments:list',
+  TASK_COMMENT_ADD: 'task:comments:add',
+  TASK_SUBSCRIBE: 'task:subscribe',
+  TASK_UNSUBSCRIBE: 'task:unsubscribe',
+
   ARTIFACT_DOWNLOAD: 'artifact:download',
   ARTIFACT_OPEN: 'artifact:open',
+  ARTIFACT_PICK_PATH: 'artifact:pick-path',
 
   TOOL_CONFIRM: 'tool:confirm',
   TOOL_CANCEL: 'tool:cancel',
@@ -105,6 +141,18 @@ export const DEFAULT_CONFIG: ServerConfig = {
   chatHistoryMaxPages: 500,
   /** Fallback SSE reconnect delay when the stream omits `retry:` (§3.1 = 5000). */
   sseRetryDefaultMs: 5_000,
+  /** Tree poll interval (also re-runs on session.status SSE). */
+  treeRefreshIntervalMs: 10_000,
+  /** Page size for GET /tasks/{id}/history (opaque cursor walk). */
+  taskHistoryLimit: 50,
+  /** Safety cap on history pages (task). */
+  taskHistoryMaxPages: 200,
+  /** Reconnect default for /tasks/{id}/events. */
+  taskSseRetryDefaultMs: 5_000,
+  /** Optional whitelist of extensions the user can save/open; informational only — server enforces. */
+  artifactExtensionHint: '.txt,.md,.json,.csv,.log,.yaml,.yml,.pdf,.png,.jpg,.jpeg,.svg',
+  /** Cache TTL for temp-artifact copies written for `open-in-OS`. */
+  artifactCacheMaxAgeMs: 7 * 24 * 60 * 60 * 1_000,
 };
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];
@@ -160,6 +208,12 @@ export type ServerConfig = {
   chatPageLimit: number;
   chatHistoryMaxPages: number;
   sseRetryDefaultMs: number;
+  treeRefreshIntervalMs: number;
+  taskHistoryLimit: number;
+  taskHistoryMaxPages: number;
+  taskSseRetryDefaultMs: number;
+  artifactExtensionHint: string;
+  artifactCacheMaxAgeMs: number;
   /**
    * Last registered FREE session — auto connect+register on next startup
    * (desktop-relay-client: «при старте с сохранённой активной сессией»).
@@ -188,6 +242,48 @@ export type MessageListQuery = {
 export type SessionSendBody = {
   id: string;
   text: string;
+};
+
+export type TaskListQuery = {
+  mine?: boolean;
+  q?: string;
+  status?: string;
+  tags?: string[];
+  cursor?: string;
+  limit?: number;
+};
+
+export type TaskHistoryQuery = {
+  /** Opaque cursor from previous page (not numeric — api-contracts §4.2). */
+  since?: string;
+  limit?: number;
+};
+
+export type TaskCommentsListQuery = {
+  cursor?: string;
+  limit?: number;
+};
+
+export type TaskCommentAddBody = {
+  body: string;
+};
+
+export type TaskSubscribeBody = {
+  taskId: string;
+  /** Initial task_event_seq (from snapshot) — `0` means snapshot+full history. */
+  sinceSeq?: number;
+};
+
+export type ArtifactDownloadBody = {
+  sessionId: string;
+  path: string;
+  /**
+   * Reserved for future use — UI today picks between `artifact.download`
+   * (OS save-as dialog) and `artifact.open` (cache + shell.openPath) via
+   * dedicated IPC methods. Keep the field out of the wire contract until
+   * the renderer actually has both modes behind one entrypoint.
+   */
+  // saveAs?: boolean;
 };
 
 export type ServerConfigPatch = Partial<ServerConfig>;

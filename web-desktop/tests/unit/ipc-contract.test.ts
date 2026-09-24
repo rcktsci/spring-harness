@@ -9,9 +9,14 @@ describe('ipc-contract', () => {
     expect(IPC.SESSION_SEND).toBe('session:send');
     expect(IPC.SESSION_LIST).toBe('session:list');
     expect(IPC.SESSION_CREATE).toBe('session:create');
+    expect(IPC.SESSION_TREE).toBe('session:tree');
     expect(IPC.AGENTS_LIST).toBe('agents:list');
     expect(IPC.RELAY_REGISTER).toBe('relay:register');
     expect(IPC.SSE_SUBSCRIBE).toBe('sse:subscribe');
+    expect(IPC.TASK_SUBSCRIBE).toBe('task:subscribe');
+    expect(IPC.TASK_HISTORY).toBe('task:history');
+    expect(IPC.TASK_COMMENT_ADD).toBe('task:comments:add');
+    expect(IPC.ARTIFACT_DOWNLOAD).toBe('artifact:download');
     expect(IPC.APP_QUIT).toBe('app:quit');
   });
 
@@ -30,5 +35,11 @@ describe('ipc-contract', () => {
     expect(DEFAULT_CONFIG.chatPageLimit).toBe(100);
     expect(DEFAULT_CONFIG.chatHistoryMaxPages).toBe(500);
     expect(DEFAULT_CONFIG.sseRetryDefaultMs).toBe(5_000);
+    expect(DEFAULT_CONFIG.treeRefreshIntervalMs).toBe(10_000);
+    expect(DEFAULT_CONFIG.taskHistoryLimit).toBe(50);
+    expect(DEFAULT_CONFIG.taskHistoryMaxPages).toBe(200);
+    expect(DEFAULT_CONFIG.taskSseRetryDefaultMs).toBe(5_000);
+    expect(DEFAULT_CONFIG.artifactExtensionHint).toContain('.md');
+    expect(DEFAULT_CONFIG.artifactCacheMaxAgeMs).toBe(7 * 24 * 60 * 60 * 1_000);
   });
 });

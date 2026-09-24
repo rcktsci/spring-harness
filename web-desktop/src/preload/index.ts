@@ -1,20 +1,33 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
   AgentCatalog,
+  ArtifactDownloadBody,
+  CommentDto,
+  CommentPage,
+  MessageListQuery,
   MessagePage,
   SendMessageAccepted,
   SessionCreateBody,
   SessionDto,
   SessionListQuery,
   SessionPage,
+  SessionTreePage,
+  TaskCommentAddBody,
+  TaskCommentsListQuery,
+  TaskDto,
+  TaskHistoryQuery,
+  TaskListQuery,
+  TaskPage,
+  TransitionPage,
+  WorkspaceDownloadResult,
 } from '../shared/ipc-contract.js';
 import {
   IPC,
   type LoginState,
-  type MessageListQuery,
   type RelayStatus,
   type ServerConfig,
   type ServerConfigPatch,
+  type TaskSubscribeBody,
   type ToolCallView,
 } from '../shared/ipc-contract.js';
 
@@ -45,7 +58,7 @@ const api = {
       ipcRenderer.invoke(IPC.SESSION_SEND, { id, text }),
     compact: (id: string): Promise<void> => ipcRenderer.invoke(IPC.SESSION_COMPACT, id),
     stop: (id: string): Promise<void> => ipcRenderer.invoke(IPC.SESSION_STOP, id),
-    tree: (id: string): Promise<unknown> => ipcRenderer.invoke(IPC.SESSION_TREE, id),
+    tree: (id: string): Promise<SessionTreePage> => ipcRenderer.invoke(IPC.SESSION_TREE, id),
   },
   agents: {
     list: (): Promise<AgentCatalog> => ipcRenderer.invoke(IPC.AGENTS_LIST),
@@ -101,13 +114,51 @@ const api = {
     },
   },
   artifact: {
-    download: (path: string): Promise<string> => ipcRenderer.invoke(IPC.ARTIFACT_DOWNLOAD, path),
-    open: (path: string): Promise<void> => ipcRenderer.invoke(IPC.ARTIFACT_OPEN, path),
+    /** OS save-as dialog → stream file → chosen local path. */
+    download: (body: ArtifactDownloadBody): Promise<WorkspaceDownloadResult> =>
+      ipcRenderer.invoke(IPC.ARTIFACT_DOWNLOAD, body),
+    /** Cache copy under userData/cache/artifacts + shell.openPath. */
+    open: (body: ArtifactDownloadBody): Promise<WorkspaceDownloadResult> =>
+      ipcRenderer.invoke(IPC.ARTIFACT_OPEN, body),
+  },
+  task: {
+    list: (query: TaskListQuery = {}): Promise<TaskPage> =>
+      ipcRenderer.invoke(IPC.TASK_LIST, query),
+    get: (id: string): Promise<TaskDto> => ipcRenderer.invoke(IPC.TASK_GET, id),
+    history: (id: string, query: TaskHistoryQuery = {}): Promise<TransitionPage> =>
+      ipcRenderer.invoke(IPC.TASK_HISTORY, { id, ...query }),
+    comments: {
+      list: (id: string, query: TaskCommentsListQuery = {}): Promise<CommentPage> =>
+        ipcRenderer.invoke(IPC.TASK_COMMENTS_LIST, { id, ...query }),
+      add: (id: string, body: TaskCommentAddBody): Promise<CommentDto> =>
+        ipcRenderer.invoke(IPC.TASK_COMMENT_ADD, { id, ...body }),
+    },
+    subscribe: (
+      payload: TaskSubscribeBody,
+      cb: (frame: {
+        taskId: string;
+        id?: string;
+        event: string;
+        data: string;
+      }) => void,
+    ): Unsub => {
+      const handler = (
+        _e: Electron.IpcRendererEvent,
+        msg: { taskId: string; id?: string; event: string; data: string },
+      ): void => cb(msg);
+      ipcRenderer.on('task:event', handler);
+      void ipcRenderer.invoke(IPC.TASK_SUBSCRIBE, payload);
+      return () => {
+        ipcRenderer.removeListener('task:event', handler);
+        void ipcRenderer.invoke(IPC.TASK_UNSUBSCRIBE, payload.taskId);
+      };
+    },
   },
   tool: {
     respondConfirm: (callId: string, approved: boolean): Promise<void> =>
       ipcRenderer.invoke(IPC.TOOL_RESPOND_CONFIRM, { callId, approved }),
-    cancel: (callId: string): Promise<void> => ipcRenderer.invoke(IPC.TOOL_CANCEL, callId),
+    cancel: (callId: string): Promise<void> =>
+      ipcRenderer.invoke(IPC.TOOL_CANCEL, callId),
     onCall: (cb: (call: ToolCallView, basePath: string) => void): Unsub => {
       const handler = (
         _e: Electron.IpcRendererEvent,
