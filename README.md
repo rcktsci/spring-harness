@@ -16,7 +16,7 @@ What you need on the VM:
 
 - `docker` with the `compose` plugin (`docker compose version`).
 - Network access to your Keycloak instance (see section 2).
-- Network access to Docker Hub, for `postgres:18` and the base images used by `docker/Dockerfile.orchestrator`.
+- Network access to Docker Hub, for `postgres:18-alpine` and the base images used by `docker/Dockerfile.orchestrator`.
 - A directory for session workspaces. Create it before the first start, otherwise the docker daemon will create it as root and the permissions will surprise you:
 
   ```bash
@@ -41,7 +41,10 @@ Fill in the secrets in `docker-compose.yml` before the first start. There is no 
 
 | Variable | What it is | Example |
 |---|---|---|
-| `DB_PASSWORD` (and `POSTGRES_PASSWORD`) | postgres password | a long random string |
+| `POSTGRES_PASSWORD` | the postgres password; the same name on both sides (backend env and database bootstrap) | a long random string |
+| `POSTGRES_USERNAME` / `POSTGRES_DATABASE` | backend credentials; defaults `harness`/`harness`, change only if you renamed them | `harness` |
+
+One naming note: the official postgres image bootstraps its superuser from its own hardcoded `POSTGRES_USER`/`POSTGRES_DB` variables, those two lines in the postgres service cannot be renamed. Everything the backend reads is uniformly `POSTGRES_*`.
 | `KEYCLOAK_ISSUER_URI` | issuer of your realm | `https://keycloak.example.com/realms/myrealm` |
 | `KEYCLOAK_JWKS_URI` | JWKS endpoint of the same realm | `https://keycloak.example.com/realms/myrealm/protocol/openid-connect/certs` |
 | `HARNESS_WEBHOOK_SECRET` | HMAC-SHA256 secret for webhook capability URLs (api-contracts §4.4) | a long random string |

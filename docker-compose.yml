@@ -19,20 +19,20 @@
 services:
 
   postgres:
-    image: postgres:18
+    image: postgres:18-alpine
     container_name: harness-postgres
     restart: unless-stopped
     environment:
       # These three vars drive the official `postgres` image's first-boot
       # DB/user creation. Without them Liquibase on first start fails with
       # "database does not exist".
-      POSTGRES_USER: harness
-      POSTGRES_PASSWORD: CHANGE_ME_postgres_password
-      POSTGRES_DB: harness
+      POSTGRES_USER: harness            # official image bootstrap; its name is hardcoded upstream
+      POSTGRES_PASSWORD: CHANGE_ME_postgres_password   # same value as POSTGRES_PASSWORD in orchestrator
+      POSTGRES_DB: harness              # official image bootstrap; its name is hardcoded upstream
     volumes:
       - pgdata:/var/lib/postgresql/data
     # NB: postgres listens on 5432 inside the compose network only, the
-    # orchestrator reaches it via `DB_HOST=postgres`. The host port is
+    # orchestrator reaches it via `POSTGRES_HOST=postgres`. The host port is
     # intentionally NOT published (only 8080 and 8081 face the host).
     # (ad-hoc psql: docker compose exec postgres psql -U harness)
     healthcheck:
@@ -66,11 +66,11 @@ services:
       - ${HARNESS_WORKSPACE_ROOT:-/srv/harness/workspaces}:/srv/harness/workspaces
     environment:
       # --- PostgreSQL (matches docker-compose service name "postgres") ------
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: harness
-      DB_USERNAME: harness
-      DB_PASSWORD: CHANGE_ME_postgres_password   # must match postgres service
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DATABASE: harness
+      POSTGRES_USERNAME: harness
+      POSTGRES_PASSWORD: CHANGE_ME_postgres_password   # same value the postgres service bootstraps with
 
       # --- Keycloak (external instance; D-R1) ------------------------------------
       # Example:

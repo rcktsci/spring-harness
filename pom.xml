@@ -328,7 +328,7 @@
             </plugin>
 
             <!-- Шаг 2 contract-first (S-J-9): генерация из замороженной спеки
-                 src/main/resources/api/openapi.yaml. SSE-операции (теги SessionEvents,
+                 api/openapi.yaml. SSE-операции (теги SessionEvents,
                  TaskEvents) исключены из генерации — контроллеры на SseEmitter вручную
                  (D-M1-8; M2 — D.2). openApiNullable=false — nullable-поля без
                  JsonNullable/Jackson-2 (jackson-databind-nullable в main-runtime
@@ -344,7 +344,7 @@
                             <goal>generate</goal>
                         </goals>
                         <configuration>
-                            <inputSpec>${project.basedir}/src/main/resources/api/openapi.yaml</inputSpec>
+                            <inputSpec>${project.basedir}/api/openapi.yaml</inputSpec>
                             <generatorName>spring</generatorName>
                             <output>${project.build.directory}/generated-sources/openapi-server</output>
                             <apiPackage>se.rocketscien.harness.api.gen</apiPackage>
@@ -373,7 +373,7 @@
                         </goals>
                         <phase>generate-test-sources</phase>
                         <configuration>
-                            <inputSpec>${project.basedir}/src/main/resources/api/openapi.yaml</inputSpec>
+                            <inputSpec>${project.basedir}/api/openapi.yaml</inputSpec>
                             <generatorName>java</generatorName>
                             <library>native</library>
                             <output>${project.build.directory}/generated-test-sources/openapi-client</output>

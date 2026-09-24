@@ -56,7 +56,7 @@ pnpm verify       # lint + typecheck + test + build
 ```
 
 `generate:api` writes `src/api/generated/openapi.d.ts` from
-`../src/main/resources/api/openapi.yaml` (frozen contract, D-89). The
+`../api/openapi.yaml` (frozen contract, D-89). The
 folder is excluded from lint/prettier — never hand-edit it.
 
 ## Architecture invariants (frozen)

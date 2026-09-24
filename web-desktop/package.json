@@ -24,7 +24,7 @@
     "e2e:electron": "playwright test --config=playwright.config.ts --project=electron-smoke",
     "lint": "eslint . --max-warnings=0",
     "lint:fix": "eslint . --fix",
-    "generate:api": "openapi-typescript ../src/main/resources/api/openapi.yaml -o src/api/generated/openapi.d.ts",
+    "generate:api": "openapi-typescript ../api/openapi.yaml -o src/api/generated/openapi.d.ts",
     "format": "prettier --write \"**/*.{ts,vue,json,md,yaml,yml}\"",
     "format:check": "prettier --check \"**/*.{ts,vue,json,md,yaml,yml}\"",
     "package:win": "electron-builder --win --config electron-builder.yml",

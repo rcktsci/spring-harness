@@ -151,9 +151,9 @@ spring:
       - org.springframework.ai.model.openai.autoconfigure.OpenAiImageAutoConfiguration
       - org.springframework.ai.model.openai.autoconfigure.OpenAiModerationAutoConfiguration
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:harness}
-    username: ${DB_USERNAME:harness}
-    password: ${DB_PASSWORD:harness}
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DATABASE:harness}
+    username: ${POSTGRES_USERNAME:harness}
+    password: ${POSTGRES_PASSWORD:harness}
   liquibase:
     change-log: classpath:db/changelog/changeset-master.xml
   jpa:
