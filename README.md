@@ -23,14 +23,14 @@ What you need on the VM:
   mkdir -p /srv/harness/workspaces
   ```
 
-  It must be writable by the user the orchestrator container runs as: the orchestrator itself creates the per-session directory (`workspaces/<sessionId>`) before starting the helper container, so a root-owned root fails with `AccessDeniedException` on the very first tool call. The app boots fine without this, only tool calls fail, so you can fix it after the first start:
+  It must end up owned by the user the orchestrator container runs as: the orchestrator itself creates the per-session directory (`workspaces/<sessionId>`) before starting the helper container, so a root-owned root fails with `AccessDeniedException` on the very first tool call. The container's uid:gid only exists once the container runs, so the `chown` is the first step after the start (see "Start it"); the app boots fine without it, only tool calls fail.
+- Write access to `/var/run/docker.sock`: the orchestrator drives its per-session helper containers through it (D-30). On a typical VM the socket is `root:docker` mode `660`, and the container user belongs to no host group on its own. Compose adds the host `docker` group to the container (`group_add`), reading the group's gid from the environment at `up`-time — export it in the same shell you run `docker compose` from:
 
   ```bash
-  OWNER="$(docker compose exec -T orchestrator sh -c 'echo "$(id -u):$(id -g)"')"
-  sudo chown -R "$OWNER" /srv/harness/workspaces   # use $HARNESS_WORKSPACE_ROOT if you changed it
+  export HARNESS_DOCKER_GID="$(stat -c '%g' /var/run/docker.sock)"
   ```
 
-  The container user is deliberately left to the image (`USER harness`) rather than pinned in compose: it needs access to `/var/run/docker.sock` to create helper containers, and a pinned uid that is not in the host's `docker` group would lose exactly that.
+  There is no default on purpose: compose refuses to start without the variable, because a guessed gid would surface much later as a cryptic failure on the first tool call.
 
 Prepare the repo:
 
@@ -50,14 +50,14 @@ Fill in the secrets in `docker-compose.yml` before the first start. There is no 
 |---|---|---|
 | `POSTGRES_PASSWORD` | the postgres password; the same name on both sides (backend env and database bootstrap) | a long random string |
 | `POSTGRES_USERNAME` / `POSTGRES_DATABASE` | backend credentials; defaults `harness`/`harness`, change only if you renamed them | `harness` |
-
-One naming note: the official postgres image bootstraps its superuser from its own hardcoded `POSTGRES_USER`/`POSTGRES_DB` variables, those two lines in the postgres service cannot be renamed. Everything the backend reads is uniformly `POSTGRES_*`.
 | `KEYCLOAK_ISSUER_URI` | issuer of your realm | `https://keycloak.example.com/realms/myrealm` |
 | `KEYCLOAK_JWKS_URI` | JWKS endpoint of the same realm | `https://keycloak.example.com/realms/myrealm/protocol/openid-connect/certs` |
 | `HARNESS_WEBHOOK_SECRET` | HMAC-SHA256 secret for webhook capability URLs (api-contracts §4.4) | a long random string |
 | `HARNESS_WEBHOOK_BASE_URL` | publicly reachable base for webhook callbacks; use the VM's hostname | `http://spring-harness.internal:8080` |
 | `HARNESS_LLM_KEY_V1` | LLM provider key (encrypted at rest, see D-43) | the provider secret |
 | `HARNESS_WORKSPACE_ROOT` | absolute host path for workspaces | change only if you moved the directory |
+
+One naming note: the official postgres image bootstraps its superuser from its own hardcoded `POSTGRES_USER`/`POSTGRES_DB` variables, those two lines in the postgres service cannot be renamed. Everything the backend reads is uniformly `POSTGRES_*`.
 
 Do not commit compose edits that contain real secrets. The file itself belongs in the repo, the `CHANGE_ME` placeholders belong in it too. If you prefer git to stop tracking your local edits entirely:
 
@@ -81,6 +81,17 @@ docker compose up -d
 docker compose ps            # orchestrator waits for postgres to go healthy first
 docker compose logs -f orchestrator
 ```
+
+Then hand the workspace root to the orchestrator — its uid:gid is readable only now that the container runs (see "What you need" for why this matters):
+
+```bash
+OWNER="$(docker compose exec -T orchestrator sh -c 'echo "$(id -u):$(id -g)"')"
+sudo chown -R "$OWNER" /srv/harness/workspaces   # use $HARNESS_WORKSPACE_ROOT if you changed it
+```
+
+No restart needed; the next tool call creates its session directory with the new owner.
+
+The container user stays whatever the image ships (`USER harness`, non-root): nothing in compose pins a numeric uid, because both host grants are read from the host at deploy time — the socket access via `HARNESS_DOCKER_GID`, the workspace ownership via the `chown` above.
 
 Check it:
 

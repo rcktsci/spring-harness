@@ -37,8 +37,9 @@ FROM bellsoft/liberica-openjre-alpine-musl:25 AS runtime
 
 WORKDIR /app
 
-# Non-root user for slightly safer defaults; container still needs the docker
-# socket mount (root at the host path), which is bind-mounted at the same UID.
+# Non-root user for slightly safer defaults. Host-specific grants are made at
+# deploy time, not in the image: docker.sock access via `group_add` (compose)
+# and workspace-root ownership via chown (README, "Start it").
 RUN addgroup -S harness && adduser -S harness -G harness
 USER harness
 

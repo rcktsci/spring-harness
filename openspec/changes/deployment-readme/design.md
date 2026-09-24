@@ -38,7 +38,7 @@
 
 ### D-R3: Все параметры — env в compose, значения владельца — inline
 
-**Решение**: в compose секция `environment:` с обязательными переменными — orchestrator: `DB_*`, `KEYCLOAK_ISSUER_URI`, `KEYCLOAK_JWKS_URI`, `HARNESS_WEBHOOK_SECRET`, `HARNESS_WEBHOOK_BASE_URL` (`http://<vm>:8080` — localhost в контейнере указывает на сам orchestrator, вебхуки наружу не достучатся), `HARNESS_LLM_KEY_V1`, `HARNESS_WORKSPACE_ROOT` (абсолютный путь на хосте VM, `/srv/harness/workspaces`, тот же путь монтируется томом — bind-mount резолвится демоном от ФС хоста), `MANAGEMENT_SERVER_PORT=8081` (в `application.yml` порта management нет — без этой env actuator сидит на 8080 вместе с API, а health-check README/compose ожидает 8081); postgres: `POSTGRES_USER=harness`, `POSTGRES_PASSWORD=harness`, `POSTGRES_DB=harness` (образ создаёт БД только из этих env — без них Liquibase упадёт). Секреты — плейсхолдеры `CHANGE_ME`, владелец правит прямо в файле перед первым запуском (приватная VM, git секретов не хранит). README: директорию workspace создать заранее (`mkdir -p`), т.к. daemon bind-mount несуществующий путь создаёт от root с неожиданными правами.
+**Решение**: в compose секция `environment:` с обязательными переменными — orchestrator: `DB_*`, `KEYCLOAK_ISSUER_URI`, `KEYCLOAK_JWKS_URI`, `HARNESS_WEBHOOK_SECRET`, `HARNESS_WEBHOOK_BASE_URL` (`http://<vm>:8080` — localhost в контейнере указывает на сам orchestrator, вебхуки наружу не достучатся), `HARNESS_LLM_KEY_V1`, `HARNESS_WORKSPACE_ROOT` (абсолютный путь на хосте VM, `/srv/harness/workspaces`, тот же путь монтируется томом — bind-mount резолвится демоном от ФС хоста), `MANAGEMENT_SERVER_PORT=8081` (в `application.yml` порта management нет — без этой env actuator сидит на 8080 вместе с API, а health-check README/compose ожидает 8081); postgres: `POSTGRES_USER=harness`, `POSTGRES_PASSWORD=harness`, `POSTGRES_DB=harness` (образ создаёт БД только из этих env — без них Liquibase упадёт). Секреты — плейсхолдеры `CHANGE_ME`, владелец правит прямо в файле перед первым запуском (приватная VM, git секретов не хранит). README: директорию workspace создать заранее (`mkdir -p`) — daemon bind-mount несуществующего пути создаёт от root; владение отдаётся после первого старта (`chown` на `uid:gid`, прочитанные из запущенного контейнера, — до сборки образа uid неизвестен), т.к. оркестратор сам создаёт `workspaces/<sessionId>` (`Files.createDirectories`) и root-owned корень даёт `AccessDeniedException` на первом вызове инструмента (живой стенд 2026-09-24).
 
 **Альтернативы**: `.env` + `env_file:` — владелец явно просил «без .env»; docker secrets — энтерпрайз-раздутие.
 
@@ -59,6 +59,14 @@
 **Альтернативы**: instructions только в docs/ — корень без README выглядит заброшенным; README = зеркало operations.md — рассинхрон.
 
 **Почему**: минимум для MVP, без дублей.
+
+### D-R6: Host-гранты оркестратора — два явных шага деплоя (владение workspace + gid docker-группы)
+
+**Решение**: все host-специфичные права оркестратора выдаются при деплое явно, числами, прочитанными с хоста, без дефолтов: (1) корень workspace после первого старта `chown`-ится на `uid:gid` из запущенного контейнера — до старта uid неизвестен (образ ещё не собран); (2) доступ к `/var/run/docker.sock` (`root:docker 660` на типовой VM) — `group_add` с gid из обязательной переменной `HARNESS_DOCKER_GID` (`${HARNESS_DOCKER_GID:?…}` в compose: без экспорта `docker compose up` падает сразу с подсказкой; дефолта нет нарочно — угаданный gid падал бы молча на первом вызове инструмента). uid контейнера не пинится в compose: оба гранта читаются с хоста при деплое, привязка uid ничего не упрощает и лишь зашивает host-число в файл.
+
+**Альтернативы**: `chmod 666 /var/run/docker.sock` — сокет становится root-эквивалентом для всех локальных пользователей и может сбрасываться юнитом docker.socket; пин `user: <uid>:<gid>` в compose — те же host-числа, но зашитые в файл, workspace всё равно нужно chown-ить; запуск оркестратора от root — избыточная привилегия при примонтированном сокете (нарушает non-root образ); docker-socket-proxy — лишняя движущаяся часть для одной выделенной VM (security-multitenancy: proxy остаётся опциональным).
+
+**Почему**: воспроизводимый подъём с нуля на типовой VM; обе зависимости (запись в workspace, доступ к сокету) — явные шаги README, а не «повезло с окружением» (живой стенд 2026-09-24: доступ к сокету работал только из-за совпадения gid).
 
 ## Risks / Trade-offs
 

@@ -10,12 +10,13 @@
 #
 # First run:
 #   1. mkdir -p /srv/harness/workspaces          # host side of the workspace volume
-#      and chown it to the orchestrator container's user (README, "What you need")
-#   2. docker build -f docker/Dockerfile -t harness-helper:local .   # helper image
-#   3. Edit the `CHANGE_ME` values below (KC issuer/JWKS, webhook secret,
+#   2. export HARNESS_DOCKER_GID="$(stat -c '%g' /var/run/docker.sock)"
+#   3. docker build -f docker/Dockerfile -t harness-helper:local .   # helper image
+#   4. Edit the `CHANGE_ME` values below (KC issuer/JWKS, webhook secret,
 #      LLM key, etc.)
-#   4. docker compose up -d
-#   5. curl http://<vm>:8081/actuator/health   # actuator on 8081 (management port)
+#   5. docker compose up -d
+#   6. chown the workspace root to the container's uid:gid   # README, "Start it"
+#   7. curl http://<vm>:8081/actuator/health   # actuator on 8081 (management port)
 
 services:
 
@@ -57,15 +58,23 @@ services:
     ports:
       - "8080:8080"   # API (REST/SSE/WS)
       - "8081:8081"   # actuator / management (compose healthcheck target)
+    group_add:
+      # rw to /var/run/docker.sock (root:docker 660 on a typical VM): add the
+      # host docker group by gid. Exported in the shell before `up` (README,
+      # prerequisites); no default on purpose — a guessed gid would fail only
+      # at the first tool call.
+      - "${HARNESS_DOCKER_GID:?export HARNESS_DOCKER_GID=<numeric gid of the host docker group> (stat -c %g /var/run/docker.sock), see README prerequisites}"
     volumes:
       # Per-session workspace helper containers (D-30), the orchestrator's
-      # docker-java client needs the host's docker daemon.
+      # docker-java client needs the host's docker daemon. The socket is
+      # root:docker 660 on a typical VM — `group_add` above grants rw access.
       - /var/run/docker.sock:/var/run/docker.sock
       # Workspace bind-mount: same absolute path inside the container and on
       # the host, so the daemon's path resolution matches the orchestrator's
-      # view. Pre-create this directory on the host before `up -d`, owned by the
-      # user the orchestrator runs as — the orchestrator creates the per-session
-      # subdirectory itself, a root-owned root fails with AccessDeniedException.
+      # view. Pre-create it on the host before `up -d` (README prerequisites);
+      # fix its ownership after the first start (README "Start it") — the
+      # orchestrator creates the per-session subdirectory itself, a root-owned
+      # root fails with AccessDeniedException.
       - ${HARNESS_WORKSPACE_ROOT:-/srv/harness/workspaces}:/srv/harness/workspaces
     environment:
       # --- PostgreSQL (matches docker-compose service name "postgres") ------
