@@ -30,7 +30,7 @@
 
 ### D-R2: Orchestrator — новый multi-stage Dockerfile (в репо), сборка внутри compose
 
-**Решение**: `docker/Dockerfile.orchestrator`: stage 1 `eclipse-temurin:25-jdk` + `mvn -q -DskipTests package` (типовый билд-кэш docker); stage 2 `eclipse-temurin:25-jre`, копирование boot-jar, `ENTRYPOINT java -jar`. В compose секция `build:` → image `spring-harness:local`. `/var/run/docker.sock` монтируется в orchestrator (D-30: docker-java создаёт per-session контейнеры). Helper-образ собирается заранее отдельной командой `docker build -f docker/Dockerfile -t harness-helper:local .` (прописана в README шагом 2 — compose его не строит: docker-java только запускает локально существующий образ, pull-логика рассчитана на его присутствие).
+**Решение**: `docker/Dockerfile.orchestrator` (директива владельца: корпоративный базовый образ `rcktsci/java-tooling:25` — Liberica JDK 25 alpine-musl с предустановленными Maven/Gradle/docker CLI): stage 1 `rcktsci/java-tooling:25` + `mvn -q -DskipTests package` (maven уже в образе — mvnw в контейнере не нужен; alpine musl); stage 2 `bellsoft/liberica-openjre-alpine-musl:25` (та же вендорская линейка Liberica, только JRE — меньше поверхность и размер), копирование boot-jar, `ENTRYPOINT java -jar`. В compose секция `build:` → image `spring-harness:local`. `/var/run/docker.sock` монтируется в orchestrator (D-30: docker-java создаёт per-session контейнеры). Helper-образ собирается заранее отдельной командой `docker build -f docker/Dockerfile -t harness-helper:local .` (прописана в README шагом 2 — compose его не строит: docker-java только запускает локально существующий образ, pull-логика рассчитана на его присутствие). Альтернатива без docker-build оркестратора на VM: собрать jar на машине разработки (`./mvnw -DskipTests package`, chmod +x mvnw на Linux) и упростить Dockerfile до копирования готового jar.
 
 **Альтернативы**: запуск jar на хосте VM без контейнера — ломает D-30 (docker-java из контейнера с примонтированным сокетом); сборка образа вне репо — не воспроизводимо.
 
@@ -38,7 +38,7 @@
 
 ### D-R3: Все параметры — env в compose, значения владельца — inline
 
-**Решение**: в compose секция `environment:` с обязательными переменными (`DB_*`, `KEYCLOAK_ISSUER_URI`, `KEYCLOAK_JWKS_URI`, `HARNESS_WEBHOOK_SECRET`, `HARNESS_LLM_KEY_V1`) — владелец правит значения прямо в файле перед первым запуском (приватная VM, git не хранит секреты: в compose плейсхолдеры вида `CHANGE_ME`). `HARNESS_WORKSPACE_ROOT` — абсолютный путь на хосте VM (`/srv/harness/workspaces`), тот же путь монтируется томом в orchestrator (bind-mount резолвится демоном от ФС хоста — комментарий в application.yml).
+**Решение**: в compose секция `environment:` с обязательными переменными — orchestrator: `DB_*`, `KEYCLOAK_ISSUER_URI`, `KEYCLOAK_JWKS_URI`, `HARNESS_WEBHOOK_SECRET`, `HARNESS_WEBHOOK_BASE_URL` (`http://<vm>:8080` — localhost в контейнере указывает на сам orchestrator, вебхуки наружу не достучатся), `HARNESS_LLM_KEY_V1`, `HARNESS_WORKSPACE_ROOT` (абсолютный путь на хосте VM, `/srv/harness/workspaces`, тот же путь монтируется томом — bind-mount резолвится демоном от ФС хоста), `MANAGEMENT_SERVER_PORT=8081` (в `application.yml` порта management нет — без этой env actuator сидит на 8080 вместе с API, а health-check README/compose ожидает 8081); postgres: `POSTGRES_USER=harness`, `POSTGRES_PASSWORD=harness`, `POSTGRES_DB=harness` (образ создаёт БД только из этих env — без них Liquibase упадёт). Секреты — плейсхолдеры `CHANGE_ME`, владелец правит прямо в файле перед первым запуском (приватная VM, git секретов не хранит). README: директорию workspace создать заранее (`mkdir -p`), т.к. daemon bind-mount несуществующий путь создаёт от root с неожиданными правами.
 
 **Альтернативы**: `.env` + `env_file:` — владелец явно просил «без .env»; docker secrets — энтерпрайз-раздутие.
 
@@ -46,7 +46,7 @@
 
 ### D-R4: groups-claim — через клиентский scope/mapper в KC
 
-**Решение**: в KC на клиенте десктопа (или в realm client-scope, назначенном ему) добавить mapper **Group Membership** → token claim `groups` (full path off); пользователь — член группы `harness-users` (дефолт `harness.security.allowed-groups`). README фиксирует: без маппера сервер отвечает 403 на всё (SSO-гейт api-contracts §1).
+**Решение**: в KC на клиенте десктопа (или в realm client-scope, назначенном ему) добавить mapper **Group Membership** → token claim `groups` (full path off); пользователь — член группы `harness-users` (дефолт `harness.security.allowed-groups`); Web Origins клиента — `http://127.0.0.1`. README фиксирует: без маппера сервер отвечает 403 на всё (SSO-гейт api-contracts §1).
 
 **Альтернативы**: roles-маппер (вместо groups) — потребует менять `allowed-groups` на имена ролей; realm-level default scope — затрагивает всех клиентов realm'а.
 
