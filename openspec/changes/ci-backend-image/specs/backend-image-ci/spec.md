@@ -30,7 +30,7 @@ Pipeline SHALL собирать образ backend-а из `docker/Dockerfile.or
 
 #### Scenario: владелец тянет образ на VM
 
-- **WHEN** владелец выполняет `docker pull ghcr.io/rcktsci/spring-harness-orchestrator:latest` с авторизованными креды
+- **WHEN** владелец выполняет `docker pull ghcr.io/rcktsci/spring-harness-orchestrator:latest` (пакет публичный, логин не требуется)
 - **THEN** скачивается образ, собранный последним push в `main`, с тегами `latest`, `main`, `sha-<short>` для того же коммита
 
 #### Scenario: откат на конкретный коммит

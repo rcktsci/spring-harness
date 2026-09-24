@@ -70,4 +70,34 @@ Scope: proposal.md, design.md, tasks.md, specs/backend-image-ci/spec.md
 
 **Outcome:** Обе MAJOR-находки устранены. Нет новых дефектов. Все пункты исходного чек-листа остаются в силе.
 
+## Re-approval 2
+
+**Date:** 2026-09-24 (same session, post-owner-fixes)
+
+**Owner decisions applied:**
+- **Package visibility**: public (PAT not needed on VM).
+- **VM architecture**: `x86_64` confirmed.
+
+**Files re-reviewed:** `design.md`, `proposal.md`, `specs/backend-image-ci/spec.md`, `tasks.md`
+
+**Verification of fixes:**
+
+| Original issue | Fixed in | Verification |
+|---|---|---|
+| D-CI10 wording ambiguous about package visibility | `design.md:104` | Explicit: "пакет GHCR — **публичный** … владелец один раз переключает видимость" |
+| Risks — architecture VM and private-package risk | `design.md:120`, `design.md:124` | Architecture confirmed x86_64; private-package risk reformulated as "первый push приватный → один раз переключить → публичный" |
+| Migration Plan step 2 | `design.md:131` | Updated to one-time public switch |
+| Open Questions both open | `design.md:138` | Both closed: "Закрыты владельцем 2026-09-24" |
+| Impact — package visibility ambiguous | `proposal.md:28` | Explicit public package, no PAT needed |
+| Spec — scenario required "authorized creds" | `spec.md:33` | Changed to "пакет публичный, логин не требуется" |
+| Task 3.1 required PAT or public options | `tasks.md:16` | Now: public package, `docker pull` without login, check: "в README нет шага с PAT" |
+| Task 3.2 pending architecture check | `tasks.md:17` | Marked `[x]` done, owner-confirmed x86_64 |
+
+**Cross-check:**
+- `spec.md` scenario «владелец тянет образ на VM» (line 33) now correctly says no login required — consistent with `design.md:104` and `tasks.md:16`.
+- `proposal.md:28` and `design.md:104` both state: first push private, owner switches once to public — consistent with GHCR behavior and `spec.md`.
+- `tasks.md:17` marked done — no technical contradiction with `design.md:60` (D-CI4 still references `uname -m` check in general terms, but task explicitly closed by owner confirmation).
+
+**Outcome:** No new defects. All owner-driven changes are consistently applied across all four planning artifacts. The change remains narrow, non-intrusive, and aligned with owner rules.
+
 ## Вердикт: APPROVE

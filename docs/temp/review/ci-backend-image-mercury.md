@@ -63,3 +63,35 @@
 **Итог:** Все замечания устранены. Спека ↔ дизайн ↔ задачи согласованы. Никаких новых дефектов не найдено.
 
 **FINAL VERDICT: APPROVE**
+
+## Re-approval 2
+
+**Owner changes verified (2026-09-24):**
+
+| Area | Change | Verification |
+|---|---|---|
+| GHCR package visibility | Private → Public (owner decision 2026-09-24) | design.md:D-CI10: «пакет GHCR — публичный (решение владельца 2026-09-24): первый push создаёт пакет приватным, владелец один раз переключает видимость в настройках пакета, после чего docker pull на VM идёт без логина и без PAT» |
+| VM architecture | Confirmed x86_64 | design.md:Risks: «Архитектура VM — x86_64, подтверждено владельцем 2026-09-24» |
+| Migration Plan | Updated to reflect one-time public switch | design.md:Migration Plan step 2: «после первого пуша переключает видимость пакета GHCR на публичную» |
+| Open Questions | Closed | design.md:Open Questions: «Закрыты владельцем 2026-09-24: пакет GHCR публичный, архитектура VM x86_64» |
+| Spec scenario | Credentials requirement removed | spec.md:33: «пакет публичный, логин не требуется» |
+| Task 3.1 | Updated for public package | tasks.md:3.1: «после первого пуша владелец переключает пакет GHCR на публичный, дальше docker pull без логина»; проверка: «в README нет шага с PAT» |
+| Task 3.2 | Marked complete | tasks.md:3.2: [x] «подтверждено владельцем 2026-09-24» |
+
+**Consistency check:**
+- proposal.md:28: «владелец один раз переключает его на публичный... после этого docker pull на VM идёт без логина и без PAT»
+- spec.md:33: «пакет публичный, логин не требуется»
+- design.md:D-CI10: «пакет GHCR — публичный»
+- tasks.md:3.1: «после первого пуша владелец переключает пакет GHCR на публичный, дальше docker pull без логина»
+
+All artifacts now consistently reflect: (a) one-time owner action to make package public after first push, (b) no PAT/login required afterward for VM pulls.
+
+**Risk update:**
+- design.md:Risks: «Первый push в GHCR создаёт приватный пакет, а владелец рассчитывает на публичный» → решено как «разовая ручная настройка владельцем... README фиксирует этот шаг»
+
+**Final status:**
+- openspec validate ci-backend-image --strict: green
+- All owner concerns addressed
+- No blockers remain
+
+**FINAL VERDICT: APPROVE**
