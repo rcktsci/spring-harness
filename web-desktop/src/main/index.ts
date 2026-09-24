@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { log, initLogger } from './logger.js';
 import { loadConfig, saveConfig } from './config.js';
 import { createMainWindow } from './window.js';
+import { sendToRenderer } from './renderer-bridge.js';
 import { buildAppMenu } from './menu.js';
 import { createTray } from './tray.js';
 import { startLogin, logout, readLoginState, refreshIfNeeded } from './auth.js';
@@ -102,12 +103,12 @@ async function bootstrap(): Promise<void> {
   sse = new SessionSseClient(
     config,
     (sessionId, frame) => {
-      mainWindow?.webContents.send('sse:event', { sessionId, ...frame });
+      sendToRenderer(() => mainWindow, 'sse:event', { sessionId, ...frame });
     },
     async () => refreshIfNeeded(config, config.tokenClockSkewSeconds),
   );
   taskSse = new TaskSseClient(config, (taskId, frame) => {
-    mainWindow?.webContents.send('task:event', { taskId, ...frame });
+    sendToRenderer(() => mainWindow, 'task:event', { taskId, ...frame });
   });
 
   // Background prune of the artifact open-cache (userData/cache/artifacts/*)
@@ -178,16 +179,16 @@ function createRelay(): RelayClient {
     refreshIfNeeded(config, config.tokenClockSkewSeconds),
   );
   client.on('status', (status) => {
-    mainWindow?.webContents.send('relay:status', status);
+    sendToRenderer(() => mainWindow, 'relay:status', status);
   });
   client.on('toolCall', (call, basePath) => {
-    mainWindow?.webContents.send('tool:call', call, basePath);
+    sendToRenderer(() => mainWindow, 'tool:call', call, basePath);
   });
   client.on('registrationConsent', (sessionId, basePath, tools) => {
-    mainWindow?.webContents.send('relay:registration-consent', { sessionId, basePath, tools });
+    sendToRenderer(() => mainWindow, 'relay:registration-consent', { sessionId, basePath, tools });
   });
   client.on('toolResult', (callId, output, exitCode) => {
-    mainWindow?.webContents.send('tool:result', callId, output, exitCode);
+    sendToRenderer(() => mainWindow, 'tool:result', callId, output, exitCode);
   });
   return client;
 }
@@ -217,12 +218,12 @@ async function onServerConfigChanged(next: ServerConfig): Promise<void> {
       sse = new SessionSseClient(
         config,
         (sessionId, frame) => {
-          mainWindow?.webContents.send('sse:event', { sessionId, ...frame });
+          sendToRenderer(() => mainWindow, 'sse:event', { sessionId, ...frame });
         },
         async () => refreshIfNeeded(config, config.tokenClockSkewSeconds),
       );
       taskSse = new TaskSseClient(config, (taskId, frame) => {
-        mainWindow?.webContents.send('task:event', { taskId, ...frame });
+        sendToRenderer(() => mainWindow, 'task:event', { taskId, ...frame });
       });
       relay?.shutdown();
       relay = createRelay();
@@ -232,7 +233,7 @@ async function onServerConfigChanged(next: ServerConfig): Promise<void> {
         });
       }
     }
-    mainWindow?.webContents.send('config:changed', { baseUrl: next.serverBaseUrl });
+    sendToRenderer(() => mainWindow, 'config:changed', { baseUrl: next.serverBaseUrl });
   }
 }
 

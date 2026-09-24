@@ -95,6 +95,7 @@ export const DEFAULT_CONFIG: ServerConfig = {
   serverBaseUrl: 'http://localhost:8080',
   keycloakIssuer: 'http://localhost:8080/realms/harness',
   keycloakClientId: 'spring-harness-web-desktop',
+  keycloakScopes: 'openid profile email',
   showTray: true,
   theme: 'system',
   logLevel: 'info',
@@ -169,6 +170,13 @@ export type ServerConfig = {
   serverBaseUrl: string;
   keycloakIssuer: string;
   keycloakClientId: string;
+  /**
+   * Space-separated scopes requested at the authorization endpoint. Keycloak
+   * rejects the whole request with `invalid_scope` when any requested scope
+   * is not assigned to the client — `groups` is therefore NOT requested by
+   * default: the `groups` claim comes from a protocol mapper, not a scope.
+   */
+  keycloakScopes: string;
   /**
    * The OAuth2 redirect_uri is deliberately NOT configurable here: the
    * loopback listener binds an ephemeral port at login time, so the URI

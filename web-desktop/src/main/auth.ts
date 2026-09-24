@@ -46,7 +46,7 @@ function authUrl(cfg: ServerConfig, pkce: PkcePair, state: string, port: number)
   const params = new URLSearchParams({
     client_id: cfg.keycloakClientId,
     response_type: 'code',
-    scope: 'openid profile email groups',
+    scope: cfg.keycloakScopes,
     redirect_uri: redirectUri,
     state,
     code_challenge: pkce.codeChallenge,

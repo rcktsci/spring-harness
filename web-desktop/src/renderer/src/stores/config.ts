@@ -11,7 +11,7 @@ export const useConfigStore = defineStore('config', () => {
 
   async function save(): Promise<void> {
     if (!config.value) return;
-    config.value = await window.harness.config.set(config.value);
+    config.value = await window.harness.config.set({ ...config.value });
   }
 
   return { config, load, save };

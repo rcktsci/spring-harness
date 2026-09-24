@@ -15,7 +15,7 @@ async function save(): Promise<void> {
   error.value = null;
   saved.value = false;
   try {
-    cfg.value = await window.harness.config.set(cfg.value);
+    cfg.value = await window.harness.config.set({ ...cfg.value });
     saved.value = true;
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err);

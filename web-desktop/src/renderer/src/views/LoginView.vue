@@ -23,7 +23,7 @@ async function login(): Promise<void> {
 <template>
   <section class="login-view">
     <h2>Sign in</h2>
-    <p>SSO via Keycloak. Bundle B will implement the full PKCE flow.</p>
+    <p>SSO via Keycloak (Authorization Code + PKCE).</p>
     <button
       :disabled="loading"
       @click="login"
