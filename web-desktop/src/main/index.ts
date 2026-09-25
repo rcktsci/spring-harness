@@ -208,7 +208,9 @@ async function onServerConfigChanged(next: ServerConfig): Promise<void> {
     // Tokens are scoped to the old issuer; a stale JWT would only produce 401s.
     if (issuerChanged) {
       const { clearTokens } = await import('./token-store.js');
+      const { invalidateSession } = await import('./auth.js');
       clearTokens();
+      invalidateSession();
     }
     // Drop any live SSE so the next subscribe re-authenticates cleanly.
     void sse?.unsubscribe();

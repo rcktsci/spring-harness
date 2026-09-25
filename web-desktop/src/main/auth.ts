@@ -94,9 +94,45 @@ async function exchangeCode(cfg: ServerConfig, code: string, pkce: PkcePair, por
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`token endpoint ${res.status}: ${text}`);
+    throw new Error(`token endpoint ${res.status}: ${sanitizeBody(text)}`);
   }
   return parseTokenResponse(await res.json());
+}
+
+export class RefreshGrantError extends Error {}
+
+export class RefreshTransientError extends Error {}
+
+const BODY_LOG_LIMIT_CHARS = 512;
+const MASKED_VALUE = '[masked]';
+const SECRET_KEY_PARTS = ['token', 'secret', 'password', 'credential'] as const;
+const JWT_LIKE_PATTERN = /[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g;
+
+function maskSecrets(value: unknown, key?: string): unknown {
+  if (key !== undefined && SECRET_KEY_PARTS.some((part) => key.toLowerCase().includes(part))) {
+    return MASKED_VALUE;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => maskSecrets(item));
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([entryKey, entryValue]) => [entryKey, maskSecrets(entryValue, entryKey)]),
+    );
+  }
+  return value;
+}
+
+function maskJwtLike(text: string): string {
+  return text.replace(JWT_LIKE_PATTERN, '[jwt-like]');
+}
+
+function sanitizeBody(text: string): string {
+  try {
+    return JSON.stringify(maskSecrets(JSON.parse(text))).slice(0, BODY_LOG_LIMIT_CHARS);
+  } catch {
+    return maskJwtLike(text).slice(0, BODY_LOG_LIMIT_CHARS);
+  }
 }
 
 async function refreshTokens(cfg: ServerConfig, refreshToken: string): Promise<TokenSet> {
@@ -105,15 +141,36 @@ async function refreshTokens(cfg: ServerConfig, refreshToken: string): Promise<T
     client_id: cfg.keycloakClientId,
     refresh_token: refreshToken,
   });
-  const res = await fetch(tokenEndpoint(cfg), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
-  });
-  if (!res.ok) {
-    throw new Error(`refresh endpoint ${res.status}`);
+  let res: Response;
+  try {
+    res = await fetch(tokenEndpoint(cfg), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    });
+  } catch (err) {
+    throw new RefreshTransientError(`refresh endpoint unreachable: ${String(err)}`);
   }
-  const refreshed = parseTokenResponse(await res.json());
+  const text = await res.text();
+  if (!res.ok) {
+    if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) {
+      throw new RefreshGrantError(`refresh endpoint ${res.status}: ${sanitizeBody(text)}`);
+    }
+    throw new RefreshTransientError(`refresh endpoint ${res.status}: ${sanitizeBody(text)}`);
+  }
+  let parsedBody: unknown;
+  try {
+    parsedBody = JSON.parse(text) as unknown;
+  } catch {
+    throw new RefreshTransientError(`refresh endpoint ${res.status}: non-JSON body: ${sanitizeBody(text)}`);
+  }
+  let refreshed: TokenSet;
+  try {
+    refreshed = parseTokenResponse(parsedBody);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new RefreshTransientError(`refresh endpoint ${res.status}: ${detail} — body: ${sanitizeBody(text)}`);
+  }
   // Keycloak may omit a new refresh token — keep the previous one.
   if (!refreshed.refreshToken) {
     refreshed.refreshToken = refreshToken;
@@ -228,40 +285,95 @@ function cleanupPending(): void {
   }
 }
 
+let refreshInFlight: Promise<string | null> | null = null;
+let sessionEpoch = 0;
+
 /**
- * Silent refresh — no window, no user interaction. Called on 401/expiry.
- * Returns the fresh access token, or `null` when the session must end
- * (refresh failed / no refresh token / safeStorage unavailable).
+ * Invalidates every in-flight silent refresh: called on any explicit session
+ * change (logout, server/issuer switch) so a refresh finishing afterwards
+ * cannot resurrect the cleared session.
+ */
+export function invalidateSession(): void {
+  sessionEpoch += 1;
+}
+
+function terminateSession(): void {
+  sessionEpoch += 1;
+  clearTokens();
+}
+
+/**
+ * Silent refresh — no window, no user interaction. Called on 401/expiry by
+ * many consumers in parallel (session list, agent catalog, SSE, relay
+ * auto-register, artifacts): single-flight — one network refresh per batch,
+ * same result for every waiter, in-flight reset on settle (success or
+ * failure) so the next batch can refresh again.
+ *
+ * Outcomes (D: silent-refresh-single-flight):
+ *  - grant rejected by Keycloak (4xx on the token endpoint, except
+ *    retry-later 408/429) → tokens cleared once, session ends;
+ *  - transient failure (network, 5xx, 408/429, malformed 2xx) → tokens
+ *    kept, returns null; the next request starts a fresh refresh.
+ * A result arriving after invalidateSession() (logout, server switch) is
+ * discarded — it must not resurrect the cleared session.
  */
 export async function refreshIfNeeded(
   cfg: ServerConfig,
   skewSeconds: number,
 ): Promise<string | null> {
+  let tokens: TokenSet | null;
   try {
-    const tokens = loadTokens();
-    if (!tokens) {
-      return null;
-    }
-    const now = Math.floor(Date.now() / 1000);
-    if (now + skewSeconds < tokens.expiresAt) {
-      return tokens.accessToken;
-    }
-    if (!tokens.refreshToken) {
-      log.warn('access token expired and no refresh token stored');
-      clearTokens();
-      return null;
-    }
-    const refreshed = await refreshTokens(cfg, tokens.refreshToken);
-    saveTokens(refreshed);
-    log.info('silent refresh succeeded');
-    return refreshed.accessToken;
+    tokens = loadTokens();
   } catch (err) {
     if (err instanceof Error && err.name === 'SafeStorageUnavailableError') {
       log.error('safeStorage unavailable; refusing to continue with tokens', err);
       return null;
     }
-    log.error('silent refresh failed; clearing session', err);
-    clearTokens();
+    log.error('token store unreadable; clearing session', err);
+    terminateSession();
+    return null;
+  }
+  if (!tokens) {
+    return null;
+  }
+  const now = Math.floor(Date.now() / 1000);
+  if (now + skewSeconds < tokens.expiresAt) {
+    return tokens.accessToken;
+  }
+  if (!tokens.refreshToken) {
+    log.warn('access token expired and no refresh token stored');
+    terminateSession();
+    return null;
+  }
+  if (!refreshInFlight) {
+    refreshInFlight = doRefresh(cfg, tokens.refreshToken).finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
+}
+
+async function doRefresh(cfg: ServerConfig, refreshToken: string): Promise<string | null> {
+  const epoch = sessionEpoch;
+  try {
+    const refreshed = await refreshTokens(cfg, refreshToken);
+    if (epoch !== sessionEpoch) {
+      log.info('silent refresh result discarded — session changed mid-flight');
+      return null;
+    }
+    saveTokens(refreshed);
+    log.info('silent refresh succeeded');
+    return refreshed.accessToken;
+  } catch (err) {
+    if (epoch !== sessionEpoch) {
+      return null;
+    }
+    if (err instanceof RefreshGrantError) {
+      log.error('silent refresh failed; clearing session', err);
+      terminateSession();
+    } else {
+      log.warn('silent refresh postponed — transient failure, tokens kept', err);
+    }
     return null;
   }
 }
@@ -299,6 +411,7 @@ export async function requireAccessToken(cfg: ServerConfig, skewSeconds: number)
 export async function logout(cfg: ServerConfig): Promise<void> {
   // A login still in flight must not outlive the session it was for.
   cleanupPending();
+  invalidateSession();
   clearTokens();
   const url = new URL(logoutUrl(cfg));
   url.searchParams.set('client_id', cfg.keycloakClientId);
