@@ -93,3 +93,22 @@ Main-логика — однострочный вызов уже протест�
 ### Осталось открытым
 
 Без изменений относительно §9: релей/SSE без управляющего события; потеря push при отсутствии живых окон; приоритет нового логина. Main-строка вызова классификатора в onServerConfigChanged остаётся вне прямого unit-покрытия (index.ts не тестируется) — интеграция covered через renderer-мок, завязанный на ту же функцию.
+
+---
+
+## 9. Фикс-раунд 2 (гард побочных эффектов смены конфигурации)
+
+**Суть (ревьюер)**: при вынесении классификатора строки sse?.unsubscribe() / 	askSse?.unsubscribe() и рассылка config:changed переехали из-под условия aseUrlChanged || issuerChanged наружу — выполнялись при ЛЮБОЙ смене настроек (тема/лимиты/confirmCommands/showTray), отписывая SSE и дёргая renderer без причины. Недостижимо в текущем UI-флоу (Settings размонтирует ChatView до сохранения), но условие обязано остаться.
+
+**Решение**: условие вынесено в чистую функцию planEndpointChange(prev, next) (shared/config-invalidation.ts), возвращающую декларативный план: invalidateSession (issuer/clientId), sseResubscribe (baseUrl || sessionInvalidated), clientsRebuild (только baseUrl), 
+otifyConfigChanged (baseUrl || sessionInvalidated). onServerConfigChanged исполняет план: SSE-отписка и config:changed — под sseResubscribe/
+otifyConfigChanged, rebuild клиентов и релея — под clientsRebuild (только baseUrl, как в исходнике). Неключевая настройка → план со всеми alse → ни unsubscribe, ни config:changed, ни broadcast'а.
+
+**Выбор условий**: sseResubscribe/
+otifyConfigChanged = aseUrlChanged || sessionInvalidated (issuer+clientId — смена «бэкенда авторизации», переподписка оправдана); clientsRebuild = только aseUrlChanged (как в исходнике — клиенты захватывают cfg в конструкторе).
+
+**Тест** (config-invalidation.test.ts, +4, всего 7): матрица планов — baseUrl → rebuild+resubscribe+notify (invalidate false); issuer и clientId → invalidate+resubscribe+notify (rebuild false); theme и showTray → все false; issuer+baseUrl вместе → полный план. Честная дискриминация: если гард убрать (всегда resubscribe/notify) — showTray-кейс падает; если инвалидирующее условие убрать — issuer-кейс падает.
+
+**Команды и результаты**: pnpm verify зелёный (**33 файла / 268 тестов**, +4 план-теста, −2 неиспользуемых переменных); pnpm e2e:electron **2 passed**; pnpm e2e:stub **7 passed**; openspec validate session-loss-ui-state --strict — valid.
+
+**Осталось открытым**: без изменений относительно §8; дополнительно — main-исполнение плана в onServerConfigChanged остаётся вне прямого unit-покрытия (index.ts не тестируется), но само решение (план) покрыто матрично, а index-строки — механическое исполнение декларации.
