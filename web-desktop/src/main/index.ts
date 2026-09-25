@@ -252,6 +252,7 @@ function registerIpcStubs(): void {
     IPC.RELAY_STATUS,
     IPC.RELAY_SET_SESSION,
     IPC.RELAY_CONFIRM_REGISTRATION,
+    IPC.RELAY_PENDING_CONSENT,
     IPC.TOOL_RESPOND_CONFIRM,
     IPC.TOOL_CANCEL,
     IPC.SESSION_LIST,
@@ -382,6 +383,8 @@ function registerIpcStubs(): void {
     relay?.resolveRegistrationConsent(payload.sessionId, payload.approved);
     return { ok: payload.approved };
   });
+
+  ipcMain.handle(IPC.RELAY_PENDING_CONSENT, async () => relay?.getPendingConsent() ?? null);
 
   ipcMain.handle(IPC.TOOL_RESPOND_CONFIRM, async (_evt, payload: { callId: string; approved: boolean }) => {
     relay?.resolveConfirmation(payload.callId, payload.approved);

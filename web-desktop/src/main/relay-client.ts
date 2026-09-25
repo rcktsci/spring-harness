@@ -64,6 +64,12 @@ const REGISTRATION_ERROR_TEXT: Record<string, string> = {
   superseded: 'Session opened elsewhere; this connection is retired.',
 };
 
+const CONSENT_DECLINED_REASON = 'User declined local execution.';
+const REGISTER_IN_PROGRESS_CODE = 'register-in-progress';
+const REGISTER_IN_PROGRESS_MESSAGE = 'Another session registration is already in progress.';
+const CONSENT_PENDING_CODE = 'consent-pending';
+const CONSENT_PENDING_MESSAGE = 'Registration consent is already pending for this session.';
+
 export class RelayClient extends EventEmitter {
   private socket: WebSocket | null = null;
   private registration: Registration | null = null;
@@ -76,6 +82,8 @@ export class RelayClient extends EventEmitter {
   private fatal = false;
   private welcomed = false;
   private registering: Promise<RegisterOutcome> | null = null;
+  /** Session the in-flight `registering` promise belongs to. */
+  private registeringSession: string | null = null;
   /**
    * Last register-refusal from an error frame, kept so a following
    * close 4409 does not overwrite it with a generic "superseded"
@@ -89,6 +97,8 @@ export class RelayClient extends EventEmitter {
   private readonly consentResolvers = new Map<string, (approved: boolean) => void>();
   /** sessionId → decision that arrived before register() asked for it. */
   private readonly pendingConsent = new Map<string, boolean>();
+  /** The currently open consent request (null when none is awaiting an answer). */
+  private openConsent: { sessionId: string; basePath: string; tools: string[] } | null = null;
   /** callIds cancelled on the wire but still being torn down. */
   private readonly cancelledCalls = new Set<string>();
 
@@ -203,6 +213,7 @@ export class RelayClient extends EventEmitter {
     this.dropSocket();
     this.registration = null;
     this.lastRegisterError = null;
+    this.registeringSession = null;
     this.emit('status', { connected: false, registered: false, phase: 'disconnected' });
   }
 
@@ -236,6 +247,17 @@ export class RelayClient extends EventEmitter {
       return { ok: false, code: 'wrong-session-kind' };
     }
 
+    if (this.busyRegisteringOtherThan(sessionId)) {
+      return {
+        ok: false,
+        code: REGISTER_IN_PROGRESS_CODE,
+        message: REGISTER_IN_PROGRESS_MESSAGE,
+      };
+    }
+    if (this.consentResolvers.has(sessionId)) {
+      return { ok: false, code: CONSENT_PENDING_CODE, message: CONSENT_PENDING_MESSAGE };
+    }
+
     const basePath =
       userBasePath ?? join(homedir(), 'harness-workspaces', sessionId);
     const { mkdir } = await import('node:fs/promises');
@@ -260,17 +282,43 @@ export class RelayClient extends EventEmitter {
     if (isNew) {
       const allowed = await this.requestRegistrationConsent(sessionId, basePath);
       if (!allowed) {
-        return { ok: false, message: 'User declined local execution.' };
+        this.emit('status', {
+          connected: true,
+          registered: false,
+          phase: 'connected',
+          sessionId,
+          basePath,
+          code: 'consent-declined',
+          reason: CONSENT_DECLINED_REASON,
+        });
+        return { ok: false, message: CONSENT_DECLINED_REASON };
       }
     }
 
     return this.sendRegister(sessionId, basePath);
   }
 
+  private busyRegisteringOtherThan(sessionId: string): boolean {
+    if (this.registering && this.registeringSession !== sessionId) {
+      return true;
+    }
+    for (const key of this.consentResolvers.keys()) {
+      if (key !== sessionId) return true;
+    }
+    return false;
+  }
+
   private sendRegister(sessionId: string, basePath: string): Promise<RegisterOutcome> {
     if (this.registering) {
-      return this.registering;
+      return this.registeringSession === sessionId
+        ? this.registering
+        : Promise.resolve({
+          ok: false,
+          code: REGISTER_IN_PROGRESS_CODE,
+          message: REGISTER_IN_PROGRESS_MESSAGE,
+        });
     }
+    this.registeringSession = sessionId;
 
     const tools: ClientTool[] = STANDARD_TOOLS.map((name) => ({
       name,
@@ -285,6 +333,7 @@ export class RelayClient extends EventEmitter {
         // Guarantee cleanup so a timed-out register never leaks the listener.
         this.removeListener('frame', onFrame);
         this.registering = null;
+        this.registeringSession = null;
         resolve({ ok: false, message: 'registration timeout' });
       }, this.cfg.relayRegisterTimeoutMs);
 
@@ -293,6 +342,7 @@ export class RelayClient extends EventEmitter {
           clearTimeout(timer);
           this.removeListener('frame', onFrame);
           this.registering = null;
+          this.registeringSession = null;
           this.registration = { sessionId, basePath, consented: true };
           this.basePath = basePath;
           this.emit('status', {
@@ -308,6 +358,7 @@ export class RelayClient extends EventEmitter {
           clearTimeout(timer);
           this.removeListener('frame', onFrame);
           this.registering = null;
+          this.registeringSession = null;
           const message = REGISTRATION_ERROR_TEXT[frame.code] ?? frame.message;
           this.lastRegisterError = { code: frame.code, message };
           // Refusal: do not leave a success-shaped registration behind.
@@ -638,12 +689,21 @@ export class RelayClient extends EventEmitter {
     }
     return new Promise<boolean>((resolve) => {
       this.consentResolvers.set(sessionId, resolve);
+      this.openConsent = { sessionId, basePath, tools: [...STANDARD_TOOLS] };
       this.emit('registrationConsent', sessionId, basePath, [...STANDARD_TOOLS]);
     });
   }
 
+  /** The consent request awaiting the user's answer (renderer re-fetch on mount). */
+  getPendingConsent(): { sessionId: string; basePath: string; tools: string[] } | null {
+    return this.openConsent;
+  }
+
   /** Called from the IPC handler when the user answers registration consent. */
   resolveRegistrationConsent(sessionId: string, approved: boolean): void {
+    if (this.openConsent?.sessionId === sessionId) {
+      this.openConsent = null;
+    }
     const resolve = this.consentResolvers.get(sessionId);
     if (resolve) {
       this.consentResolvers.delete(sessionId);

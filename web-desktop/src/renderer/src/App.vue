@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useRoute } from 'vue-router';
 import { computed } from 'vue';
+import RelayDialogs from './components/RelayDialogs.vue';
 
 const route = useRoute();
 const viewName = computed(() => String(route.name ?? 'unknown'));
@@ -33,6 +34,7 @@ const viewName = computed(() => String(route.name ?? 'unknown'));
         />
       </RouterView>
     </main>
+    <RelayDialogs />
   </div>
 </template>
 

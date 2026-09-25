@@ -73,6 +73,8 @@ const api = {
     status: (): Promise<RelayStatus | null> => ipcRenderer.invoke(IPC.RELAY_STATUS),
     confirmRegistration: (sessionId: string, approved: boolean): Promise<unknown> =>
       ipcRenderer.invoke(IPC.RELAY_CONFIRM_REGISTRATION, { sessionId, approved }),
+    pendingConsent: (): Promise<{ sessionId: string; basePath: string; tools: string[] } | null> =>
+      ipcRenderer.invoke(IPC.RELAY_PENDING_CONSENT),
     onStatus: (cb: (status: RelayStatus) => void): Unsub => {
       const handler = (_e: Electron.IpcRendererEvent, payload: RelayStatus): void => cb(payload);
       ipcRenderer.on('relay:status', handler);

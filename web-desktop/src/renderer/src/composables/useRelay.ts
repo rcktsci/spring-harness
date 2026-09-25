@@ -1,4 +1,4 @@
-import { onMounted, onUnmounted, ref, type Ref } from 'vue';
+import { ref, type Ref } from 'vue';
 import type {
   RegistrationConsentRequest,
   RelayStatus,
@@ -20,36 +20,44 @@ export interface UseRelay {
   register: (sessionId: string, kind?: string, basePath?: string) => Promise<unknown>;
   setSession: (sessionId: string, kind?: string) => Promise<unknown>;
   disconnect: () => Promise<void>;
+  /**
+   * Auto-connect for an opened session (spec 3.2): no-op for STATE sessions,
+   * for a session already registered, and for a duplicate trigger while a
+   * previous registration for the same session is still in flight.
+   */
+  ensureConnected: (sessionId: string, kind?: string) => Promise<void>;
   respondConsent: (approved: boolean) => Promise<void>;
   respondToolConfirm: (approved: boolean) => Promise<void>;
   cancelTool: (callId: string) => Promise<void>;
 }
 
 /**
- * Renderer-side relay state: subscribes to main's status/consent/tool
- * events and exposes the IPC actions the UI needs (spec 3.1/3.4).
+ * Renderer-side relay state. Module-scoped singleton: relay events come from
+ * the one main process and must be visible from every view (global dialogs in
+ * App.vue, status bar in ChatView), so per-component subscriptions would race
+ * and lose events.
  */
+const status = ref<RelayStatus | null>(null);
+const consent = ref<RegistrationConsentRequest | null>(null);
+const toolConfirm = ref<PendingToolConfirm | null>(null);
+let wired = false;
+const autoInFlight = new Set<string>();
+
+function wire(): void {
+  if (wired) return;
+  wired = true;
+  window.harness.relay.onStatus((s) => { status.value = s; });
+  window.harness.relay.onRegistrationConsent((req) => { consent.value = req; });
+  window.harness.tool.onCall((call, basePath) => {
+    toolConfirm.value = { call, basePath };
+  });
+  void window.harness.relay.status().then((s) => {
+    if (s) status.value = s;
+  });
+}
+
 export function useRelay(): UseRelay {
-  const status = ref<RelayStatus | null>(null);
-  const consent = ref<RegistrationConsentRequest | null>(null);
-  const toolConfirm = ref<PendingToolConfirm | null>(null);
-  const unsubs: Array<() => void> = [];
-
-  onMounted(() => {
-    unsubs.push(window.harness.relay.onStatus((s) => { status.value = s; }));
-    unsubs.push(window.harness.relay.onRegistrationConsent((req) => { consent.value = req; }));
-    unsubs.push(window.harness.tool.onCall((call, basePath) => {
-      toolConfirm.value = { call, basePath };
-    }));
-    void window.harness.relay.status().then((s) => {
-      if (s) status.value = s;
-    });
-  });
-
-  onUnmounted(() => {
-    for (const unsub of unsubs) unsub();
-    unsubs.length = 0;
-  });
+  wire();
 
   return {
     status,
@@ -61,6 +69,21 @@ export function useRelay(): UseRelay {
     setSession: (sessionId, kind = 'FREE') =>
       window.harness.relay.setSession(sessionId, kind),
     disconnect: () => window.harness.relay.disconnect(),
+    ensureConnected: async (sessionId, kind = 'FREE') => {
+      if (kind === 'STATE') return;
+      const s = status.value;
+      if (s?.registered && s.sessionId === sessionId) return;
+      if (autoInFlight.has(sessionId)) return;
+      autoInFlight.add(sessionId);
+      try {
+        await window.harness.relay.connect();
+        await window.harness.relay.register(sessionId, kind);
+      } catch {
+        // Failures surface through relay status events / the status bar.
+      } finally {
+        autoInFlight.delete(sessionId);
+      }
+    },
     respondConsent: async (approved) => {
       const req = consent.value;
       if (!req) return;

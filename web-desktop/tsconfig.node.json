@@ -57,6 +57,8 @@
     "tests/unit/feed.test.ts",
     "tests/unit/artifact-paths.test.ts",
     "tests/unit/session-tree.test.ts",
-    "tests/unit/auth-gate.test.ts"
+    "tests/unit/auth-gate.test.ts",
+    "tests/unit/use-relay.test.ts",
+    "tests/unit/relay-label.test.ts"
   ]
 }

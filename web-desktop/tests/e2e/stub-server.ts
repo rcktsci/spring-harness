@@ -287,6 +287,8 @@ function closeRelay(socket: WebSocket, code: number, reason: string): void {
   socket.close(code, reason);
 }
 
+const TOOL_CALL_SCRIPT_COMMAND = 'node -e "process.stdout.write(\'hello-from-client\')"';
+
 function sessionToolScript(sessionId: string): void {
   // Simulate the orchestrator: push a TOOL_CALL for `bash` immediately after
   // the user message (which is appended via POST /messages — the spec triggers
@@ -302,7 +304,7 @@ function sessionToolScript(sessionId: string): void {
   appendMessage(sessionId, 'TOOL_CALL', {
     callId,
     tool: 'bash',
-    arguments: { command: 'echo hello && pwd' },
+    arguments: { command: TOOL_CALL_SCRIPT_COMMAND },
   });
   broadcastSessionEvent(sessionId, {
     id: String(s.lastSeq),
@@ -311,13 +313,33 @@ function sessionToolScript(sessionId: string): void {
       id: 'stub-call-' + callId,
       seq: s.lastSeq,
       kind: 'TOOL_CALL',
-      payload: { callId, tool: 'bash', arguments: { command: 'echo hello && pwd' } },
+      payload: { callId, tool: 'bash', arguments: { command: TOOL_CALL_SCRIPT_COMMAND } },
       callId,
       createdAt: new Date().toISOString(),
     },
   });
-  // Wait for the desktop to send tool.result via WS — relayed back to /workspace/files
-  // handling stays in the WS layer. After tool.result, push the final assistant text.
+  deliverToolCallWhenRegistered(sessionId, callId);
+}
+
+/**
+ * The orchestrator can only call a client tool through a registered relay
+ * connection. The desktop registers asynchronously (auto-connect + consent
+ * dialog), so retry delivery for a while instead of dropping the call.
+ */
+function deliverToolCallWhenRegistered(sessionId: string, callId: string, attempt = 0): void {
+  const conn = [...relayConns.values()].find((c) => c.sessionId === sessionId);
+  if (conn) {
+    sendRelay(conn.socket, {
+      type: 'tool.call',
+      callId,
+      sessionId,
+      tool: 'bash',
+      args: { command: TOOL_CALL_SCRIPT_COMMAND },
+    });
+    return;
+  }
+  if (attempt >= 50) return;
+  setTimeout(() => deliverToolCallWhenRegistered(sessionId, callId, attempt + 1), 200);
 }
 
 const server = createServer((req, res) => {
@@ -621,9 +643,10 @@ wss.on('connection', (socket: WebSocket) => {
       const id = (frame['identity'] as string | undefined) ?? 'anon';
       identity = id;
       helloed = true;
+      // §5.1: the frame field is `protocol` (not `protocolVersion`).
       sendRelay(socket, {
         type: 'welcome',
-        protocolVersion: SUPPORTED_PROTOCOL,
+        protocol: SUPPORTED_PROTOCOL,
         heartbeatIntervalMs: 5_000,
         sessionEventStreamPath: '/api/v1/sessions/{id}/events',
         serverTime: new Date().toISOString(),
@@ -654,11 +677,12 @@ wss.on('connection', (socket: WebSocket) => {
         relayConns.delete(key);
       }
       // workspace-occupied sweep omitted for stub: same-identity takeover only
+      const declaredTools = (frame['client'] as { tools?: unknown[] } | undefined)?.tools ?? [];
       const registered: RelayConnection = {
         socket,
         sessionId,
         basePath: (frame['basePath'] as string | undefined) ?? null,
-        tools: (frame['tools'] as string[] | undefined) ?? [],
+        tools: declaredTools.map((t) => (t as { name?: string }).name ?? 'unknown'),
         identity,
       };
       conn = registered;

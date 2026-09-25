@@ -68,6 +68,7 @@ export const IPC = {
   RELAY_STATUS: 'relay:status',
   RELAY_SET_SESSION: 'relay:set-session',
   RELAY_CONFIRM_REGISTRATION: 'relay:confirm-registration',
+  RELAY_PENDING_CONSENT: 'relay:pending-consent',
 
   SSE_SUBSCRIBE: 'sse:subscribe',
   SSE_UNSUBSCRIBE: 'sse:unsubscribe',

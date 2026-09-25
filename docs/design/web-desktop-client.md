@@ -32,7 +32,7 @@
 | 2.1 | SSO через Keycloak OAuth2 + PKCE (visible `BrowserWindow` + loopback-redirect); `safeStorage` для токенов; silent refresh на 401 | `src/main/auth.ts` |
 | 2.2 | Settings: server baseUrl, Keycloak issuer/clientId, `confirmCommands` (default `always`, D-93), тема; запись в `userData/config.json` | `src/renderer/src/views/SettingsView.vue` |
 | 2.3 | WS-релей: handshake `hello`/`welcome` с Bearer-JWT, ping-watchdog (2×interval), reconnect-exponential-backoff, 4401→silent refresh, 4403→fatal, 4409→`superseded`-takeover; toolset-оверлей (parent-chain, D-80/D-84/D-85); cancel во время spawn | `src/main/relay-client.ts` |
-| 2.4 | `confirmCommands=always` (D-93): per-session consent на первой регистрации + режим «никогда»; `TOOL_CONFIRM` IPC | `src/main/relay-client.ts` + `src/renderer/src/composables/useRelay.ts` |
+| 2.4 | `confirmCommands=always` (D-93): per-session consent на первой регистрации + режим «никогда»; запросы релея (consent регистрации, подтверждение команды) рендерятся глобальным оверлеем `RelayDialogs` поверх любого view; незакрытый consent, отправленный до монтирования renderer, переопросом `relay:pending-consent` | `src/main/relay-client.ts` + `src/renderer/src/composables/useRelay.ts` + `src/renderer/src/components/RelayDialogs.vue` |
 | 2.5 | Список сессий: `GET /sessions?mine=true`, поиск с debounce 300 мс, cursor-paging, создание через выбор агента из `GET /agents` | `src/renderer/src/composables/useSessions.ts` + `src/renderer/src/components/SessionList.vue` |
 | 2.6 | Лента чата: все `MessageKind` (USER/ASSISTANT/SYSTEM/TOOL_CALL/TOOL_RESULT/COMPACT + ASYNC_ACCEPTED), markdown-рендер (markdown-it + DOMPurify), сворачиваемые tool-блоки, плейсхолдер «ожидает результат», `late`-маркер; начальная загрузка пейджингом `since=0` по `nextCursor` до хвоста | `src/renderer/src/lib/feed.ts` + `src/renderer/src/components/ChatFeed.vue` |
 | 2.7 | Отправка + команды: кнопки Compact/Stop в статус-баре (confirm для Stop при `TURN_RUNNING`), индикатор «агент работает…», черновик per-session | `src/renderer/src/views/ChatView.vue` |
@@ -45,7 +45,7 @@
 ## 3. UX-минимум
 
 - Поток: события рендерятся по `seq`; `TOOL_CALL/TOOL_RESULT` — сворачиваемые блоки; `COMPACT` — маркер «граница раунда»; `ASYNC_ACCEPTED` — плейсхолдер «принято, в полёте» (M3); поздний `TOOL_RESULT` с `late=true` заменяет плейсхолдер.
-- Статус-бар чата: `runtimeStatus` (`IDLE`/`TURN_RUNNING`/`PARKED_ASYNC`/`PARKED_CLIENT`), индикатор «агент работает…» при `TURN_RUNNING|PARKED_ASYNC`; relay-статус отдельно («подключён (N инструментов)» / «в другом месте» для `code==='superseded'`).
+- Статус-бар чата: `runtimeStatus` (`IDLE`/`TURN_RUNNING`/`PARKED_ASYNC`/`PARKED_CLIENT`), индикатор «агент работает…» при `TURN_RUNNING|PARKED_ASYNC`; relay-статус отдельно («подключён (N инструментов)» / «в другом месте» для `code==='superseded'`, причина отказа регистрации — строкой). Открытие FREE root-сессии автоматически подключает и регистрирует релей (basePath по умолчанию D-88); сохранённая активная сессия восстанавливается при старте.
 - Ввод во время хода — обычный `POST /messages`; ассистент подхватит в следующем раунде.
 - Артефакты: кликабельный путь в выводе tool → `/artifacts?sessionId=&path=`; save-as через нативный dialog.
 - Дерево: breadcrumb `root › … › current`; клик на STATE-узле → открыть чат субагента и развернуть правую панель задачи.
@@ -75,11 +75,12 @@
 
 ## 6. Тестовое покрытие
 
-- 19 unit-файлов / 166 unit-тестов (Vitest, см. `pnpm verify`):
+- 26 unit-файлов / 204 unit-теста (Vitest, см. `pnpm verify`):
   - relay-client, local-tools, ws-frames (batch C);
   - sse-parser, sse-client, chat-feed (batch D);
-  - path-utils, artifact-paths, session-tree, components/{session-tree,task-panel}, task-sse-client, workspace-fetch, artifact (batch E + ревью-фиксы).
-- e2e: `tests/e2e/electron-smoke.spec.ts` — Playwright-electron против in-test stub-сервера (`tests/e2e/stub-server.ts`) — full §5 + §3.1/§3.2 (см. `web-desktop/docs/smoke.md`).
+  - path-utils, artifact-paths, session-tree, components/{session-tree,task-panel}, task-sse-client, workspace-fetch, artifact (batch E + ревью-фиксы);
+  - use-relay + components/relay-dialogs (авто-подключение, consent/tool-confirm UI).
+- e2e: `tests/e2e/electron-smoke.spec.ts` — Playwright-electron против in-test stub-сервера (`tests/e2e/stub-server.ts`): реальный DOM, авто-подключение при открытии сессии, consent-диалог, полный tool-цикл по WS (включая D-93 confirm deny/approve), реальный save-as с записью файла (см. `web-desktop/docs/smoke.md`).
 
 ## 7. Невходит в M5 (эволюция, см. AGENTS.md)
 

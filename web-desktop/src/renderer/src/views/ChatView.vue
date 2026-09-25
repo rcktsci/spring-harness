@@ -6,6 +6,7 @@ import ChatFeed from '../components/ChatFeed.vue';
 import { useSessions } from '../composables/useSessions';
 import { useChat } from '../composables/useChat';
 import { useRelay } from '../composables/useRelay';
+import { relayLabel as relayLabelOf } from '../lib/relay-label';
 import { isAgentWorking } from '../lib/feed';
 
 const route = useRoute();
@@ -36,28 +37,26 @@ const working = computed(() => isAgentWorking(chat.runtimeStatus.value));
 const isFree = computed(() => activeSession.value?.kind !== 'STATE');
 const showCompact = computed(() => isFree.value);
 
-const relayLabel = computed(() => {
-  const s = relay.status.value;
-  if (!s) return 'релей: —';
-  if (s.code === 'superseded' || (s.phase === 'fatal' && s.code === 'superseded')) {
-    return 'сессия открыта в другом месте';
-  }
-  if (s.registered && s.toolCount !== undefined) {
-    return `подключён (${s.toolCount} инструментов)`;
-  }
-  if (s.connected) return 'подключён';
-  if (s.phase === 'connecting' || s.phase === 'handshake' || s.phase === 'registering') {
-    return `релей: ${s.phase}…`;
-  }
-  if (s.phase === 'fatal') return s.reason ?? 'релей: ошибка';
-  return 'не подключён';
-});
+const relayLabel = computed(() =>
+  relayLabelOf(relay.status.value, activeSession.value?.kind),
+);
 
 const relayConnected = computed(() => Boolean(relay.status.value?.registered));
 
 watch(activeId, (id, prev) => {
   if (prev) drafts.value[prev] = draft.value;
   draft.value = (id && drafts.value[id]) || '';
+});
+
+/**
+ * Opening a FREE root session triggers the relay auto-connect+register
+ * (desktop-relay-client 3.2); ensureConnected dedupes repeats. STATE
+ * sessions never register.
+ */
+watch(activeSession, (session) => {
+  const id = session?.id;
+  if (!id || session?.kind === 'STATE') return;
+  void relay.ensureConnected(id, session.kind);
 });
 
 /**
@@ -149,8 +148,7 @@ async function toggleRelay(): Promise<void> {
   if (relayConnected.value) {
     await relay.disconnect();
   } else {
-    await relay.connect();
-    await relay.register(id, activeSession.value?.kind ?? 'FREE');
+    await relay.ensureConnected(id, activeSession.value?.kind ?? 'FREE');
   }
 }
 

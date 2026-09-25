@@ -231,6 +231,98 @@ describe('relay client: handshake and frames', () => {
     expect(server.received.filter((f) => (f as { type?: string }).type === 'register')).toHaveLength(0);
   });
 
+  it('emits a consent-declined status so the UI can show the reason', async () => {
+    client = makeClient(server);
+    const statuses: Array<{ registered: boolean; phase: string; code?: string; reason?: string }> = [];
+    client.on('status', (s) => statuses.push({ ...s }));
+
+    const p = client.register('sess-free', 'FREE', tmpBasePath());
+    await server.waitFor((f) => (f as { type?: string }).type === 'hello');
+    server.send({ type: 'welcome', protocol: 1 });
+    await server.waitFor(() => client.getPendingConsent() !== null);
+    client.resolveRegistrationConsent('sess-free', false);
+    await expect(p).resolves.toMatchObject({ ok: false });
+
+    const declined = statuses.find((s) => s.code === 'consent-declined');
+    expect(declined).toBeDefined();
+    expect(declined).toMatchObject({ registered: false, phase: 'connected' });
+    expect(declined?.reason).toContain('declined');
+  });
+
+  it('refuses a parallel registration of a different session without disturbing the first', async () => {
+    client = makeClient(server);
+    const consents: string[] = [];
+    client.on('registrationConsent', (sessionId) => consents.push(sessionId));
+
+    const first = client.register('sess-a', 'FREE', tmpBasePath());
+    await server.waitFor((f) => (f as { type?: string }).type === 'hello');
+    server.send({ type: 'welcome', protocol: 1 });
+    await server.waitFor(() => consents.includes('sess-a'));
+
+    const second = await client.register('sess-b', 'FREE', tmpBasePath());
+    expect(second).toMatchObject({ ok: false, code: 'register-in-progress' });
+    expect(consents).toEqual(['sess-a']);
+
+    client.resolveRegistrationConsent('sess-a', true);
+    await expect(first).resolves.toMatchObject({ ok: true });
+    const registered = server.received.filter((f) => (f as { sessionId?: string }).sessionId === 'sess-a');
+    expect(registered.length).toBeGreaterThan(0);
+  });
+
+  it('rejects a duplicate same-session register while consent is pending', async () => {
+    client = makeClient(server);
+    const consents: string[] = [];
+    client.on('registrationConsent', (sessionId) => consents.push(sessionId));
+
+    const first = client.register('sess-a', 'FREE', tmpBasePath());
+    await server.waitFor((f) => (f as { type?: string }).type === 'hello');
+    server.send({ type: 'welcome', protocol: 1 });
+    await server.waitFor(() => consents.length === 1);
+
+    const duplicate = await client.register('sess-a', 'FREE', tmpBasePath());
+    expect(duplicate).toMatchObject({ ok: false, code: 'consent-pending' });
+    expect(consents).toEqual(['sess-a']);
+
+    client.resolveRegistrationConsent('sess-a', true);
+    await expect(first).resolves.toMatchObject({ ok: true });
+  });
+
+  it('keeps the consent request retrievable until the user answers', async () => {
+    client = makeClient(server);
+    const consents: Array<{ sessionId: string; basePath: string }> = [];
+    client.on('registrationConsent', (sessionId, basePath) => {
+      consents.push({ sessionId, basePath });
+    });
+
+    const p = client.register('sess-free', 'FREE', tmpBasePath());
+    await server.waitFor((f) => (f as { type?: string }).type === 'hello');
+    server.send({ type: 'welcome', protocol: 1 });
+    await server.waitFor(() => consents.length === 1);
+
+    // Renderer re-fetch path: the request must still be pending here.
+    expect(client.getPendingConsent()).toMatchObject({ sessionId: 'sess-free' });
+
+    client.resolveRegistrationConsent('sess-free', true);
+    await p;
+    expect(client.getPendingConsent()).toBeNull();
+  });
+
+  it('consumes an early consent decision instead of hanging', async () => {
+    client = makeClient(server);
+    const consents: number[] = [];
+    client.on('registrationConsent', () => consents.push(1));
+
+    // The user answers before register() reaches the consent gate.
+    client.resolveRegistrationConsent('sess-free', true);
+
+    const p = client.register('sess-free', 'FREE', tmpBasePath());
+    await server.waitFor((f) => (f as { type?: string }).type === 'hello');
+    server.send({ type: 'welcome', protocol: 1 });
+    await expect(p).resolves.toMatchObject({ ok: true });
+    expect(consents).toHaveLength(0);
+    expect(client.getPendingConsent()).toBeNull();
+  });
+
   it('requires confirmation before bash when confirmCommands=always', async () => {
     client = makeClient(server, { confirmCommands: 'always' });
     await happyPath(server, client);
