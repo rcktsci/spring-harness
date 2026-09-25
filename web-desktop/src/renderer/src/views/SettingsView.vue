@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import type { ServerConfig } from '@shared/ipc-contract';
 import { useAuthStore } from '../stores/auth';
 
+const router = useRouter();
 const cfg = ref<ServerConfig | null>(null);
 const saved = ref(false);
 const error = ref<string | null>(null);
@@ -32,6 +34,7 @@ async function onSignOut(): Promise<void> {
   error.value = null;
   try {
     await auth.logout();
+    await router.push('/login');
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err);
   } finally {

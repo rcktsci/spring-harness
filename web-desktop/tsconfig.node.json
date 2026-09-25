@@ -60,6 +60,7 @@
     "tests/unit/auth-gate.test.ts",
     "tests/unit/use-relay.test.ts",
     "tests/unit/relay-label.test.ts",
-    "tests/unit/use-sessions.test.ts"
+    "tests/unit/use-sessions.test.ts",
+    "tests/unit/login-navigation.test.ts"
   ]
 }

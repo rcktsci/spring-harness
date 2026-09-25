@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
+import { useAuthStore } from '../stores/auth';
 
 const router = useRouter();
+const auth = useAuthStore();
 const loading = ref(false);
 const error = ref<string | null>(null);
 
@@ -10,7 +12,7 @@ async function login(): Promise<void> {
   loading.value = true;
   error.value = null;
   try {
-    await window.harness.auth.loginStart();
+    await auth.login();
     await router.push('/chat');
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err);
@@ -26,6 +28,7 @@ async function login(): Promise<void> {
     <p>SSO via Keycloak (Authorization Code + PKCE).</p>
     <button
       :disabled="loading"
+      data-testid="login-submit"
       @click="login"
     >
       {{ loading ? 'Opening Keycloak…' : 'Sign in' }}
