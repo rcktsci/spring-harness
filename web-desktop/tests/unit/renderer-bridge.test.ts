@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { sendToRenderer } from '../../src/main/renderer-bridge';
+import { broadcastToRenderer, sendToRenderer } from '../../src/main/renderer-bridge';
+import { BrowserWindow } from 'electron';
+
+vi.mock('electron', () => ({
+  BrowserWindow: { getAllWindows: vi.fn(() => []) },
+}));
 
 type FakeWindow = {
   isDestroyed: () => boolean;
@@ -48,5 +53,25 @@ describe('sendToRenderer', () => {
       throw new TypeError('Object has been destroyed');
     });
     expect(sendToRenderer(() => win as never, 'relay:status', {})).toBe(false);
+  });
+});
+
+describe('broadcastToRenderer', () => {
+  it('sends to every live window', () => {
+    const winA = fakeWindow();
+    const winB = fakeWindow();
+    const destroyed = fakeWindow({ isDestroyed: () => true });
+    vi.mocked(BrowserWindow.getAllWindows).mockReturnValue([winA, destroyed, winB] as never);
+
+    broadcastToRenderer('auth:session-lost');
+
+    expect(winA.webContents.send).toHaveBeenCalledWith('auth:session-lost');
+    expect(winB.webContents.send).toHaveBeenCalledWith('auth:session-lost');
+    expect(destroyed.webContents.send).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op with no windows', () => {
+    vi.mocked(BrowserWindow.getAllWindows).mockReturnValue([] as never);
+    expect(() => broadcastToRenderer('auth:session-lost')).not.toThrow();
   });
 });

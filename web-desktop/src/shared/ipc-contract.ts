@@ -47,6 +47,7 @@ export const IPC = {
   AUTH_LOGIN_START: 'auth:login-start',
   AUTH_LOGIN_LOGOUT: 'auth:login-logout',
   AUTH_REFRESH: 'auth:refresh',
+  AUTH_SESSION_LOST: 'auth:session-lost',
 
   CONFIG_GET: 'config:get',
   CONFIG_SET: 'config:set',

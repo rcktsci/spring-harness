@@ -3,7 +3,8 @@ import { join } from 'node:path';
 import { log, initLogger } from './logger.js';
 import { loadConfig, saveConfig } from './config.js';
 import { createMainWindow } from './window.js';
-import { sendToRenderer } from './renderer-bridge.js';
+import { broadcastToRenderer, sendToRenderer } from './renderer-bridge.js';
+import { planEndpointChange } from '../shared/config-invalidation.js';
 import { buildAppMenu } from './menu.js';
 import { createTray } from './tray.js';
 import { startLogin, logout, readLoginState, refreshIfNeeded } from './auth.js';
@@ -199,42 +200,45 @@ function createRelay(): RelayClient {
  * request re-authenticates against the new issuer (spec "смена сервера").
  */
 async function onServerConfigChanged(next: ServerConfig): Promise<void> {
-  const baseUrlChanged = next.serverBaseUrl !== config.serverBaseUrl;
-  const issuerChanged = next.keycloakIssuer !== config.keycloakIssuer;
+  const plan = planEndpointChange(config, next);
+  const sessionInvalidated = plan.invalidateSession;
   config = next;
   applyTheme(next.theme);
-  if (baseUrlChanged || issuerChanged) {
+  // Tokens are scoped to the old issuer; a stale JWT would only produce 401s.
+  if (sessionInvalidated) {
+    const { clearTokens } = await import('./token-store.js');
+    const { invalidateSession } = await import('./auth.js');
+    clearTokens();
+    invalidateSession();
+    broadcastToRenderer(IPC.AUTH_SESSION_LOST);
+  }
+  if (plan.sseResubscribe) {
     log.info('server/keycloak endpoint changed — reconnecting relay');
-    // Tokens are scoped to the old issuer; a stale JWT would only produce 401s.
-    if (issuerChanged) {
-      const { clearTokens } = await import('./token-store.js');
-      const { invalidateSession } = await import('./auth.js');
-      clearTokens();
-      invalidateSession();
-    }
     // Drop any live SSE so the next subscribe re-authenticates cleanly.
     void sse?.unsubscribe();
     void taskSse?.unsubscribe();
-    if (baseUrlChanged) {
-      // Both clients capture cfg in the constructor — rebuild for the new URL.
-      sse = new SessionSseClient(
-        config,
-        (sessionId, frame) => {
-          sendToRenderer(() => mainWindow, 'sse:event', { sessionId, ...frame });
-        },
-        async () => refreshIfNeeded(config, config.tokenClockSkewSeconds),
-      );
-      taskSse = new TaskSseClient(config, (taskId, frame) => {
-        sendToRenderer(() => mainWindow, 'task:event', { taskId, ...frame });
+  }
+  if (plan.clientsRebuild) {
+    // Both clients capture cfg in the constructor — rebuild for the new URL.
+    sse = new SessionSseClient(
+      config,
+      (sessionId, frame) => {
+        sendToRenderer(() => mainWindow, 'sse:event', { sessionId, ...frame });
+      },
+      async () => refreshIfNeeded(config, config.tokenClockSkewSeconds),
+    );
+    taskSse = new TaskSseClient(config, (taskId, frame) => {
+      sendToRenderer(() => mainWindow, 'task:event', { taskId, ...frame });
+    });
+    relay?.shutdown();
+    relay = createRelay();
+    if (config.relayActiveSessionId) {
+      void relay.register(config.relayActiveSessionId, 'FREE').catch(() => {
+        /* status events already surface failures */
       });
-      relay?.shutdown();
-      relay = createRelay();
-      if (config.relayActiveSessionId) {
-        void relay.register(config.relayActiveSessionId, 'FREE').catch(() => {
-          /* status events already surface failures */
-        });
-      }
     }
+  }
+  if (plan.notifyConfigChanged) {
     sendToRenderer(() => mainWindow, 'config:changed', { baseUrl: next.serverBaseUrl });
   }
 }

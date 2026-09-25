@@ -28,6 +28,9 @@ describe('installAuthGuard', () => {
   let guard: (to: { name?: string }) => Promise<string | null>;
 
   beforeEach(() => {
+    (window as unknown as { harness: unknown }).harness = {
+      auth: { loginState: vi.fn(async () => ({ loggedIn: true })), onSessionLost: vi.fn() },
+    };
     const pinia = createPinia();
     setActivePinia(pinia);
     const router = {
@@ -40,7 +43,9 @@ describe('installAuthGuard', () => {
 
   it('asks main once and redirects a signed-in user away from /login', async () => {
     const loginState = vi.fn(async () => ({ loggedIn: true }));
-    (window as unknown as { harness: unknown }).harness = { auth: { loginState } };
+    (window as unknown as { harness: unknown }).harness = {
+      auth: { loginState, onSessionLost: vi.fn() },
+    };
     expect(await guard({ name: 'login' })).toBe('chat');
     expect(await guard({ name: 'login' })).toBe('chat');
     expect(loginState).toHaveBeenCalledTimes(1);
@@ -48,7 +53,7 @@ describe('installAuthGuard', () => {
 
   it('parks a signed-out visitor on /login', async () => {
     (window as unknown as { harness: unknown }).harness = {
-      auth: { loginState: async () => ({ loggedIn: false }) },
+      auth: { loginState: async () => ({ loggedIn: false }), onSessionLost: vi.fn() },
     };
     expect(await guard({ name: 'chat' })).toBe('login');
   });

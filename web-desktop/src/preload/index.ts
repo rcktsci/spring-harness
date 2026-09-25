@@ -39,6 +39,11 @@ const api = {
     loginStart: (): Promise<void> => ipcRenderer.invoke(IPC.AUTH_LOGIN_START),
     logout: (): Promise<void> => ipcRenderer.invoke(IPC.AUTH_LOGIN_LOGOUT),
     refresh: (): Promise<void> => ipcRenderer.invoke(IPC.AUTH_REFRESH),
+    onSessionLost: (cb: () => void): Unsub => {
+      const handler = (): void => cb();
+      ipcRenderer.on(IPC.AUTH_SESSION_LOST, handler);
+      return () => ipcRenderer.removeListener(IPC.AUTH_SESSION_LOST, handler);
+    },
   },
   config: {
     get: (): Promise<ServerConfig> => ipcRenderer.invoke(IPC.CONFIG_GET),

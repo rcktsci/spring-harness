@@ -25,4 +25,18 @@ export function installAuthGuard(router: Router, pinia: Pinia): void {
     const name = typeof to.name === 'string' ? to.name : undefined;
     return entryRoute(name, auth.state.loggedIn);
   });
+
+  window.harness.auth.onSessionLost(() => {
+    void handleSessionLoss(router, auth);
+  });
+}
+
+async function handleSessionLoss(router: Router, auth: ReturnType<typeof useAuthStore>): Promise<void> {
+  await auth.refresh();
+  if (auth.state.loggedIn) {
+    return;
+  }
+  if (router.currentRoute.value.path !== '/login') {
+    await router.push('/login');
+  }
 }

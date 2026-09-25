@@ -8,6 +8,12 @@ vi.mock('electron', () => ({
 const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 vi.mock('../../src/main/logger.js', () => ({ log, initLogger: vi.fn() }));
 
+const sessionLostBroadcast = vi.fn();
+vi.mock('../../src/main/renderer-bridge.js', () => ({
+  broadcastToRenderer: (...args: unknown[]) => sessionLostBroadcast(...args),
+  sendToRenderer: vi.fn(),
+}));
+
 const store = {
   tokens: null as unknown,
   save: vi.fn(),
@@ -50,6 +56,7 @@ describe('silent refresh single-flight', () => {
     log.error.mockClear();
     store.save.mockClear();
     store.clear.mockClear();
+    sessionLostBroadcast.mockClear();
     store.tokens = null;
   });
 
@@ -90,6 +97,7 @@ describe('silent refresh single-flight', () => {
     const logged = log.error.mock.calls[0]?.[1] as Error;
     expect(logged.message).toContain('invalid_grant');
     expect(logged.message).toContain('Token is not active');
+    expect(sessionLostBroadcast).toHaveBeenCalledWith('auth:session-lost');
   });
 
   it('keeps tokens when the token endpoint is unreachable', async () => {
@@ -106,6 +114,7 @@ describe('silent refresh single-flight', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(store.clear).not.toHaveBeenCalled();
     expect(store.save).not.toHaveBeenCalled();
+    expect(sessionLostBroadcast).not.toHaveBeenCalled();
     const logged = log.warn.mock.calls[0]?.[1] as Error;
     expect(logged.message).toContain('ECONNREFUSED');
   });
@@ -120,6 +129,17 @@ describe('silent refresh single-flight', () => {
     expect(results).toEqual([null, null, null]);
     expect(store.clear).not.toHaveBeenCalled();
     expect(store.save).not.toHaveBeenCalled();
+    expect(sessionLostBroadcast).not.toHaveBeenCalled();
+  });
+
+  it('does not broadcast a session loss on interactive logout', async () => {
+    store.tokens = { accessToken: 'tok', refreshToken: 'r1', expiresAt: now + 600 };
+    const { logout } = await importAuth();
+
+    await logout(cfg);
+
+    expect(store.clear).toHaveBeenCalledTimes(1);
+    expect(sessionLostBroadcast).not.toHaveBeenCalled();
   });
 
   it('starts a fresh refresh for the next batch after a transient failure', async () => {

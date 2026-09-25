@@ -30,6 +30,7 @@ function installIpcBridge(): void {
         harnessState.loggedIn = false;
       },
       refresh: async () => undefined,
+      onSessionLost: vi.fn(),
     },
     config: {
       get: async () => ({ ...DEFAULT_CONFIG }),

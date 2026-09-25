@@ -7,6 +7,8 @@
  * an uncaught main-process exception. Every push in `index.ts` goes through
  * here so a dead window is a no-op instead of a crash.
  */
+import { BrowserWindow } from 'electron';
+
 export function sendToRenderer(
   getWindow: () => Electron.BrowserWindow | null,
   channel: string,
@@ -22,5 +24,11 @@ export function sendToRenderer(
   } catch {
     // Destroyed between the check and the send — same no-op contract.
     return false;
+  }
+}
+
+export function broadcastToRenderer(channel: string, ...args: unknown[]): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    sendToRenderer(() => win, channel, ...args);
   }
 }

@@ -17,6 +17,8 @@ import { BrowserWindow, shell } from 'electron';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { log } from './logger.js';
+import { broadcastToRenderer } from './renderer-bridge.js';
+import { IPC } from '../shared/ipc-contract.js';
 import {
   clearTokens,
   isTokenFresh,
@@ -313,6 +315,7 @@ export function invalidateSession(): void {
 function terminateSession(): void {
   sessionEpoch += 1;
   clearTokens();
+  broadcastToRenderer(IPC.AUTH_SESSION_LOST);
 }
 
 /**
