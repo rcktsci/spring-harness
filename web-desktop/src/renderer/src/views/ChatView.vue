@@ -14,6 +14,7 @@ const router = useRouter();
 const {
   sessions,
   agents,
+  agentsError,
   search,
   loading: listLoading,
   error: listError,
@@ -171,6 +172,7 @@ async function onOpenArtifact(path: string): Promise<void> {
     <SessionList
       :sessions="sessions"
       :agents="agents"
+      :agents-error="agentsError"
       :active-id="activeId"
       :search="search"
       :loading="listLoading"

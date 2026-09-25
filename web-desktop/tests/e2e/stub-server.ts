@@ -21,7 +21,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { URL } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, rmSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -103,7 +103,9 @@ function newSession(
 }
 
 // Pre-create one FREE root session at boot for the test scenario.
-ensureWorkspace();
+// (Workspace creation happens in startStub(), NOT at module load: Playwright
+// loads this file both for test collection and in the worker, and a
+// module-level temp dir would leak — nothing closes the ghost copy.)
 const rootSession = newSession('FREE', 'tester', 'tester', 1);
 rootSession.title = 'e2e-root';
 // Plus one STATE sub-session so /tree exercises stateCode/taskId in the
@@ -787,6 +789,7 @@ export interface StubHandle {
 }
 
 export function startStub(): Promise<StubHandle> {
+  ensureWorkspace();
   return new Promise((resolve) => {
     server.listen(0, '127.0.0.1', () => {
       const addr = server.address();
@@ -805,6 +808,7 @@ export function startStub(): Promise<StubHandle> {
             try { closeRelay(conn.socket, 1000, 'server closing'); } catch { /* ignore */ }
           }
           wss.close();
+          rmSync(workspaceRoot, { recursive: true, force: true, maxRetries: 5 });
           await new Promise<void>((r) => server.close(() => r()));
         },
       });

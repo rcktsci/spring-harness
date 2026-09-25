@@ -96,6 +96,27 @@ describe('RelayDialogs', () => {
     expect(wrapper.find('[data-testid="consent-dialog"]').exists()).toBe(false);
   });
 
+  it('disables the consent buttons while an answer is being delivered', async () => {
+    harness.relay.pendingConsent.mockResolvedValue({
+      sessionId: 'sess-c',
+      basePath: '/tmp/ws',
+      tools: ['bash'],
+    });
+    let release: () => void = () => undefined;
+    harness.relay.confirmRegistration.mockImplementation(async () => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return { ok: true };
+    });
+    const wrapper = mount(RelayDialogs);
+    await flushPromises();
+    await wrapper.find('[data-testid="consent-approve"]').trigger('click');
+    expect(wrapper.find('[data-testid="consent-approve"]').attributes('disabled')).toBeDefined();
+    expect(wrapper.find('[data-testid="consent-deny"]').attributes('disabled')).toBeDefined();
+    release();
+    await flushPromises();
+    expect(wrapper.find('[data-testid="consent-dialog"]').exists()).toBe(false);
+  });
+
   it('shows the tool-confirm dialog and forwards the answer', async () => {
     const wrapper = mount(RelayDialogs);
     await flushPromises();

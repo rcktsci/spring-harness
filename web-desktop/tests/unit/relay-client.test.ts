@@ -45,6 +45,7 @@ async function happyPath(server: TestRelayServer, client: InstanceType<typeof Re
   const registered = client.register('sess-free', 'FREE', tmpBasePath());
   await server.waitFor((f) => (f as { type?: string }).type === 'hello');
   server.send({ type: 'welcome', protocol: 1 });
+  await server.waitFor(() => client.getPendingConsent() !== null);
   await client.resolveRegistrationConsent('sess-free', true);
   await registered;
 }
@@ -76,6 +77,7 @@ describe('relay client: handshake and frames', () => {
     expect(hello.protocol).toBe(1);
 
     server.send({ type: 'welcome', protocol: 1 });
+    await server.waitFor(() => client.getPendingConsent() !== null);
     await client.resolveRegistrationConsent('sess-free', true);
     const outcome = await registerPromise;
     expect(outcome.ok).toBe(true);
@@ -105,6 +107,7 @@ describe('relay client: handshake and frames', () => {
     const p = client.register('sess-free', 'FREE', tmpBasePath());
     await server.waitFor((f) => (f as { type?: string }).type === 'hello');
     server.send({ type: 'welcome', protocol: 1 });
+    await server.waitFor(() => client.getPendingConsent() !== null);
     await client.resolveRegistrationConsent('sess-free', true);
     await expect(p).resolves.toMatchObject({ ok: true });
 
@@ -147,6 +150,7 @@ describe('relay client: handshake and frames', () => {
     const p = client.register('sess-free', 'FREE', tmpBasePath());
     await server.waitFor((f) => (f as { type?: string }).type === 'hello');
     server.send({ type: 'welcome', protocol: 1 });
+    await server.waitFor(() => client.getPendingConsent() !== null);
     await client.resolveRegistrationConsent('sess-free', true);
 
     const reg = (await server.waitFor(
@@ -174,6 +178,7 @@ describe('relay client: handshake and frames', () => {
     const p = client.register('sess-free', 'FREE', tmpBasePath());
     await server.waitFor((f) => (f as { type?: string }).type === 'hello');
     server.send({ type: 'welcome', protocol: 1 });
+    await server.waitFor(() => client.getPendingConsent() !== null);
     await client.resolveRegistrationConsent('sess-free', true);
     await server.waitFor((f) => (f as { type?: string }).type === 'register');
     server.send({ type: 'error', code: 'workspace-occupied', message: 'no' });
@@ -210,6 +215,48 @@ describe('relay client: handshake and frames', () => {
     await expect(p).resolves.toMatchObject({ ok: false, message: expect.stringContaining('handshake') });
     // reconnect path: a second hello arrives
     await server.waitForCount((f) => (f as { type?: string }).type === 'hello', 2);
+  });
+
+  it('terminates an in-flight registration when disconnect arrives during consent', async () => {
+    client = makeClient(server);
+    const p = client.register('sess-free', 'FREE', tmpBasePath());
+    await server.waitFor((f) => (f as { type?: string }).type === 'hello');
+    server.send({ type: 'welcome', protocol: 1 });
+    await server.waitFor(() => client.getPendingConsent() !== null);
+
+    client.disconnect();
+    await expect(p).resolves.toMatchObject({
+      ok: false,
+      code: 'disconnected',
+      message: 'relay disconnected',
+    });
+    expect(client.getPendingConsent()).toBeNull();
+
+    const p2 = client.register('sess-free', 'FREE', tmpBasePath());
+    await server.waitForCount((f) => (f as { type?: string }).type === 'hello', 2);
+    server.send({ type: 'welcome', protocol: 1 });
+    await server.waitFor(() => client.getPendingConsent() !== null);
+    await client.resolveRegistrationConsent('sess-free', true);
+    await expect(p2).resolves.toMatchObject({ ok: true });
+  });
+
+  it('terminates an in-flight register frame on disconnect instead of timing out', async () => {
+    await server.close();
+    server = await startRelayServer({ autoAckRegister: false });
+    client = makeClient(server, { relayRegisterTimeoutMs: 5_000 });
+    const p = client.register('sess-free', 'FREE', tmpBasePath());
+    await server.waitFor((f) => (f as { type?: string }).type === 'hello');
+    server.send({ type: 'welcome', protocol: 1 });
+    await server.waitFor(() => client.getPendingConsent() !== null);
+    await client.resolveRegistrationConsent('sess-free', true);
+    await server.waitFor((f) => (f as { type?: string }).type === 'register');
+
+    client.disconnect();
+    await expect(p).resolves.toMatchObject({
+      ok: false,
+      code: 'disconnected',
+      message: 'relay disconnected',
+    });
   });
 
   it('asks for first-registration consent and honours decline', async () => {
@@ -307,20 +354,63 @@ describe('relay client: handshake and frames', () => {
     expect(client.getPendingConsent()).toBeNull();
   });
 
-  it('consumes an early consent decision instead of hanging', async () => {
+  it('ignores an answer with no open consent and asks again on the next registration', async () => {
     client = makeClient(server);
-    const consents: number[] = [];
-    client.on('registrationConsent', () => consents.push(1));
+    const consents: string[] = [];
+    client.on('registrationConsent', (sessionId) => consents.push(sessionId));
 
-    // The user answers before register() reaches the consent gate.
     client.resolveRegistrationConsent('sess-free', true);
+    client.resolveRegistrationConsent('sess-free', false);
+    expect(client.getPendingConsent()).toBeNull();
 
     const p = client.register('sess-free', 'FREE', tmpBasePath());
     await server.waitFor((f) => (f as { type?: string }).type === 'hello');
     server.send({ type: 'welcome', protocol: 1 });
+    await server.waitFor(() => consents.length === 1);
+    expect(client.getPendingConsent()).toMatchObject({ sessionId: 'sess-free' });
+    expect(server.received.filter((f) => (f as { type?: string }).type === 'register')).toHaveLength(0);
+
+    client.resolveRegistrationConsent('sess-free', true);
     await expect(p).resolves.toMatchObject({ ok: true });
-    expect(consents).toHaveLength(0);
-    expect(client.getPendingConsent()).toBeNull();
+  });
+
+  it('delivers exactly one answer per consent prompt', async () => {
+    client = makeClient(server);
+    const consents: string[] = [];
+    client.on('registrationConsent', (sessionId) => consents.push(sessionId));
+
+    const p = client.register('sess-free', 'FREE', tmpBasePath());
+    await server.waitFor((f) => (f as { type?: string }).type === 'hello');
+    server.send({ type: 'welcome', protocol: 1 });
+    await server.waitFor(() => consents.length === 1);
+
+    client.resolveRegistrationConsent('sess-free', true);
+    client.resolveRegistrationConsent('sess-free', false);
+    await expect(p).resolves.toMatchObject({ ok: true });
+    expect(consents).toEqual(['sess-free']);
+  });
+
+  it('resolves pending command confirmations with a rejection on disconnect', async () => {
+    client = makeClient(server, { confirmCommands: 'always' });
+    await happyPath(server, client);
+
+    const confirms: string[] = [];
+    const rejections: Array<{ callId: string; output: string }> = [];
+    client.on('toolCall', (call) => confirms.push(call.callId));
+    client.on('toolResult', (callId, output) => rejections.push({ callId, output }));
+
+    server.send({
+      type: 'tool.call',
+      callId: 'call-dc',
+      sessionId: 'sess-free',
+      tool: 'bash',
+      args: { command: 'echo never-runs' },
+    });
+    await server.waitFor(() => confirms.includes('call-dc'));
+
+    client.disconnect();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(rejections).toEqual([{ callId: 'call-dc', output: 'command rejected by user' }]);
   });
 
   it('requires confirmation before bash when confirmCommands=always', async () => {
@@ -481,6 +571,7 @@ describe('relay client: handshake and frames', () => {
       const p = client.register('sess-free', 'FREE', tmpBasePath());
       await server.waitFor((f) => (f as { type?: string }).type === 'hello');
       server.send({ type: 'welcome', protocol: 1 });
+      await server.waitFor(() => client.getPendingConsent() !== null);
       await client.resolveRegistrationConsent('sess-free', true);
       await server.waitFor((f) => (f as { type?: string }).type === 'register');
       server.send({ type: 'error', code, message: `raw ${code}` });
@@ -503,6 +594,7 @@ describe('relay client: handshake and frames', () => {
     const p = client.register('sess-free', 'FREE', tmpBasePath());
     await server.waitFor((f) => (f as { type?: string }).type === 'hello');
     server.send({ type: 'welcome', protocol: 1 });
+    await server.waitFor(() => client.getPendingConsent() !== null);
     await client.resolveRegistrationConsent('sess-free', true);
     await server.waitFor((f) => (f as { type?: string }).type === 'register');
     server.send({ type: 'error', code: 'workspace-occupied', message: 'no' });
@@ -525,6 +617,7 @@ describe('relay client: handshake and frames', () => {
     const p = client.register('sess-free', 'FREE', tmpBasePath());
     await server.waitFor((f) => (f as { type?: string }).type === 'hello');
     server.send({ type: 'welcome', protocol: 1 });
+    await server.waitFor(() => client.getPendingConsent() !== null);
     await client.resolveRegistrationConsent('sess-free', true);
     await server.waitFor((f) => (f as { type?: string }).type === 'register');
     // no registered/error reply → timeout path
@@ -560,6 +653,7 @@ describe('relay client: handshake and frames', () => {
     const p = client.register('sess-free', 'FREE', tmpBasePath());
     await server.waitFor((f) => (f as { type?: string }).type === 'hello');
     server.send({ type: 'welcome', protocol: 1 });
+    await server.waitFor(() => client.getPendingConsent() !== null);
     await client.resolveRegistrationConsent('sess-free', true);
     await server.waitFor((f) => (f as { type?: string }).type === 'register');
     expect(client.currentStatus.registered).toBe(false);

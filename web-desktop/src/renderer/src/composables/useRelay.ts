@@ -42,11 +42,21 @@ const consent = ref<RegistrationConsentRequest | null>(null);
 const toolConfirm = ref<PendingToolConfirm | null>(null);
 let wired = false;
 const autoInFlight = new Set<string>();
+let consentInFlight = false;
+let toolConfirmInFlight = false;
 
 function wire(): void {
   if (wired) return;
   wired = true;
-  window.harness.relay.onStatus((s) => { status.value = s; });
+  window.harness.relay.onStatus((s) => {
+    status.value = s;
+    if (s && (s.phase === 'disconnected' || s.phase === 'fatal')) {
+      consent.value = null;
+      toolConfirm.value = null;
+      consentInFlight = false;
+      toolConfirmInFlight = false;
+    }
+  });
   window.harness.relay.onRegistrationConsent((req) => { consent.value = req; });
   window.harness.tool.onCall((call, basePath) => {
     toolConfirm.value = { call, basePath };
@@ -86,15 +96,25 @@ export function useRelay(): UseRelay {
     },
     respondConsent: async (approved) => {
       const req = consent.value;
-      if (!req) return;
-      consent.value = null;
-      await window.harness.relay.confirmRegistration(req.sessionId, approved);
+      if (!req || consentInFlight) return;
+      consentInFlight = true;
+      try {
+        await window.harness.relay.confirmRegistration(req.sessionId, approved);
+        if (consent.value === req) consent.value = null;
+      } finally {
+        consentInFlight = false;
+      }
     },
     respondToolConfirm: async (approved) => {
       const pending = toolConfirm.value;
-      if (!pending) return;
-      toolConfirm.value = null;
-      await window.harness.tool.respondConfirm(pending.call.callId, approved);
+      if (!pending || toolConfirmInFlight) return;
+      toolConfirmInFlight = true;
+      try {
+        await window.harness.tool.respondConfirm(pending.call.callId, approved);
+        if (toolConfirm.value === pending) toolConfirm.value = null;
+      } finally {
+        toolConfirmInFlight = false;
+      }
     },
     cancelTool: (callId) => window.harness.tool.cancel(callId),
   };

@@ -69,6 +69,8 @@ const REGISTER_IN_PROGRESS_CODE = 'register-in-progress';
 const REGISTER_IN_PROGRESS_MESSAGE = 'Another session registration is already in progress.';
 const CONSENT_PENDING_CODE = 'consent-pending';
 const CONSENT_PENDING_MESSAGE = 'Registration consent is already pending for this session.';
+const DISCONNECTED_CODE = 'disconnected';
+const DISCONNECTED_MESSAGE = 'relay disconnected';
 
 export class RelayClient extends EventEmitter {
   private socket: WebSocket | null = null;
@@ -94,11 +96,11 @@ export class RelayClient extends EventEmitter {
   /** callId → resolver for the renderer's confirm/deny answer. */
   private readonly confirmWaiters = new Map<string, (approved: boolean) => void>();
   /** sessionId → resolver for the first-time registration consent. */
-  private readonly consentResolvers = new Map<string, (approved: boolean) => void>();
-  /** sessionId → decision that arrived before register() asked for it. */
-  private readonly pendingConsent = new Map<string, boolean>();
+  private readonly consentResolvers = new Map<string, (approved: boolean | 'disconnected') => void>();
   /** The currently open consent request (null when none is awaiting an answer). */
   private openConsent: { sessionId: string; basePath: string; tools: string[] } | null = null;
+  /** Terminates the in-flight register promise early (disconnect). */
+  private registerAbort: ((outcome: RegisterOutcome) => void) | null = null;
   /** callIds cancelled on the wire but still being torn down. */
   private readonly cancelledCalls = new Set<string>();
 
@@ -213,7 +215,16 @@ export class RelayClient extends EventEmitter {
     this.dropSocket();
     this.registration = null;
     this.lastRegisterError = null;
-    this.registeringSession = null;
+    for (const resolve of [...this.consentResolvers.values()]) {
+      resolve('disconnected');
+    }
+    this.consentResolvers.clear();
+    for (const resolve of this.confirmWaiters.values()) {
+      resolve(false);
+    }
+    this.confirmWaiters.clear();
+    this.openConsent = null;
+    this.abortRegistering();
     this.emit('status', { connected: false, registered: false, phase: 'disconnected' });
   }
 
@@ -281,6 +292,9 @@ export class RelayClient extends EventEmitter {
     const isNew = !this.registration || this.registration.sessionId !== sessionId;
     if (isNew) {
       const allowed = await this.requestRegistrationConsent(sessionId, basePath);
+      if (allowed === 'disconnected') {
+        return { ok: false, code: DISCONNECTED_CODE, message: DISCONNECTED_MESSAGE };
+      }
       if (!allowed) {
         this.emit('status', {
           connected: true,
@@ -330,17 +344,19 @@ export class RelayClient extends EventEmitter {
     this.lastRegisterError = null;
     this.registering = new Promise<RegisterOutcome>((resolve) => {
       const timer = setTimeout(() => {
-        // Guarantee cleanup so a timed-out register never leaks the listener.
-        this.removeListener('frame', onFrame);
         this.registering = null;
         this.registeringSession = null;
-        resolve({ ok: false, message: 'registration timeout' });
+        finish({ ok: false, message: 'registration timeout' });
       }, this.cfg.relayRegisterTimeoutMs);
+      const finish = (outcome: RegisterOutcome): void => {
+        clearTimeout(timer);
+        this.removeListener('frame', onFrame);
+        this.registerAbort = null;
+        resolve(outcome);
+      };
 
       const onFrame = (frame: ServerFrame): void => {
         if (frame.type === 'registered' && frame.sessionId === sessionId) {
-          clearTimeout(timer);
-          this.removeListener('frame', onFrame);
           this.registering = null;
           this.registeringSession = null;
           this.registration = { sessionId, basePath, consented: true };
@@ -353,10 +369,8 @@ export class RelayClient extends EventEmitter {
             basePath,
             toolCount: tools.length,
           });
-          resolve({ ok: true });
+          finish({ ok: true });
         } else if (frame.type === 'error') {
-          clearTimeout(timer);
-          this.removeListener('frame', onFrame);
           this.registering = null;
           this.registeringSession = null;
           const message = REGISTRATION_ERROR_TEXT[frame.code] ?? frame.message;
@@ -374,10 +388,11 @@ export class RelayClient extends EventEmitter {
             code: frame.code,
             reason: message,
           });
-          resolve({ ok: false, code: frame.code, message });
+          finish({ ok: false, code: frame.code, message });
         }
       };
       this.on('frame', onFrame);
+      this.registerAbort = finish;
 
       this.send({
         type: 'register',
@@ -388,6 +403,14 @@ export class RelayClient extends EventEmitter {
     });
 
     return this.registering;
+  }
+
+  private abortRegistering(): void {
+    const abort = this.registerAbort;
+    this.registerAbort = null;
+    this.registering = null;
+    this.registeringSession = null;
+    abort?.({ ok: false, code: DISCONNECTED_CODE, message: DISCONNECTED_MESSAGE });
   }
 
   /* ---------------------------------------------------------------- */
@@ -595,6 +618,7 @@ export class RelayClient extends EventEmitter {
         this.emit('toolCall', call, basePath);
         const approved = await this.awaitConfirmation(call);
         if (!approved) {
+          this.emit('toolResult', call.callId, 'command rejected by user', -1);
           this.send({
             type: 'tool.result',
             callId: call.callId,
@@ -679,15 +703,8 @@ export class RelayClient extends EventEmitter {
   private async requestRegistrationConsent(
     sessionId: string,
     basePath: string,
-  ): Promise<boolean> {
-    // An early decision (caller resolved before register() reached here)
-    // is already waiting — consume it instead of hanging on the resolver.
-    const early = this.pendingConsent.get(sessionId);
-    if (early !== undefined) {
-      this.pendingConsent.delete(sessionId);
-      return early;
-    }
-    return new Promise<boolean>((resolve) => {
+  ): Promise<boolean | 'disconnected'> {
+    return new Promise<boolean | 'disconnected'>((resolve) => {
       this.consentResolvers.set(sessionId, resolve);
       this.openConsent = { sessionId, basePath, tools: [...STANDARD_TOOLS] };
       this.emit('registrationConsent', sessionId, basePath, [...STANDARD_TOOLS]);
@@ -699,19 +716,21 @@ export class RelayClient extends EventEmitter {
     return this.openConsent;
   }
 
-  /** Called from the IPC handler when the user answers registration consent. */
+  /**
+   * Called from the IPC handler when the user answers registration consent.
+   * An answer without an open prompt is a no-op: buffering it would let the
+   * next registration on the same session skip the D-93 consent dialog.
+   */
   resolveRegistrationConsent(sessionId: string, approved: boolean): void {
     if (this.openConsent?.sessionId === sessionId) {
       this.openConsent = null;
     }
     const resolve = this.consentResolvers.get(sessionId);
-    if (resolve) {
-      this.consentResolvers.delete(sessionId);
-      resolve(approved);
-    } else {
-      // No waiter yet — remember the decision for requestRegistrationConsent.
-      this.pendingConsent.set(sessionId, approved);
+    if (!resolve) {
+      return;
     }
+    this.consentResolvers.delete(sessionId);
+    resolve(approved);
   }
 
   /* ---------------------------------------------------------------- */

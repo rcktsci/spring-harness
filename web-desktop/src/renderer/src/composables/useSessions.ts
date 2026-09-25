@@ -4,6 +4,7 @@ import type { AgentCatalogItem, SessionDto } from '@shared/api-types';
 export interface UseSessions {
   sessions: Ref<SessionDto[]>;
   agents: Ref<AgentCatalogItem[]>;
+  agentsError: Ref<string | null>;
   search: Ref<string>;
   loading: Ref<boolean>;
   error: Ref<string | null>;
@@ -20,6 +21,7 @@ export interface UseSessions {
 export function useSessions(): UseSessions {
   const sessions = ref<SessionDto[]>([]);
   const agents = ref<AgentCatalogItem[]>([]);
+  const agentsError = ref<string | null>(null);
   const search = ref('');
   const loading = ref(false);
   const error = ref<string | null>(null);
@@ -31,6 +33,19 @@ export function useSessions(): UseSessions {
   let disposed = false;
   let requestId = 0;
   let stopSearchWatch: (() => void) | null = null;
+
+  async function loadAgents(): Promise<void> {
+    if (disposed) return;
+    agentsError.value = null;
+    try {
+      const catalog = await window.harness.agents.list();
+      if (disposed) return;
+      agents.value = catalog.items;
+    } catch (err) {
+      if (disposed) return;
+      agentsError.value = err instanceof Error ? err.message : String(err);
+    }
+  }
 
   async function fetchPage(reset: boolean): Promise<void> {
     const token = ++requestId;
@@ -68,6 +83,7 @@ export function useSessions(): UseSessions {
   }
 
   async function refresh(): Promise<void> {
+    await loadAgents();
     await fetchPage(true);
   }
 
@@ -96,8 +112,6 @@ export function useSessions(): UseSessions {
     } catch {
       /* defaults already set */
     }
-    const catalog = await window.harness.agents.list().catch(() => null);
-    if (!disposed && catalog) agents.value = catalog.items;
     await refresh();
   });
 
@@ -112,6 +126,7 @@ export function useSessions(): UseSessions {
   return {
     sessions,
     agents,
+    agentsError,
     search,
     loading,
     error,

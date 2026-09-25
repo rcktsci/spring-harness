@@ -23,7 +23,7 @@
  */
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -123,7 +123,8 @@ test.afterAll(async () => {
 
 test('auto-connect + consent + bash tool cycle + artifact save-as (confirmCommands=never)', async () => {
   if (!stub) throw new Error('stub not started');
-  const { app } = await launchApp(true);
+  const { app, userData } = await launchApp(true);
+  const saveTarget = join(tmpdir(), `harness-e2e-save-${Date.now()}.md`);
   try {
     const page = await app.firstWindow({ timeout: 30_000 });
     await page.waitForLoadState('domcontentloaded');
@@ -153,7 +154,6 @@ test('auto-connect + consent + bash tool cycle + artifact save-as (confirmComman
 
     // 5. Real save-as: stub the native dialog in main, drive the UI,
     //    assert the file landed on disk with the workspace content.
-    const saveTarget = join(tmpdir(), `harness-e2e-save-${Date.now()}.md`);
     await app.evaluate(
       ({ dialog }, target) => {
         const stubDialog = dialog as unknown as {
@@ -172,12 +172,14 @@ test('auto-connect + consent + bash tool cycle + artifact save-as (confirmComman
     expect(readFileSync(saveTarget, 'utf8')).toContain('# hi from stub');
   } finally {
     await app.close();
+    rmSync(userData, { recursive: true, force: true, maxRetries: 5 });
+    rmSync(saveTarget, { force: true, maxRetries: 5 });
   }
 });
 
 test('tool confirm dialog: deny skips execution, approve runs (confirmCommands=always)', async () => {
   if (!stub) throw new Error('stub not started');
-  const { app } = await launchApp(false);
+  const { app, userData } = await launchApp(false);
   try {
     const page = await app.firstWindow({ timeout: 30_000 });
     await page.waitForLoadState('domcontentloaded');
@@ -223,5 +225,6 @@ test('tool confirm dialog: deny skips execution, approve runs (confirmCommands=a
     await expect(page.locator('.rt-IDLE').first()).toBeVisible({ timeout: 10_000 });
   } finally {
     await app.close();
+    rmSync(userData, { recursive: true, force: true, maxRetries: 5 });
   }
 });

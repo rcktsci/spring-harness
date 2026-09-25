@@ -1,8 +1,29 @@
 <script setup lang="ts">
-import { onMounted } from 'vue';
+import { onMounted, ref } from 'vue';
 import { useRelay } from '../composables/useRelay';
 
 const relay = useRelay();
+const delivering = ref<'consent' | 'tool' | null>(null);
+
+async function answerConsent(approved: boolean): Promise<void> {
+  if (delivering.value !== null) return;
+  delivering.value = 'consent';
+  try {
+    await relay.respondConsent(approved);
+  } finally {
+    if (delivering.value === 'consent') delivering.value = null;
+  }
+}
+
+async function answerToolConfirm(approved: boolean): Promise<void> {
+  if (delivering.value !== null) return;
+  delivering.value = 'tool';
+  try {
+    await relay.respondToolConfirm(approved);
+  } finally {
+    if (delivering.value === 'tool') delivering.value = null;
+  }
+}
 
 function argsJson(args: Record<string, unknown>): string {
   try {
@@ -44,16 +65,18 @@ onMounted(() => {
         <button
           type="button"
           class="approve"
+          :disabled="delivering !== null"
           data-testid="consent-approve"
-          @click="relay.respondConsent(true)"
+          @click="answerConsent(true)"
         >
           Разрешить
         </button>
         <button
           type="button"
           class="deny"
+          :disabled="delivering !== null"
           data-testid="consent-deny"
-          @click="relay.respondConsent(false)"
+          @click="answerConsent(false)"
         >
           Отклонить
         </button>
@@ -77,16 +100,18 @@ onMounted(() => {
         <button
           type="button"
           class="approve"
+          :disabled="delivering !== null"
           data-testid="tool-confirm-approve"
-          @click="relay.respondToolConfirm(true)"
+          @click="answerToolConfirm(true)"
         >
           Разрешить
         </button>
         <button
           type="button"
           class="deny"
+          :disabled="delivering !== null"
           data-testid="tool-confirm-deny"
-          @click="relay.respondToolConfirm(false)"
+          @click="answerToolConfirm(false)"
         >
           Отклонить
         </button>

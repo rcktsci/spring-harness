@@ -59,6 +59,7 @@
     "tests/unit/session-tree.test.ts",
     "tests/unit/auth-gate.test.ts",
     "tests/unit/use-relay.test.ts",
-    "tests/unit/relay-label.test.ts"
+    "tests/unit/relay-label.test.ts",
+    "tests/unit/use-sessions.test.ts"
   ]
 }

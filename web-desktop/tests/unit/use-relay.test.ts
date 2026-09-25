@@ -157,4 +157,84 @@ describe('useRelay prompts', () => {
     expect(harness.tool.respondConfirm).toHaveBeenCalledWith('call-1', true);
     expect(relay.toolConfirm.value).toBeNull();
   });
+
+  it('keeps the consent prompt when the IPC answer fails', async () => {
+    const relay = useRelay();
+    emitConsent({ sessionId: 'sess-a', basePath: '/tmp/ws', tools: ['bash'] });
+    harness.relay.confirmRegistration.mockRejectedValueOnce(new Error('channel closed'));
+    await expect(relay.respondConsent(true)).rejects.toThrow('channel closed');
+    expect(relay.consent.value?.sessionId).toBe('sess-a');
+
+    await relay.respondConsent(true);
+    expect(harness.relay.confirmRegistration).toHaveBeenCalledTimes(2);
+    expect(relay.consent.value).toBeNull();
+  });
+
+  it('keeps the tool-confirm prompt when the IPC answer fails', async () => {
+    const relay = useRelay();
+    emitToolCall(
+      { callId: 'call-2', sessionId: 'sess-a', tool: 'bash', args: { command: 'ls' }, basePath: '/tmp/ws' },
+      '/tmp/ws',
+    );
+    harness.tool.respondConfirm.mockRejectedValueOnce(new Error('channel closed'));
+    await expect(relay.respondToolConfirm(false)).rejects.toThrow('channel closed');
+    expect(relay.toolConfirm.value?.call.callId).toBe('call-2');
+
+    await relay.respondToolConfirm(false);
+    expect(harness.tool.respondConfirm).toHaveBeenCalledTimes(2);
+    expect(relay.toolConfirm.value).toBeNull();
+  });
+
+  it('answers a consent prompt at most once while delivery is in flight', async () => {
+    const relay = useRelay();
+    emitConsent({ sessionId: 'sess-a', basePath: '/tmp/ws', tools: ['bash'] });
+    let release: () => void = () => undefined;
+    harness.relay.confirmRegistration.mockImplementation(async () => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return { ok: true };
+    });
+
+    const first = relay.respondConsent(true);
+    const second = relay.respondConsent(true);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(harness.relay.confirmRegistration).toHaveBeenCalledTimes(1);
+    release();
+    await Promise.all([first, second]);
+    expect(relay.consent.value).toBeNull();
+  });
+
+  it('answers a tool-confirm prompt at most once while delivery is in flight', async () => {
+    const relay = useRelay();
+    emitToolCall(
+      { callId: 'call-3', sessionId: 'sess-a', tool: 'bash', args: { command: 'ls' }, basePath: '/tmp/ws' },
+      '/tmp/ws',
+    );
+    let release: () => void = () => undefined;
+    harness.tool.respondConfirm.mockImplementation(async () => {
+      await new Promise<void>((resolve) => { release = resolve; });
+    });
+
+    const first = relay.respondToolConfirm(true);
+    const second = relay.respondToolConfirm(true);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(harness.tool.respondConfirm).toHaveBeenCalledTimes(1);
+    release();
+    await Promise.all([first, second]);
+    expect(relay.toolConfirm.value).toBeNull();
+  });
+
+  it('closes pending prompts when the relay disconnects', async () => {
+    const relay = useRelay();
+    emitConsent({ sessionId: 'sess-a', basePath: '/tmp/ws', tools: ['bash'] });
+    emitToolCall(
+      { callId: 'call-4', sessionId: 'sess-a', tool: 'bash', args: { command: 'ls' }, basePath: '/tmp/ws' },
+      '/tmp/ws',
+    );
+    expect(relay.consent.value).not.toBeNull();
+    expect(relay.toolConfirm.value).not.toBeNull();
+
+    emitStatus({ connected: false, registered: false, phase: 'disconnected' });
+    expect(relay.consent.value).toBeNull();
+    expect(relay.toolConfirm.value).toBeNull();
+  });
 });

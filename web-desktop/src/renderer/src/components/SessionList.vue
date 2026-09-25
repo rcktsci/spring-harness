@@ -5,6 +5,7 @@ import type { SessionDto } from '@shared/api-types';
 defineProps<{
   sessions: SessionDto[];
   agents: Array<{ key: string; name: string }>;
+  agentsError: string | null;
   activeId: string | null;
   search: string;
   loading: boolean;
@@ -131,6 +132,14 @@ function submitCreate(): void {
       class="error"
     >
       {{ error }}
+    </p>
+
+    <p
+      v-if="agentsError"
+      class="error"
+      data-testid="agents-error"
+    >
+      {{ agentsError }}
     </p>
 
     <ul class="sessions">
