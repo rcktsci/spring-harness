@@ -95,3 +95,81 @@ All artifacts now consistently reflect: (a) one-time owner action to make packag
 - No blockers remain
 
 **FINAL VERDICT: APPROVE**
+
+## Release policy review
+
+**Date:** 2026-09-25
+
+### Consistency check
+- proposal ↔ spec (backend-image-ci) ↔ spec (release-policy) ↔ design (D-CI12–D-CI15) ↔ tasks: 6 requirements in release-policy spec are covered by design decisions D-CI12–D-CI15 and tasks 4.1–4.5.
+- Two specs (backend-image-ci, release-policy) do not contradict; release-policy adds tag-trigger scenarios already referenced in backend-image-ci spec.
+
+### Findings
+
+| Severity | Location | Issue | Why | Fix |
+|---|---|---|---|---|
+| MAJOR | design.md:Risks (missing) | No semver tag overwrite protection | If owner accidentally pushes same tag v0.1.0 twice, GHCR will allow overwrite (build-push-action push: true doesn't guard). Design mentions tag as source of truth but doesn't warn about tag immutability. | Add risk: «Повторный пуш того же semver-тега перезапишет образ в GHCR. Решение: владелец проверяет `docker buildx imagetools inspect` перед пушем; при необходимости — тег с датой/комментарием» |
+| MAJOR | tasks.md:4.4 | First release alignment not explicitly verified | Task assumes orchestrator prepares commit with pom=0.1.0 and package.json=0.1.0, but doesn't require explicit diff verification of both files before tagging. | Add check: «diff pom.xml и web-desktop/package.json перед коммитом — версия должна быть 0.1.0 в обоих файлах» |
+| MINOR | tasks.md:2.3 | Version extraction fragility | Design D-CI13 acknowledges "первый <version> в pom.xml" assumption but tasks should document that this breaks if pom gets <parent>. | Add note: «Шаг извлекает версию из первого <version> в pom.xml; при появлении <parent> в пом шаблон сломается — чинится одной строкой» |
+| MINOR | spec.md:67 (release-policy) | Tag-branch rule enforcement | Spec requires "тег только после merge в main" but tasks 4.5 only references README/PR-template review instruction. | Add to task 4.5: «Проверка: в README.md есть инструкция "тег только с коммита в main" и пример команды git tag + git push» |
+| MINOR | tasks.md:4.2 | SemVer bump rules for 0.x not fully explicit | Task asks to document bump rules but spec requires explicit 0.x breaking=MINOR+**BREAKING** rule. | Add to README check: «В правилах bump явно указано: в 0.x breaking = MINOR с пометкой **BREAKING**» |
+| MINOR | design.md:D-CI15 | OCI label version format on tag run | metadata-action with type=semver may produce vX.Y.Z or X.Y.Z; design says org.opencontainers.image.version (semver) but doesn't clarify format. | Add note: «metadata-action type=semver на теге v0.1.0 выдаст теги 0.1.0 и vX.Y.Z; label org.opencontainers.image.version будет X.Y.Z (без v)» |
+
+### SemVer policy adequacy
+- Bump rules for MAJOR/MINOR/PATCH with 0.x exception documented in design D-CI14, spec release-policy, and tasks 4.2.
+- Breaking-change discipline (manual mark **BREAKING** + changelog entry + two-reviewer approval) documented in D-CI14.
+- Traceability goal: OCI labels (org.opencontainers.image.version, org.opencontainers.image.revision) provide version lookup via docker inspect (design D-CI15, tasks 4.3).
+- Changelog requirement: CHANGELOG.md creation and manual maintenance documented (tasks 4.1, D-CI15).
+
+### First release v0.1.0 feasibility
+- Current state: pom.xml=1.0.0-SNAPSHOT, package.json=0.1.0 (version mismatch exists).
+- Task 4.4: orchestrator prepares release commit aligning both to 0.1.0, owner approves diff, then tag v0.1.0 pushed.
+- No blockers: task 4.4 explicitly handles alignment. Post-release, version mismatch cannot recur due to CI check on tag run (task 2.3).
+
+### Owner rules compliance
+- No hardcoded numbers in workflow: versions pinned in actions, policy parameters in design/docs.
+- Design decisions documented with alternatives and rationales: D-CI12–D-CI15 have full ADR treatment.
+- Non-enterprise bloat: one workflow, manual changelog, manual tag, CI check only for version alignment.
+
+### Risks covered
+- Version mismatch: CI fails on tag run before publish (design D-CI13).
+- Tag on non-main commit: documented as discipline check (design Risks).
+- Changelog missing entry: caught by release-review (design D-CI14).
+- SemVer tag overwrite: **not documented** (see MAJOR finding above).
+
+### Final status
+- All owner requirements addressed.
+- One MAJOR (tag overwrite risk), five MINOR (documentation/verification gaps) — no blockers.
+- openspec validate ci-backend-image --strict: green.
+
+**FINAL VERDICT: APPROVE**
+
+## Re-approval 3
+
+**Date:** 2026-09-25
+
+**All fix requests verified:**
+
+| Original Finding | Fix Location | Verification |
+|---|---|---|
+| MAJOR-1: Semver tag overwrite protection | design.md:D-CI16, release-policy/spec.md:82-94, tasks.md:2.3 | D-CI16 added «Релизные теги неизменяемы». Release-policy spec has 2 scenarios (lines 86-94). Task 2.3 checks if tag exists in GHCR via `docker buildx imagetools inspect` → fail if found. |
+| MAJOR-2: First release alignment verification | tasks.md:2.3, tasks.md:4.4 | Task 2.3 explicitly checks current pom.xml returns `1.0.0-SNAPSHOT` not parent version. Task 4.4 requires logs showing both versions checked and tag not yet in GHCR. |
+| MINOR-3: First `<version>` fragility | design.md:D-CI13, tasks.md:2.3 | XML tree parsing via `python3` (`<version>` top-level element, not first in file). D-CI13 documents that pom has `<parent>spring-boot-starter-parent:4.1.1` at lines 7-12. |
+| MINOR-4: Tag must be on main | tasks.md:4.2 | Rule «тег ставится только на коммите, уже в `main`» explicitly in task 4.2. |
+| MINOR-5: 0.x breaking rule | tasks.md:4.2 | Rule «пока версия `0.x`, breaking = MINOR с пометкой `**BREAKING**` и миграцией в changelog» explicitly in task 4.2. |
+| ADR number conflict | tasks.md:3.5 | Changed to **D-96** (D-95 occupied by deployment-readme host-grants). |
+| metadata-action behavior | design.md:D-CI5 | Explicitly documents `flavor: latest=false`, `type=semver,pattern={{raw}}` + `type=semver,pattern={{version}}`, no `{{major}}`/`{{minor}}`. |
+| Tracing scenario | release-policy/spec.md:75 | Clarified: `.version` = semver on release images, `main` on images from push to branch. |
+
+**Consistency check:**
+- proposal.md, design.md (D-CI1–D-CI16), tasks.md (1.1–4.5), specs (backend-image-ci, release-policy) all aligned.
+- Two specs do not contradict; release-policy adds tag-unchangeable requirement referenced in design D-CI13/D-CI16.
+- All owner rules satisfied: no hardcoded numbers in workflow, design decisions have alternatives and rationale, one workflow file, manual changelog/tag.
+
+**Final status:**
+- openspec validate ci-backend-image --strict: green
+- All fixes applied and verified
+- No blockers remain
+- No new findings
+
+**FINAL VERDICT: APPROVE**

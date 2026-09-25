@@ -7,7 +7,7 @@ CI-поведение репозитория: по push в `main` backend-обр
 
 ### Requirement: Сборка и публикация образа по push в main
 
-Pipeline SHALL собирать образ backend-а из `docker/Dockerfile.orchestrator` и публиковать его в GHCR при каждом push в ветку `main` репозитория `github.com/rcktsci/spring-harness`. Сборка SHALL использовать Dockerfile и исходники из закоммиченного коммита запуска. Push в другие ветки SHALL NOT запускать публикацию образа.
+Pipeline SHALL собирать образ backend-а из `docker/Dockerfile.orchestrator` и публиковать его в GHCR при каждом push в ветку `main` репозитория `github.com/rcktsci/spring-harness`. Сборка SHALL использовать Dockerfile и исходники из закоммиченного коммита запуска. Push в другие ветки SHALL NOT запускать публикацию образа. Push тега `vX.Y.Z` SHALL запускать отдельный релизный прогон (см. capability `release-policy`): он публикует semver-теги и SHALL NOT двигать `latest`/`main`.
 
 #### Scenario: push в main
 
@@ -18,6 +18,16 @@ Pipeline SHALL собирать образ backend-а из `docker/Dockerfile.or
 
 - **WHEN** коммит запушен в ветку, отличную от `main`
 - **THEN** публикация образа backend-а не запускается
+
+#### Scenario: push semver-тега
+
+- **WHEN** владелец пушит тег `v0.1.0`
+- **THEN** запускается релизный прогон с тегами `v0.1.0`, `0.1.0`, `sha-<short>`; теги `latest` и `main` не обновляются
+
+#### Scenario: версия в репо не совпала с тегом
+
+- **WHEN** на теговом прогоне версия в `pom.xml` или `web-desktop/package.json` отличается от версии в теге
+- **THEN** прогон падает на шаге проверки версии до публикации образа
 
 #### Scenario: ручной перезапуск
 
