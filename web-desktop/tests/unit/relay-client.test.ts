@@ -259,6 +259,175 @@ describe('relay client: handshake and frames', () => {
     });
   });
 
+  it('rejects a tool call for a session without registration instead of using a foreign basePath', async () => {
+    client = makeClient(server);
+    const dirA = tmpBasePath();
+    const p1 = client.register('sess-free', 'FREE', dirA);
+    await server.waitFor((f) => (f as { type?: string }).type === 'hello');
+    server.send({ type: 'welcome', protocol: 1 });
+    await server.waitFor(() => client.getPendingConsent() !== null);
+    await client.resolveRegistrationConsent('sess-free', true);
+    await expect(p1).resolves.toMatchObject({ ok: true });
+
+    const cwdCommand = 'node -e "process.stdout.write(\'EXECUTED-IN:\' + process.cwd())"';
+    server.send({
+      type: 'tool.call',
+      callId: 'call-x',
+      sessionId: 'sess-never',
+      tool: 'bash',
+      args: { command: cwdCommand },
+    });
+    const refused = (await server.waitFor(
+      (f) => (f as { type?: string; callId?: string }).type === 'tool.result' && (f as { callId?: string }).callId === 'call-x',
+    )) as { output: string; exitCode: number };
+    expect(refused.exitCode).toBe(-1);
+    expect(refused.output).toContain('no registration for session sess-never');
+    expect(refused.output).not.toContain('EXECUTED-IN');
+    expect(refused.output).not.toContain(dirA);
+  });
+
+  it('clears the session-to-basePath mapping on terminal closes', async () => {
+    client = makeClient(server);
+    const p1 = client.register('sess-free', 'FREE', tmpBasePath());
+    await server.waitFor((f) => (f as { type?: string }).type === 'hello');
+    server.send({ type: 'welcome', protocol: 1 });
+    await server.waitFor(() => client.getPendingConsent() !== null);
+    await client.resolveRegistrationConsent('sess-free', true);
+    await expect(p1).resolves.toMatchObject({ ok: true });
+    expect(client.trackedSessionCount).toBe(1);
+
+    for (const c of server.clients) c.close(4409, 'superseded');
+    await new Promise((r) => setTimeout(r, 300));
+    expect(client.trackedSessionCount).toBe(0);
+
+    const p2 = client.register('sess-again', 'FREE', tmpBasePath());
+    await server.waitForCount((f) => (f as { type?: string }).type === 'hello', 2);
+    server.send({ type: 'welcome', protocol: 1 });
+    await server.waitFor(() => client.getPendingConsent()?.sessionId === 'sess-again');
+    await client.resolveRegistrationConsent('sess-again', true);
+    await expect(p2).resolves.toMatchObject({ ok: true });
+    expect(client.trackedSessionCount).toBe(1);
+  });
+
+  it('clears the session-to-basePath mapping on a fatal protocol close', async () => {
+    client = makeClient(server);
+    const p1 = client.register('sess-free', 'FREE', tmpBasePath());
+    await server.waitFor((f) => (f as { type?: string }).type === 'hello');
+    server.send({ type: 'welcome', protocol: 1 });
+    await server.waitFor(() => client.getPendingConsent() !== null);
+    await client.resolveRegistrationConsent('sess-free', true);
+    await expect(p1).resolves.toMatchObject({ ok: true });
+    expect(client.trackedSessionCount).toBe(1);
+
+    for (const c of server.clients) c.close(4403, 'protocol-mismatch');
+    await new Promise((r) => setTimeout(r, 300));
+    expect(client.trackedSessionCount).toBe(0);
+  });
+
+  it('executes calls of successively registered sessions in their own workspaces', async () => {
+    client = makeClient(server);
+    const dirA = tmpBasePath();
+    const dirB = tmpBasePath();
+
+    const pA = client.register('sess-a', 'FREE', dirA);
+    await server.waitFor((f) => (f as { type?: string }).type === 'hello');
+    server.send({ type: 'welcome', protocol: 1 });
+    await server.waitFor(() => client.getPendingConsent()?.sessionId === 'sess-a');
+    await client.resolveRegistrationConsent('sess-a', true);
+    await expect(pA).resolves.toMatchObject({ ok: true });
+
+    const pB = client.register('sess-b', 'FREE', dirB);
+    await server.waitFor(() => client.getPendingConsent()?.sessionId === 'sess-b');
+    await client.resolveRegistrationConsent('sess-b', true);
+    await expect(pB).resolves.toMatchObject({ ok: true });
+
+    const cwdCommand = 'node -e "process.stdout.write(process.cwd())"';
+    server.send({ type: 'tool.call', callId: 'a-1', sessionId: 'sess-a', tool: 'bash', args: { command: cwdCommand } });
+    const resultA = (await server.waitFor(
+      (f) => (f as { type?: string; callId?: string }).type === 'tool.result' && (f as { callId?: string }).callId === 'a-1',
+    )) as { output: string };
+    expect(resultA.output).toContain(dirA);
+
+    server.send({ type: 'tool.call', callId: 'b-1', sessionId: 'sess-b', tool: 'bash', args: { command: cwdCommand } });
+    const resultB = (await server.waitFor(
+      (f) => (f as { type?: string; callId?: string }).type === 'tool.result' && (f as { callId?: string }).callId === 'b-1',
+    )) as { output: string };
+    expect(resultB.output).toContain(dirB);
+  });
+
+  it('uses the freshly registered basePath after a reconnect', async () => {
+    client = makeClient(server);
+    const dirA = tmpBasePath();
+    const dirB = tmpBasePath();
+
+    const p1 = client.register('sess-free', 'FREE', dirA);
+    await server.waitFor((f) => (f as { type?: string }).type === 'hello');
+    server.send({ type: 'welcome', protocol: 1 });
+    await server.waitFor(() => client.getPendingConsent() !== null);
+    await client.resolveRegistrationConsent('sess-free', true);
+    await expect(p1).resolves.toMatchObject({ ok: true });
+
+    for (const c of server.clients) {
+      c.removeAllListeners();
+      c.terminate();
+    }
+    server.clients.length = 0;
+    await server.waitForCount((f) => (f as { type?: string }).type === 'hello', 2);
+    server.send({ type: 'welcome', protocol: 1 });
+    await server.waitForCount((f) => (f as { type?: string }).type === 'register', 2);
+
+    const p2 = client.register('sess-free', 'FREE', dirB);
+    await expect(p2).resolves.toMatchObject({ ok: true });
+
+    const cwdCommand = 'node -e "process.stdout.write(process.cwd())"';
+    server.send({ type: 'tool.call', callId: 'cwd-1', sessionId: 'sess-free', tool: 'bash', args: { command: cwdCommand } });
+    const result = (await server.waitFor(
+      (f) => (f as { type?: string; callId?: string }).type === 'tool.result' && (f as { callId?: string }).callId === 'cwd-1',
+    )) as { output: string };
+    expect(result.output).toContain(dirB);
+    expect(result.output).not.toContain(dirA);
+  });
+
+  it('does not consume the register timeout while consent is pending', async () => {
+    client = makeClient(server, { relayRegisterTimeoutMs: 300 });
+    const statuses: Array<{ code?: string }> = [];
+    client.on('status', (s) => statuses.push({ code: s.code }));
+
+    const p = client.register('sess-free', 'FREE', tmpBasePath());
+    await server.waitFor((f) => (f as { type?: string }).type === 'hello');
+    server.send({ type: 'welcome', protocol: 1 });
+    await server.waitFor(() => client.getPendingConsent() !== null);
+
+    await new Promise((r) => setTimeout(r, 700));
+    expect(statuses.some((s) => s.code === 'register-timeout')).toBe(false);
+
+    client.resolveRegistrationConsent('sess-free', true);
+    await expect(p).resolves.toMatchObject({ ok: true });
+  });
+
+  it('surfaces a register-timeout status and allows a retry without restart', async () => {
+    await server.close();
+    server = await startRelayServer({ autoAckRegister: false });
+    client = makeClient(server, { relayRegisterTimeoutMs: 200 });
+    const statuses: Array<{ code?: string }> = [];
+    client.on('status', (s) => statuses.push({ code: s.code }));
+
+    const p1 = client.register('sess-free', 'FREE', tmpBasePath());
+    await server.waitFor((f) => (f as { type?: string }).type === 'hello');
+    server.send({ type: 'welcome', protocol: 1 });
+    await server.waitFor(() => client.getPendingConsent() !== null);
+    await client.resolveRegistrationConsent('sess-free', true);
+    await expect(p1).resolves.toMatchObject({ ok: false, message: 'registration timeout' });
+    expect(statuses.some((s) => s.code === 'register-timeout')).toBe(true);
+
+    const p2 = client.register('sess-free', 'FREE', tmpBasePath());
+    await server.waitFor(() => client.getPendingConsent() !== null);
+    await client.resolveRegistrationConsent('sess-free', true);
+    await server.waitFor((f) => (f as { type?: string }).type === 'register');
+    server.send({ type: 'registered', sessionId: 'sess-free' });
+    await expect(p2).resolves.toMatchObject({ ok: true });
+  });
+
   it('asks for first-registration consent and honours decline', async () => {
     client = makeClient(server);
     const consents: Array<{ sessionId: string; tools: string[] }> = [];

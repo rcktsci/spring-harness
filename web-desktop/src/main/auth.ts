@@ -87,11 +87,20 @@ async function exchangeCode(cfg: ServerConfig, code: string, pkce: PkcePair, por
     redirect_uri: `http://127.0.0.1:${port}/callback`,
     code_verifier: pkce.codeVerifier,
   });
-  const res = await fetch(tokenEndpoint(cfg), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
-  });
+  let res: Response;
+  try {
+    res = await fetch(tokenEndpoint(cfg), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+      signal: AbortSignal.timeout(cfg.keycloakRequestTimeoutMs),
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === 'TimeoutError') {
+      throw new Error(`token endpoint timed out after ${cfg.keycloakRequestTimeoutMs} ms`, { cause: err });
+    }
+    throw new Error(`token endpoint unreachable: ${String(err)}`, { cause: err });
+  }
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`token endpoint ${res.status}: ${sanitizeBody(text)}`);
@@ -147,8 +156,12 @@ async function refreshTokens(cfg: ServerConfig, refreshToken: string): Promise<T
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString(),
+      signal: AbortSignal.timeout(cfg.keycloakRequestTimeoutMs),
     });
   } catch (err) {
+    if (err instanceof Error && err.name === 'TimeoutError') {
+      throw new RefreshTransientError(`refresh endpoint timed out after ${cfg.keycloakRequestTimeoutMs} ms`);
+    }
     throw new RefreshTransientError(`refresh endpoint unreachable: ${String(err)}`);
   }
   const text = await res.text();

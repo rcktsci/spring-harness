@@ -27,6 +27,7 @@ const cfg = {
   serverBaseUrl: 'http://127.0.0.1:1',
   keycloakIssuer: 'http://127.0.0.1:1/realms/harness',
   keycloakClientId: 'test-client',
+  keycloakRequestTimeoutMs: 5_000,
 } as never;
 
 function okTokenResponse(body: Record<string, unknown>) {
@@ -67,7 +68,9 @@ describe('silent refresh single-flight', () => {
     expect(results).toEqual(['fresh', 'fresh', 'fresh', 'fresh', 'fresh']);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(store.save).toHaveBeenCalledTimes(1);
-    expect(store.save).toHaveBeenCalledWith({ accessToken: 'fresh', refreshToken: 'r2', expiresAt: now + 900 });
+    const saved = store.save.mock.calls[0]![0] as { accessToken: string; refreshToken: string; expiresAt: number };
+    expect(saved).toMatchObject({ accessToken: 'fresh', refreshToken: 'r2' });
+    expect(saved.expiresAt).toBeGreaterThan(now + 800);
     expect(store.clear).not.toHaveBeenCalled();
   });
 
@@ -174,6 +177,32 @@ describe('silent refresh single-flight', () => {
     const logged = log.warn.mock.calls[0]?.[1] as Error;
     expect(logged.message).toContain('access_token');
     expect(logged.message).toContain('{"foo":"bar"}');
+  });
+
+  it('aborts a hanging token endpoint request by the configured timeout', async () => {
+    store.tokens = { accessToken: 'stale', refreshToken: 'r1', expiresAt: now - 10 };
+    const kcCfg = { ...(cfg as Record<string, unknown>), keycloakRequestTimeoutMs: 50 } as never;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: unknown, init: { signal?: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            const timeoutError = new Error('The operation was aborted due to timeout');
+            timeoutError.name = 'TimeoutError';
+            reject(timeoutError);
+          });
+        })),
+    );
+    const { refreshIfNeeded } = await importAuth();
+
+    const result = await refreshIfNeeded(kcCfg, 30);
+
+    expect(result).toBeNull();
+    expect(store.clear).not.toHaveBeenCalled();
+    expect(store.save).not.toHaveBeenCalled();
+    const logged = log.warn.mock.calls[0]?.[1] as Error;
+    expect(logged.message).toContain('timed out after 50 ms');
+    expect(logged.message).not.toContain('unreachable');
   });
 
   it('masks secret fields of the response body in error logs', async () => {

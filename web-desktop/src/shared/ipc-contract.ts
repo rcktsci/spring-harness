@@ -109,6 +109,7 @@ export const DEFAULT_CONFIG: ServerConfig = {
   loginWindowWidth: 900,
   loginWindowHeight: 750,
   tokenClockSkewSeconds: 30,
+  keycloakRequestTimeoutMs: 15_000,
   relayHandshakeTimeoutMs: 10_000,
   relayHeartbeatIntervalMs: 15_000,
   /** Server ping watchdog fires at 2× the expected interval (§5.4). */
@@ -197,6 +198,8 @@ export type ServerConfig = {
   loginWindowHeight: number;
   /** Seconds of clock skew tolerated before an access token is treated as expired. */
   tokenClockSkewSeconds: number;
+  /** Timeout for every Keycloak token-endpoint request (refresh + code exchange). */
+  keycloakRequestTimeoutMs: number;
   relayHandshakeTimeoutMs: number;
   relayHeartbeatIntervalMs: number;
   relayPingWatchdogMultiplier: number;

@@ -101,6 +101,8 @@ export class RelayClient extends EventEmitter {
   private openConsent: { sessionId: string; basePath: string; tools: string[] } | null = null;
   /** Terminates the in-flight register promise early (disconnect). */
   private registerAbort: ((outcome: RegisterOutcome) => void) | null = null;
+  /** sessionId → basePath of every session registered on the current connection. */
+  private readonly sessionBasePaths = new Map<string, string>();
   /** callIds cancelled on the wire but still being torn down. */
   private readonly cancelledCalls = new Set<string>();
 
@@ -224,6 +226,7 @@ export class RelayClient extends EventEmitter {
     }
     this.confirmWaiters.clear();
     this.openConsent = null;
+    this.sessionBasePaths.clear();
     this.abortRegistering();
     this.emit('status', { connected: false, registered: false, phase: 'disconnected' });
   }
@@ -346,6 +349,15 @@ export class RelayClient extends EventEmitter {
       const timer = setTimeout(() => {
         this.registering = null;
         this.registeringSession = null;
+        this.emit('status', {
+          connected: true,
+          registered: false,
+          phase: 'connected',
+          sessionId,
+          basePath,
+          code: 'register-timeout',
+          reason: 'registration timeout',
+        });
         finish({ ok: false, message: 'registration timeout' });
       }, this.cfg.relayRegisterTimeoutMs);
       const finish = (outcome: RegisterOutcome): void => {
@@ -361,6 +373,7 @@ export class RelayClient extends EventEmitter {
           this.registeringSession = null;
           this.registration = { sessionId, basePath, consented: true };
           this.basePath = basePath;
+          this.sessionBasePaths.set(sessionId, basePath);
           this.emit('status', {
             connected: true,
             registered: true,
@@ -452,6 +465,7 @@ export class RelayClient extends EventEmitter {
         // 4403: fatal — never retry
         this.stopped = true;
         this.fatal = true;
+        this.sessionBasePaths.clear();
         this.emit('status', {
           connected: false,
           registered: false,
@@ -468,6 +482,7 @@ export class RelayClient extends EventEmitter {
         this.stopped = true;
         const prior = this.lastRegisterError;
         this.lastRegisterError = null;
+        this.sessionBasePaths.clear();
         this.emit('status', {
           connected: false,
           registered: false,
@@ -602,12 +617,14 @@ export class RelayClient extends EventEmitter {
   /* ---------------------------------------------------------------- */
 
   private async handleToolCall(call: ToolCallFrame): Promise<void> {
-    const basePath = this.basePath ?? this.registration?.basePath;
+    const basePath = this.sessionBasePaths.get(call.sessionId);
     if (!basePath) {
+      const output = `no registration for session ${call.sessionId} — cannot execute`;
+      this.emit('toolResult', call.callId, output, -1);
       this.send({
         type: 'tool.result',
         callId: call.callId,
-        output: 'no registration — cannot execute',
+        output,
         exitCode: -1,
       });
       return;
@@ -769,5 +786,10 @@ export class RelayClient extends EventEmitter {
   /** Test hook: current exponential-backoff attempt counter. */
   get backoffAttempt(): number {
     return this.reconnectAttempt;
+  }
+
+  /** Test hook: how many session→basePath mappings are currently tracked. */
+  get trackedSessionCount(): number {
+    return this.sessionBasePaths.size;
   }
 }
