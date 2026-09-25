@@ -1,0 +1,104 @@
+name: backend-image
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: backend-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify tag versions and immutability
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TAG="${GITHUB_REF_NAME#v}"
+
+          BACKEND_RAW="$(python3 -c "import xml.etree.ElementTree as ET; ns={'m':'http://maven.apache.org/POM/4.0.0'}; root=ET.parse('pom.xml').getroot(); print(root.find('m:version', ns).text)" 2>&1)" || {
+            echo "::error::cannot read backend version from pom.xml: ${BACKEND_RAW}"
+            exit 1
+          }
+          BACKEND_VERSION="${BACKEND_RAW}"
+
+          DESKTOP_RAW="$(python3 -c "import json; print(json.load(open('web-desktop/package.json'))['version'])" 2>&1)" || {
+            echo "::error::cannot read desktop version from web-desktop/package.json: ${DESKTOP_RAW}"
+            exit 1
+          }
+          DESKTOP_VERSION="${DESKTOP_RAW}"
+
+          if [ "$BACKEND_VERSION" != "$TAG" ] || [ "$DESKTOP_VERSION" != "$TAG" ]; then
+            echo "::error::Version mismatch: tag=${GITHUB_REF_NAME} (expected v${TAG}), pom.xml=${BACKEND_VERSION}, web-desktop/package.json=${DESKTOP_VERSION}"
+            exit 1
+          fi
+
+          IMAGE="ghcr.io/${{ github.repository_owner }}/spring-harness-orchestrator:v${TAG}"
+          INSPECT_OUTPUT=""
+          for attempt in 1 2 3; do
+            if INSPECT_OUTPUT="$(docker buildx imagetools inspect "$IMAGE" 2>&1)"; then
+              echo "::error::Release tag ${GITHUB_REF_NAME} already published in GHCR; release tags are immutable (D-CI16)."
+              exit 1
+            fi
+            if printf '%s' "$INSPECT_OUTPUT" | grep -qiE 'not found|no such manifest|manifest unknown'; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::imagetools inspect attempt $attempt for ${IMAGE} returned an unrecognized error, retrying in 5s..."
+              sleep 5
+            fi
+          done
+
+          echo "::error::imagetools inspect for ${IMAGE} kept failing with unrecognized output after 3 attempts; cannot determine tag existence. Last output:"
+          echo "$INSPECT_OUTPUT"
+          exit 1
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/spring-harness-orchestrator
+          flavor: latest=false
+          tags: |
+            type=ref,event=branch
+            type=sha,format=short
+            type=semver,pattern={{raw}}
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile.orchestrator
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

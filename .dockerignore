@@ -1,0 +1,13 @@
+.git/
+target/
+web-desktop/node_modules/
+web-desktop/dist/
+web-desktop/out/
+web-desktop/test-results/
+web-desktop/playwright-report/
+.idea/
+.vscode/
+.opencode/
+docs/
+openspec/
+*.log
