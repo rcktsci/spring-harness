@@ -281,7 +281,7 @@ docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.versi
 ```
 
 - `org.opencontainers.image.revision` — the full commit SHA the image was built from. Set on every build. Identical between the `:main`, `:latest`, and `:sha-…` tags that came from the same commit; for a short form in logs and shell history, read the `sha-<short>` tag name itself.
-- `org.opencontainers.image.version` — semver on release builds (for example `0.1.0`); on branch builds it is the branch name (`main`) — by design.
+- `org.opencontainers.image.version` — the release tag on release builds (`v0.1.0`, with the leading `v`); on branch builds it is the branch name (`main`) — by design.
 
 Rollback is the same move as an upgrade: set the previous tag in the `image:` line of `docker-compose.yml` — `vX.Y.Z` (or `X.Y.Z`), or `sha-<previous-short>` — and run `docker compose up -d`. Compose pulls the old tag when the line changes.
 
