@@ -1,7 +1,7 @@
 # backend-image-ci Specification
 
 ## Purpose
-CI-поведение репозитория: по push в `main` backend-образ (docker/Dockerfile.orchestrator) собирается и публикуется в GitHub Container Registry, откуда его забирает VM через `docker pull` вместо ручной пересборки на dev-машине.
+CI-поведение репозитория: по push в `main` backend-образ (docker/Dockerfile.orchestrator) собирается и публикуется в GitHub Container Registry, а VM запускает его через `docker compose up -d` по версионному тегу, закреплённому в `docker-compose.yml`, вместо ручной пересборки на dev-машине.
 
 ## ADDED Requirements
 
@@ -50,12 +50,17 @@ Pipeline SHALL собирать образ backend-а из `docker/Dockerfile.or
 
 ### Requirement: Образ, пригодный для развёртывания на VM
 
-Опубликованный образ SHALL запускаться с тем же env-контрактом, что и локальная сборка: конфигурация только через переменные окружения (в т.ч. `POSTGRES_*`, `MANAGEMENT_SERVER_PORT`), порты REST/WS/SSE 8080 и management 8081, точка входа — boot-jar, пользователь непривилегированный. CI SHALL NOT вносить в образ изменений относительно `docker/Dockerfile.orchestrator`.
+Опубликованный образ SHALL запускаться с тем же env-контрактом, что и локальная сборка: конфигурация только через переменные окружения (в т.ч. `POSTGRES_*`, `MANAGEMENT_SERVER_PORT`), порты REST/WS/SSE 8080 и management 8081, точка входа — boot-jar, пользователь непривилегированный. CI SHALL NOT вносить в образ изменений относительно `docker/Dockerfile.orchestrator`. `docker-compose.yml` SHALL закреплять версионный тег опубликованного образа из GHCR в строке `image:` сервиса orchestrator (без блока `build:`) и запускать его через `docker compose up -d`; локальная сборка — отдельная команда `docker build`, compose её не выполняет.
 
 #### Scenario: запуск опубликованного образа
 
-- **WHEN** владелец запускает скачанный образ с env-контрактом из README и подключённой БД/Keycloak
-- **THEN** backend поднимается и отвечает на management-порту, поведение не отличается от локальной сборки
+- **WHEN** владелец выполняет `docker compose up -d` с env-контрактом из README и подключённой БД/Keycloak
+- **THEN** compose стягивает образ по тегу, закреплённому в строке `image:`, backend поднимается и отвечает на management-порту
+
+#### Scenario: смена версии на VM
+
+- **WHEN** владелец меняет тег в строке `image:` `docker-compose.yml` на новую версию и выполняет `docker compose up -d`
+- **THEN** compose стягивает образ нового тега и перезапускает контейнер; отдельного `docker pull` или ручного ретага не требуется
 
 ### Requirement: Аутентификация и права pipeline
 

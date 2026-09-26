@@ -46,10 +46,7 @@ services:
       - harness
 
   orchestrator:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.orchestrator
-    image: spring-harness:local
+    image: ghcr.io/rcktsci/spring-harness-orchestrator:v0.1.0
     container_name: harness-orchestrator
     restart: unless-stopped
     depends_on:

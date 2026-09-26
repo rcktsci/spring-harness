@@ -2,11 +2,11 @@
 
 All notable changes to spring-harness are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-> `0.1.0` is the first release of the product. The whole product — backend and web-desktop — carries one SemVer number. The release date matches the date of the release commit. The `v0.1.0` tag is created in a separate step (after this file lands in `main`); if the date changes, update it in the release commit.
+> `0.1.0` is the first release of the product. The whole product — backend and web-desktop — carries one SemVer number. The release date is the date of the release commit; the `v0.1.0` tag is pushed to `origin` right after it lands in `main`.
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-09-25
+## [0.1.0] - 2026-09-26
 
 First release. Combines everything shipped in M1–M5, the deployment bundle, and the CI pipeline that publishes the backend image to GitHub Container Registry.
 

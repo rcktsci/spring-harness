@@ -65,14 +65,7 @@ Do not commit compose edits that contain real secrets. The file itself belongs i
 git update-index --skip-worktree docker-compose.yml
 ```
 
-No internet access to a Maven mirror from the VM? Build the jar on your dev machine instead:
-
-```bash
-chmod +x mvnw
-./mvnw -DskipTests package
-```
-
-Then replace the `build:` block in compose with a ready image. The default path stays the in-container `mvn -DskipTests package`, which needs no local Java at all.
+The orchestrator image is not built on the VM: `docker-compose.yml` pins a published version of `ghcr.io/rcktsci/spring-harness-orchestrator` and `docker compose up -d` pulls it. The package is public, so no login is needed. Upgrading or rolling back is the same move: change the tag in the `image:` line, then `up -d` again (section 4).
 
 Start it:
 
@@ -199,13 +192,28 @@ The script reads `HARNESS_E2E_*` from the environment, drives Electron through t
 
 ## 4. Backend image: CI, releases, and rollback
 
-Section 1 builds the orchestrator image locally from the Dockerfile. This section covers the alternative: a GitHub Actions pipeline that publishes the same image to GitHub Container Registry, the procedure for cutting a release, and how to read the running version on the VM.
+The orchestrator image is built by a GitHub Actions pipeline and published to GitHub Container Registry; `docker-compose.yml` pins one published version and `docker compose up -d` runs it. This section covers the delivery path, the release procedure, and how to read the running version on the VM.
 
-### 4.1 Pulling the published image
+### 4.1 Deploying the published image
 
-The workflow at `.github/workflows/backend-image.yml` builds the image section 1 builds, and pushes it to GHCR on every push to `main` and on every tag `v*`. The package is **public**. The first push creates it private; flip the package to **Public** in the GHCR package settings once. After that, `docker pull` works on the VM with no login and no PAT.
+The workflow at `.github/workflows/backend-image.yml` builds the image from `docker/Dockerfile.orchestrator` and pushes it to GHCR on every push to `main` and on every tag `v*`. The package is **public**. The first push creates it private; flip the package to **Public** in the GHCR package settings once. After that, pulls work on the VM with no login and no PAT.
 
 Image name: `ghcr.io/rcktsci/spring-harness-orchestrator`.
+
+`docker-compose.yml` does not build anything — it pins one published version:
+
+```yaml
+image: ghcr.io/rcktsci/spring-harness-orchestrator:v0.1.0
+```
+
+Deploy, upgrade, and rollback are the same move: set the tag you want in the `image:` line of the `orchestrator` service, then:
+
+```bash
+docker compose pull    # fails fast with a clear error if the tag is missing or mistyped
+docker compose up -d
+```
+
+The explicit `pull` surfaces a wrong tag immediately, not at container start; no `docker login` needed. One deployment note: the VM runs a hand-maintained copy of the compose file (the repository is not cloned there), so a version bump means editing the `image:` line in the live copy on the VM — in the repository the same line is changed by the release commit (see 4.2).
 
 Tag scheme (set by `docker/metadata-action` in the workflow, `flavor: latest=false`):
 
@@ -216,17 +224,15 @@ Tag scheme (set by `docker/metadata-action` in the workflow, `flavor: latest=fal
 | `sha-<short>` | Immutable commit hash | Every push |
 | `vX.Y.Z` / `X.Y.Z` | Semver from the git tag | Only on `v*` tags |
 
-`latest` is not updated by tag pushes — the `latest=false` flavor overrides the default. `latest` follows `main` only, so a tagged release does not silently move it.
+`latest` is not updated by tag pushes — the `latest=false` flavor overrides the default. `latest` follows `main` only, so a tagged release does not silently move it. Pin the compose file on the immutable tags (`vX.Y.Z`, `X.Y.Z`, or `sha-<short>`); `latest` moves under your feet with every push to `main`.
 
-Pull and run on the VM:
+Compose never builds the orchestrator image. A local build for debugging is a separate, deliberate command:
 
 ```bash
-docker pull ghcr.io/rcktsci/spring-harness-orchestrator:latest
-docker tag  ghcr.io/rcktsci/spring-harness-orchestrator:latest spring-harness:local
-docker compose up -d
+docker build -f docker/Dockerfile.orchestrator -t ghcr.io/rcktsci/spring-harness-orchestrator:local .
 ```
 
-No `docker login`, no PAT — the package is public. The `docker tag ... spring-harness:local` line matches the image name in `docker-compose.yml`, so the existing `docker compose up -d` works without edits. Section 1's local `build:` path stays a working alternative for development; the CI image is for VMs without a JDK or a working clone.
+Don't point the compose `image:` line at `:local` unless you are debugging on purpose — the file should name exactly what runs.
 
 ### 4.2 Cutting a release
 
@@ -249,8 +255,9 @@ While the version is `0.x`, breaking changes are allowed in **MINOR**, but they 
 
 1. Set the version in `pom.xml` (the project's `<version>`, not the `<parent>` version) and in `web-desktop/package.json` to `X.Y.Z`. No `-SNAPSHOT` suffix — release commits carry the clean version.
 2. Add a `## [X.Y.Z] - YYYY-MM-DD` entry to `CHANGELOG.md` under the right sections (Added / Changed / Fixed / Removed). Use the current date.
-3. Commit on `main` and push.
-4. Tag and push the tag:
+3. Pin the new version in `docker-compose.yml`: set the `image:` line of the `orchestrator` service to `ghcr.io/rcktsci/spring-harness-orchestrator:vX.Y.Z`. The release commit ships the compose pin; a release without it is not considered ready.
+4. Commit on `main` and push.
+5. Tag and push the tag:
 
    ```bash
    git tag vX.Y.Z
@@ -274,17 +281,11 @@ docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.versi
 ```
 
 - `org.opencontainers.image.revision` — the full commit SHA the image was built from. Set on every build. Identical between the `:main`, `:latest`, and `:sha-…` tags that came from the same commit; for a short form in logs and shell history, read the `sha-<short>` tag name itself.
-- `org.opencontainers.image.version` — semver on release builds (for example `0.1.0`), the branch name on branch builds (`main`). Until the first tag exists, the `latest` image's `version` is `main`, not a semver — that is by design.
+- `org.opencontainers.image.version` — semver on release builds (for example `0.1.0`); on branch builds it is the branch name (`main`) — by design.
 
-For rollbacks, pull the specific tag you want and re-tag as `spring-harness:local`:
+Rollback is the same move as an upgrade: set the previous tag in the `image:` line of `docker-compose.yml` — `vX.Y.Z` (or `X.Y.Z`), or `sha-<previous-short>` — and run `docker compose up -d`. Compose pulls the old tag when the line changes.
 
-```bash
-docker pull ghcr.io/rcktsci/spring-harness-orchestrator:sha-<previous-short>
-docker tag  ghcr.io/rcktsci/spring-harness-orchestrator:sha-<previous-short> spring-harness:local
-docker compose up -d
-```
-
-`:sha-<short>` tags are immutable, so a rollback always re-deploys the exact bytes that were live before. Pinning on a semver (`vX.Y.Z` / `X.Y.Z`) works the same way; pick whichever one you noted at the time.
+Release and `sha-<short>` tags are immutable, so a rollback always re-deploys the exact bytes that were live before. Pick whichever tag you noted at the time; the label check above tells you what actually runs after the restart.
 
 ## Going deeper
 
