@@ -197,6 +197,95 @@ pwsh scripts/smoke-docker.ps1    # or bash scripts/smoke-docker.sh
 
 The script reads `HARNESS_E2E_*` from the environment, drives Electron through the full scenario (login, session, bash tool, artifact download), and needs a display server (`xvfb-run` on headless Linux). The manual fallback lives in [`web-desktop/docs/smoke.md`](web-desktop/docs/smoke.md).
 
+## 4. Backend image: CI, releases, and rollback
+
+Section 1 builds the orchestrator image locally from the Dockerfile. This section covers the alternative: a GitHub Actions pipeline that publishes the same image to GitHub Container Registry, the procedure for cutting a release, and how to read the running version on the VM.
+
+### 4.1 Pulling the published image
+
+The workflow at `.github/workflows/backend-image.yml` builds the image section 1 builds, and pushes it to GHCR on every push to `main` and on every tag `v*`. The package is **public**. The first push creates it private; flip the package to **Public** in the GHCR package settings once. After that, `docker pull` works on the VM with no login and no PAT.
+
+Image name: `ghcr.io/rcktsci/spring-harness-orchestrator`.
+
+Tag scheme (set by `docker/metadata-action` in the workflow, `flavor: latest=false`):
+
+| Tag | Meaning | When it updates |
+|---|---|---|
+| `latest` | Head of `main` | Every push to `main` |
+| `main` | Branch name | Every push to `main` |
+| `sha-<short>` | Immutable commit hash | Every push |
+| `vX.Y.Z` / `X.Y.Z` | Semver from the git tag | Only on `v*` tags |
+
+`latest` is not updated by tag pushes — the `latest=false` flavor overrides the default. `latest` follows `main` only, so a tagged release does not silently move it.
+
+Pull and run on the VM:
+
+```bash
+docker pull ghcr.io/rcktsci/spring-harness-orchestrator:latest
+docker tag  ghcr.io/rcktsci/spring-harness-orchestrator:latest spring-harness:local
+docker compose up -d
+```
+
+No `docker login`, no PAT — the package is public. The `docker tag ... spring-harness:local` line matches the image name in `docker-compose.yml`, so the existing `docker compose up -d` works without edits. Section 1's local `build:` path stays a working alternative for development; the CI image is for VMs without a JDK or a working clone.
+
+### 4.2 Cutting a release
+
+One SemVer number covers both the backend (`pom.xml`) and the desktop client (`web-desktop/package.json`). The git tag `vX.Y.Z` is the source of truth for which version is released; the manifests match it.
+
+**Bump rules:**
+
+- **MAJOR** — breaking change to `api/openapi.yaml`, the WebSocket relay protocol (`docs/design/api-contracts.md` §5), or the SSE event stream (§3.1, §3.2).
+- **MINOR** — new backward-compatible API or feature.
+- **PATCH** — bug fixes that don't change contracts.
+
+While the version is `0.x`, breaking changes are allowed in **MINOR**, but they must carry a `**BREAKING**` marker in the change/PR and a migration note in `CHANGELOG.md`. There is no automated check for breaking changes in CI — the marker and the changelog entry are reviewer-enforced; both reviewers must approve the release commit. Don't skip them.
+
+**Tag rules:**
+
+- Tags go only on commits already in `main`. No tags from feature branches.
+- Release tags are **immutable**. The workflow rejects a re-push of `vX.Y.Z` if that tag already exists in GHCR. A fix ships as the next release — `v0.1.1` (PATCH) for a bugfix, `v0.2.0` (MINOR) if a contract changes; overwriting `vX.Y.Z` is forbidden.
+
+**Release procedure:**
+
+1. Set the version in `pom.xml` (the project's `<version>`, not the `<parent>` version) and in `web-desktop/package.json` to `X.Y.Z`. No `-SNAPSHOT` suffix — release commits carry the clean version.
+2. Add a `## [X.Y.Z] - YYYY-MM-DD` entry to `CHANGELOG.md` under the right sections (Added / Changed / Fixed / Removed). Use the current date.
+3. Commit on `main` and push.
+4. Tag and push the tag:
+
+   ```bash
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
+   ```
+
+The tag push triggers the workflow. Before it builds and pushes the image, the workflow runs two gates:
+
+- **Version gate** — re-reads `pom.xml` and `web-desktop/package.json`, checks both equal the tag. Mismatch fails with `::error::Version mismatch: …`.
+- **Immutability gate** — checks GHCR for the tag. If `vX.Y.Z` already exists, the build fails with the immutability error.
+
+If both gates pass, the image is published with exactly three tags: `vX.Y.Z`, `X.Y.Z`, and `sha-<short>`. A tag run never moves `latest` or `main` — those keep pointing at the last push to `main`.
+
+### 4.3 Checking the version on the VM
+
+Two OCI labels on the running image tell you exactly what's deployed (the container name `harness-orchestrator` comes from `container_name` in the `orchestrator` section of `docker-compose.yml`):
+
+```bash
+docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' harness-orchestrator
+docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' harness-orchestrator
+```
+
+- `org.opencontainers.image.revision` — the full commit SHA the image was built from. Set on every build. Identical between the `:main`, `:latest`, and `:sha-…` tags that came from the same commit; for a short form in logs and shell history, read the `sha-<short>` tag name itself.
+- `org.opencontainers.image.version` — semver on release builds (for example `0.1.0`), the branch name on branch builds (`main`). Until the first tag exists, the `latest` image's `version` is `main`, not a semver — that is by design.
+
+For rollbacks, pull the specific tag you want and re-tag as `spring-harness:local`:
+
+```bash
+docker pull ghcr.io/rcktsci/spring-harness-orchestrator:sha-<previous-short>
+docker tag  ghcr.io/rcktsci/spring-harness-orchestrator:sha-<previous-short> spring-harness:local
+docker compose up -d
+```
+
+`:sha-<short>` tags are immutable, so a rollback always re-deploys the exact bytes that were live before. Pinning on a semver (`vX.Y.Z` / `X.Y.Z`) works the same way; pick whichever one you noted at the time.
+
 ## Going deeper
 
 - Architecture, operations, security: [`docs/design/architecture.md`](docs/design/architecture.md), [`docs/design/operations.md`](docs/design/operations.md), [`docs/design/security-multitenancy.md`](docs/design/security-multitenancy.md)
